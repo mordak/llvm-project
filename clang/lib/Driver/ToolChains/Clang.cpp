@@ -4099,7 +4099,31 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddLastArg(CmdArgs, options::OPT_pthread);
 
-  RenderSSPOptions(getToolChain(), Args, CmdArgs, KernelOrKext);
+  // -ret-protector
+  unsigned RetProtector = 1;
+  if (Arg *A = Args.getLastArg(options::OPT_fno_ret_protector,
+        options::OPT_fret_protector)) {
+    if (A->getOption().matches(options::OPT_fno_ret_protector))
+      RetProtector = 0;
+    else if (A->getOption().matches(options::OPT_fret_protector))
+      RetProtector = 1;
+  }
+  if (RetProtector &&
+      ((getToolChain().getArch() == llvm::Triple::x86_64) ||
+       (getToolChain().getArch() == llvm::Triple::aarch64)) &&
+      !Args.hasArg(options::OPT_fno_stack_protector) &&
+      !Args.hasArg(options::OPT_pg)) {
+    CmdArgs.push_back(Args.MakeArgString("-D_RET_PROTECTOR"));
+    CmdArgs.push_back(Args.MakeArgString("-ret-protector"));
+    // Consume the stack protector arguments to prevent warning
+    Args.getLastArg(options::OPT_fstack_protector_all,
+        options::OPT_fstack_protector_strong,
+        options::OPT_fstack_protector,
+        options::OPT__param); // ssp-buffer-size
+  } else {
+    // If we're not using retguard, then do the usual stack protector
+    RenderSSPOptions(getToolChain(), Args, CmdArgs, KernelOrKext);
+  }
 
   // Translate -mstackrealign
   if (Args.hasFlag(options::OPT_mstackrealign, options::OPT_mno_stackrealign,

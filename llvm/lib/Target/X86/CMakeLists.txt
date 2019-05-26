@@ -55,6 +55,7 @@ set(sources
   X86RegisterBankInfo.cpp
   X86RegisterInfo.cpp
   X86RetpolineThunks.cpp
+  X86ReturnProtectorLowering.cpp
   X86SelectionDAGInfo.cpp
   X86ShuffleDecodeConstantPool.cpp
   X86SpeculativeLoadHardening.cpp
