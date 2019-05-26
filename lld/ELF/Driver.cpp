@@ -794,7 +794,12 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   Config->Optimize = args::getInteger(Args, OPT_O, 1);
   Config->OrphanHandling = getOrphanHandling(Args);
   Config->OutputFile = Args.getLastArgValue(OPT_o);
+#ifdef __OpenBSD__
+  Config->Pie = Args.hasFlag(OPT_pie, OPT_no_pie,
+      !Args.hasArg(OPT_shared) && !Args.hasArg(OPT_relocatable));
+#else
   Config->Pie = Args.hasFlag(OPT_pie, OPT_no_pie, false);
+#endif
   Config->PrintIcfSections =
       Args.hasFlag(OPT_print_icf_sections, OPT_no_print_icf_sections, false);
   Config->PrintGcSections =
