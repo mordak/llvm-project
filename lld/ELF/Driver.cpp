@@ -126,6 +126,7 @@ static std::tuple<ELFKind, uint16_t, uint8_t> parseEmulation(StringRef Emul) {
           .Cases("elf32btsmip", "elf32btsmipn32", {ELF32BEKind, EM_MIPS})
           .Cases("elf32ltsmip", "elf32ltsmipn32", {ELF32LEKind, EM_MIPS})
           .Case("elf32ppc", {ELF32BEKind, EM_PPC})
+          .Case("elf64_sparc", {ELF64BEKind, EM_SPARCV9})
           .Case("elf64btsmip", {ELF64BEKind, EM_MIPS})
           .Case("elf64ltsmip", {ELF64LEKind, EM_MIPS})
           .Case("elf64ppc", {ELF64BEKind, EM_PPC64})
@@ -339,10 +340,12 @@ static bool getZFlag(opt::InputArgList &Args, StringRef K1, StringRef K2,
 static bool isKnown(StringRef S) {
   return S == "combreloc" || S == "copyreloc" || S == "defs" ||
          S == "execstack" || S == "hazardplt" || S == "initfirst" ||
+         S == "interpose" ||
          S == "keep-text-section-prefix" || S == "lazy" || S == "muldefs" ||
          S == "nocombreloc" || S == "nocopyreloc" || S == "nodelete" ||
          S == "nodlopen" || S == "noexecstack" ||
-         S == "nokeep-text-section-prefix" || S == "norelro" || S == "notext" ||
+         S == "nokeep-text-section-prefix" || S == "norelro" ||
+         S == "noretpolineplt" || S == "notext" ||
          S == "now" || S == "origin" || S == "relro" || S == "retpolineplt" ||
          S == "rodynamic" || S == "text" || S == "wxneeded" ||
          S.startswith("max-page-size=") || S.startswith("stack-size=");
@@ -771,7 +774,8 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   Config->IgnoreDataAddressEquality =
       Args.hasArg(OPT_ignore_data_address_equality);
   Config->IgnoreFunctionAddressEquality =
-      Args.hasArg(OPT_ignore_function_address_equality);
+      Args.hasFlag(OPT_ignore_function_address_equality,
+      OPT_no_ignore_function_address_equality, true);
   Config->Init = Args.getLastArgValue(OPT_init, "_init");
   Config->LTOAAPipeline = Args.getLastArgValue(OPT_lto_aa_pipeline);
   Config->LTODebugPassManager = Args.hasArg(OPT_lto_debug_pass_manager);
@@ -794,7 +798,12 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   Config->Optimize = args::getInteger(Args, OPT_O, 1);
   Config->OrphanHandling = getOrphanHandling(Args);
   Config->OutputFile = Args.getLastArgValue(OPT_o);
+#ifdef __OpenBSD__
+  Config->Pie = Args.hasFlag(OPT_pie, OPT_no_pie,
+      !Args.hasArg(OPT_shared) && !Args.hasArg(OPT_relocatable));
+#else
   Config->Pie = Args.hasFlag(OPT_pie, OPT_no_pie, false);
+#endif
   Config->PrintIcfSections =
       Args.hasFlag(OPT_print_icf_sections, OPT_no_print_icf_sections, false);
   Config->PrintGcSections =
@@ -844,6 +853,7 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   Config->ZExecstack = getZFlag(Args, "execstack", "noexecstack", false);
   Config->ZHazardplt = hasZOption(Args, "hazardplt");
   Config->ZInitfirst = hasZOption(Args, "initfirst");
+  Config->ZInterpose = hasZOption(Args, "interpose");
   Config->ZKeepTextSectionPrefix = getZFlag(
       Args, "keep-text-section-prefix", "nokeep-text-section-prefix", false);
   Config->ZNodelete = hasZOption(Args, "nodelete");
@@ -851,7 +861,11 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   Config->ZNow = getZFlag(Args, "now", "lazy", false);
   Config->ZOrigin = hasZOption(Args, "origin");
   Config->ZRelro = getZFlag(Args, "relro", "norelro", true);
-  Config->ZRetpolineplt = hasZOption(Args, "retpolineplt");
+#ifndef __OpenBSD__
+  Config->ZRetpolineplt = getZFlag(Args, "retpolineplt", "noretpolineplt", false);
+#else
+  Config->ZRetpolineplt = getZFlag(Args, "retpolineplt", "noretpolineplt", true);
+#endif
   Config->ZRodynamic = hasZOption(Args, "rodynamic");
   Config->ZStackSize = args::getZOptionValue(Args, OPT_z, "stack-size", 0);
   Config->ZText = getZFlag(Args, "text", "notext", true);
