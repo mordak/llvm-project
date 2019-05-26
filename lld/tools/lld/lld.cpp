@@ -130,12 +130,14 @@ int main(int Argc, const char **Argv) {
     if (isPETarget(Args))
       return !mingw::link(Args);
     return !elf::link(Args, canExitEarly());
+#ifndef __OpenBSD__
   case WinLink:
     return !coff::link(Args, canExitEarly());
   case Darwin:
     return !mach_o::link(Args, canExitEarly());
   case Wasm:
     return !wasm::link(Args, canExitEarly());
+#endif
   default:
     die("lld is a generic driver.\n"
         "Invoke ld.lld (Unix), ld64.lld (macOS), lld-link (Windows), wasm-lld"
