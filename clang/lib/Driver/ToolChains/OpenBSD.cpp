@@ -156,7 +156,7 @@ void openbsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     if (!Args.hasArg(options::OPT_shared)) {
       if (Args.hasArg(options::OPT_pg)) {
         CmdArgs.push_back("-nopie");
-	crt0 = "gcrt0.o"
+	crt0 = "gcrt0.o";
       } else if (Args.hasArg(options::OPT_static) &&
                !Args.hasArg(options::OPT_nopie))
         crt0 = "rcrt0.o";

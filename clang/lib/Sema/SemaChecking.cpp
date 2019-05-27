@@ -7540,7 +7540,7 @@ CheckPrintfHandler::HandlePrintfSpecifier(const analyze_printf::PrintfSpecifier
           S.PDiag(diag::warn_format_conversion_argument_type_mismatch)
           << AT.getRepresentativeTypeName(S.Context) << Ex->getType()
           << false << Ex->getSourceRange(),
-          Ex->getLocStart(), /*IsStringLocation*/false,
+          Ex->getBeginLoc(), /*IsStringLocation*/false,
           getSpecifierRange(startSpecifier, specifierLen));
     } else {
       // Check the length modifier for %b

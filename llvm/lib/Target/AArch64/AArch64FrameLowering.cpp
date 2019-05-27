@@ -2178,6 +2178,8 @@ unsigned AArch64FrameLowering::getWinEHFuncletFrameSize(
   // This is the amount of stack a funclet needs to allocate.
   return alignTo(CSSize + MF.getFrameInfo().getMaxCallFrameSize(),
                  getStackAlignment());
+}
+
 const ReturnProtectorLowering *AArch64FrameLowering::getReturnProtector() const {
   return &RPL;
 }
