@@ -123,7 +123,7 @@ StringRef elf::getOutputSectionName(const InputSectionBase *S) {
        {".text.", ".rodata.", ".data.rel.ro.", ".data.", ".bss.rel.ro.",
         ".bss.", ".init_array.", ".fini_array.", ".ctors.", ".dtors.", ".tbss.",
         ".gcc_except_table.", ".tdata.", ".ARM.exidx.", ".ARM.extab.",
-        ".openbsd.randomdata."}) {
+        ".openbsd.randomdata."})
     if (isSectionPrefix(V, S->Name))
       return V.drop_back();
 
