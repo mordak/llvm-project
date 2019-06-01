@@ -530,17 +530,6 @@ static bool useFramePointerForTargetByDefault(const ArgList &Args,
     break;
   }
 
-  if (Triple.isOSOpenBSD()) {
-    switch (Triple.getArch()) {
-    case llvm::Triple::mips64:
-    case llvm::Triple::mips64el:
-    case llvm::Triple::x86_64:
-      return !areOptimizationsEnabled(Args);
-    default:
-      return true;
-    }
-  }
-
   if (Triple.isOSNetBSD()) {
     return !areOptimizationsEnabled(Args);
   }
