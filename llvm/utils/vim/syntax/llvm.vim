@@ -1,7 +1,7 @@
 " Vim syntax file
 " Language:   llvm
 " Maintainer: The LLVM team, http://llvm.org/
-" Version:      $Revision$
+" Version:      $Revision: 1.1.1.7 $
 
 if version < 600
   syntax clear
