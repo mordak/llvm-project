@@ -814,7 +814,6 @@ bool FormatSpecifier::hasValidLengthModifier(const TargetInfo &Target) const {
         case ConversionSpecifier::XArg:
           return !Target.getTriple().isOSDarwin() &&
                  !Target.getTriple().isOSWindows();
-        case ConversionSpecifier::FreeBSDbArg: 
         default:
           return false;
       }
@@ -946,6 +945,7 @@ bool FormatSpecifier::hasStandardLengthConversionCombination() const {
         case ConversionSpecifier::uArg:
         case ConversionSpecifier::xArg:
         case ConversionSpecifier::XArg:
+        case ConversionSpecifier::FreeBSDbArg:
           return false;
         default:
           return true;
