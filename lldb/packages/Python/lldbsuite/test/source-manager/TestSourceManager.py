@@ -10,7 +10,6 @@ o test_modify_source_file_while_debugging:
 """
 
 from __future__ import print_function
-import re
 
 import lldb
 from lldbsuite.test.decorators import *
@@ -158,17 +157,21 @@ class SourceManagerTestCase(TestBase):
             error=True,
             substrs=['''error: the replacement path doesn't exist: "/q/r/s/t/u"'''])
 
+        # 'make -C' has resolved current directory to its realpath form.
+        builddir_real = os.path.realpath(self.getBuildDir())
+        hidden_real = os.path.realpath(hidden)
         # Set target.source-map settings.
         self.runCmd("settings set target.source-map %s %s" %
-                    (self.getBuildDir(), hidden))
+                    (builddir_real, hidden_real))
         # And verify that the settings work.
         self.expect("settings show target.source-map",
-                    substrs=[self.getBuildDir(), hidden])
+                    substrs=[builddir_real, hidden_real])
 
         # Display main() and verify that the source mapping has been kicked in.
         self.expect("source list -n main", SOURCE_DISPLAYED_CORRECTLY,
                     substrs=['Hello world'])
 
+    @skipIf(oslist=["windows"], bugnumber="llvm.org/pr44431")
     def test_modify_source_file_while_debugging(self):
         """Modify a source file while debugging the executable."""
         self.build()
@@ -234,15 +237,19 @@ class SourceManagerTestCase(TestBase):
             SOURCE_DISPLAYED_CORRECTLY,
             substrs=['Hello lldb'])
 
+    @expectedFailureAll(oslist=["windows"], bugnumber="llvm.org/pr44432")
     def test_set_breakpoint_with_absolute_path(self):
         self.build()
         hidden = self.getBuildArtifact("hidden")
         lldbutil.mkdir_p(hidden)
+        # 'make -C' has resolved current directory to its realpath form.
+        builddir_real = os.path.realpath(self.getBuildDir())
+        hidden_real = os.path.realpath(hidden)
         self.runCmd("settings set target.source-map %s %s" %
-                    (self.getBuildDir(), hidden))
+                    (builddir_real, hidden_real))
 
         exe = self.getBuildArtifact("a.out")
-        main = os.path.join(self.getBuildDir(), "hidden", "main-copy.c")
+        main = os.path.join(builddir_real, "hidden", "main-copy.c")
         self.runCmd("file " + exe, CURRENT_EXECUTABLE_SET)
 
         lldbutil.run_break_set_by_file_and_line(

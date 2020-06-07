@@ -1,14 +1,14 @@
 //===-- ClangHighlighter.cpp ------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "ClangHighlighter.h"
 
+#include "lldb/Host/FileSystem.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Utility/AnsiTerminal.h"
 #include "lldb/Utility/StreamString.h"
@@ -136,7 +136,24 @@ void ClangHighlighter::Highlight(const HighlightStyle &options,
   using namespace clang;
 
   FileSystemOptions file_opts;
-  FileManager file_mgr(file_opts);
+  FileManager file_mgr(file_opts,
+                       FileSystem::Instance().GetVirtualFileSystem());
+
+  // The line might end in a backslash which would cause Clang to drop the
+  // backslash and the terminating new line. This makes sense when parsing C++,
+  // but when highlighting we care about preserving the backslash/newline. To
+  // not lose this information we remove the new line here so that Clang knows
+  // this is just a single line we are highlighting. We add back the newline
+  // after tokenizing.
+  llvm::StringRef line_ending = "";
+  // There are a few legal line endings Clang recognizes and we need to
+  // temporarily remove from the string.
+  if (line.consume_back("\r\n"))
+    line_ending = "\r\n";
+  else if (line.consume_back("\n"))
+    line_ending = "\n";
+  else if (line.consume_back("\r"))
+    line_ending = "\r";
 
   unsigned line_number = previous_lines.count('\n') + 1U;
 
@@ -225,6 +242,9 @@ void ClangHighlighter::Highlight(const HighlightStyle &options,
 
     color.Apply(result, to_print);
   }
+
+  // Add the line ending we trimmed before tokenizing.
+  result << line_ending;
 
   // If we went over the whole file but couldn't find our own file, then
   // somehow our setup was wrong. When we're in release mode we just give the

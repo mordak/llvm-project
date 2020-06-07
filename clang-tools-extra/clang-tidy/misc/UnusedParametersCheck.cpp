@@ -1,9 +1,8 @@
 //===--- UnusedParametersCheck.cpp - clang-tidy----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -136,17 +135,22 @@ void UnusedParametersCheck::warnOnUnusedParameter(
   auto MyDiag = diag(Param->getLocation(), "parameter %0 is unused") << Param;
 
   if (!Indexer) {
-    Indexer = llvm::make_unique<IndexerVisitor>(*Result.Context);
+    Indexer = std::make_unique<IndexerVisitor>(*Result.Context);
   }
 
-  // Comment out parameter name for non-local functions.
+  // Cannot remove parameter for non-local functions.
   if (Function->isExternallyVisible() ||
       !Result.SourceManager->isInMainFile(Function->getLocation()) ||
       !Indexer->getOtherRefs(Function).empty() || isOverrideMethod(Function)) {
+
+    // It is illegal to omit parameter name here in C code, so early-out.
+    if (!Result.Context->getLangOpts().CPlusPlus)
+      return;
+
     SourceRange RemovalRange(Param->getLocation());
-    // Note: We always add a space before the '/*' to not accidentally create a
-    // '*/*' for pointer types, which doesn't start a comment. clang-format will
-    // clean this up afterwards.
+    // Note: We always add a space before the '/*' to not accidentally create
+    // a '*/*' for pointer types, which doesn't start a comment. clang-format
+    // will clean this up afterwards.
     MyDiag << FixItHint::CreateReplacement(
         RemovalRange, (Twine(" /*") + Param->getName() + "*/").str());
     return;

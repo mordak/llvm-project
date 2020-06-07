@@ -1,9 +1,8 @@
 //===-- SystemInitializerTest.cpp -------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -29,6 +28,7 @@
 #include "Plugins/ABI/SysV-ppc64/ABISysV_ppc64.h"
 #include "Plugins/ABI/SysV-s390x/ABISysV_s390x.h"
 #include "Plugins/ABI/SysV-x86_64/ABISysV_x86_64.h"
+#include "Plugins/ABI/Windows-x86_64/ABIWindows_x86_64.h"
 #include "Plugins/Architecture/Arm/ArchitectureArm.h"
 #include "Plugins/Architecture/PPC64/ArchitecturePPC64.h"
 #include "Plugins/Disassembler/llvm/DisassemblerLLVMC.h"
@@ -58,7 +58,6 @@
 #include "Plugins/ObjectFile/PECOFF/ObjectFilePECOFF.h"
 #include "Plugins/Platform/Android/PlatformAndroid.h"
 #include "Plugins/Platform/FreeBSD/PlatformFreeBSD.h"
-#include "Plugins/Platform/Kalimba/PlatformKalimba.h"
 #include "Plugins/Platform/Linux/PlatformLinux.h"
 #include "Plugins/Platform/MacOSX/PlatformMacOSX.h"
 #include "Plugins/Platform/MacOSX/PlatformRemoteiOS.h"
@@ -113,9 +112,40 @@ SystemInitializerTest::SystemInitializerTest() {}
 
 SystemInitializerTest::~SystemInitializerTest() {}
 
-llvm::Error
-SystemInitializerTest::Initialize(const InitializerOptions &options) {
-  if (auto e = SystemInitializerCommon::Initialize(options))
+#define LLDB_PROCESS_AArch64(op)                                               \
+  ABIMacOSX_arm64::op();                                                       \
+  ABISysV_arm64::op();
+#define LLDB_PROCESS_ARM(op)                                                   \
+  ABIMacOSX_arm::op();                                                         \
+  ABISysV_arm::op();
+#define LLDB_PROCESS_Hexagon(op) ABISysV_hexagon::op();
+#define LLDB_PROCESS_Mips(op)                                                  \
+  ABISysV_mips::op();                                                          \
+  ABISysV_mips64::op();
+#define LLDB_PROCESS_PowerPC(op)                                               \
+  ABISysV_ppc::op();                                                          \
+  ABISysV_ppc64::op();
+#define LLDB_PROCESS_SystemZ(op) ABISysV_s390x::op();
+#define LLDB_PROCESS_X86(op)                                                   \
+  ABIMacOSX_i386::op();                                                        \
+  ABISysV_i386::op();                                                          \
+  ABISysV_x86_64::op();                                                        \
+  ABIWindows_x86_64::op();
+
+#define LLDB_PROCESS_AMDGPU(op)
+#define LLDB_PROCESS_ARC(op)
+#define LLDB_PROCESS_AVR(op)
+#define LLDB_PROCESS_BPF(op)
+#define LLDB_PROCESS_Lanai(op)
+#define LLDB_PROCESS_MSP430(op)
+#define LLDB_PROCESS_NVPTX(op)
+#define LLDB_PROCESS_RISCV(op)
+#define LLDB_PROCESS_Sparc(op)
+#define LLDB_PROCESS_WebAssembly(op)
+#define LLDB_PROCESS_XCore(op)
+
+llvm::Error SystemInitializerTest::Initialize() {
+  if (auto e = SystemInitializerCommon::Initialize())
     return e;
 
   breakpad::ObjectFileBreakpad::Initialize();
@@ -131,7 +161,6 @@ SystemInitializerTest::Initialize(const InitializerOptions &options) {
   platform_netbsd::PlatformNetBSD::Initialize();
   platform_openbsd::PlatformOpenBSD::Initialize();
   PlatformWindows::Initialize();
-  PlatformKalimba::Initialize();
   platform_android::PlatformAndroid::Initialize();
   PlatformRemoteiOS::Initialize();
   PlatformMacOSX::Initialize();
@@ -148,19 +177,8 @@ SystemInitializerTest::Initialize(const InitializerOptions &options) {
 
   ClangASTContext::Initialize();
 
-  ABIMacOSX_i386::Initialize();
-  ABIMacOSX_arm::Initialize();
-  ABIMacOSX_arm64::Initialize();
-  ABISysV_arm::Initialize();
-  ABISysV_arm64::Initialize();
-  ABISysV_hexagon::Initialize();
-  ABISysV_i386::Initialize();
-  ABISysV_x86_64::Initialize();
-  ABISysV_ppc::Initialize();
-  ABISysV_ppc64::Initialize();
-  ABISysV_mips::Initialize();
-  ABISysV_mips64::Initialize();
-  ABISysV_s390x::Initialize();
+#define LLVM_TARGET(t) LLDB_PROCESS_ ## t(Initialize)
+#include "llvm/Config/Targets.def"
 
   ArchitectureArm::Initialize();
   ArchitecturePPC64::Initialize();
@@ -217,9 +235,7 @@ SystemInitializerTest::Initialize(const InitializerOptions &options) {
   // It shouldn't be limited to __APPLE__.
   StructuredDataDarwinLog::Initialize();
 
-  //----------------------------------------------------------------------
   // Platform agnostic plugins
-  //----------------------------------------------------------------------
   platform_gdb_server::PlatformRemoteGDBServer::Initialize();
 
   process_gdb_remote::ProcessGDBRemote::Initialize();
@@ -252,19 +268,9 @@ void SystemInitializerTest::Terminate() {
 
   ClangASTContext::Terminate();
 
-  ABIMacOSX_i386::Terminate();
-  ABIMacOSX_arm::Terminate();
-  ABIMacOSX_arm64::Terminate();
-  ABISysV_arm::Terminate();
-  ABISysV_arm64::Terminate();
-  ABISysV_hexagon::Terminate();
-  ABISysV_i386::Terminate();
-  ABISysV_x86_64::Terminate();
-  ABISysV_ppc::Terminate();
-  ABISysV_ppc64::Terminate();
-  ABISysV_mips::Terminate();
-  ABISysV_mips64::Terminate();
-  ABISysV_s390x::Terminate();
+#define LLVM_TARGET(t) LLDB_PROCESS_ ## t(Terminate)
+#include "llvm/Config/Targets.def"
+
   DisassemblerLLVMC::Terminate();
 
   JITLoaderGDB::Terminate();
@@ -327,7 +333,6 @@ void SystemInitializerTest::Terminate() {
   platform_netbsd::PlatformNetBSD::Terminate();
   platform_openbsd::PlatformOpenBSD::Terminate();
   PlatformWindows::Terminate();
-  PlatformKalimba::Terminate();
   platform_android::PlatformAndroid::Terminate();
   PlatformMacOSX::Terminate();
   PlatformRemoteiOS::Terminate();

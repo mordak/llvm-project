@@ -1,9 +1,8 @@
 //===---- ClangQuery.cpp - clang-query tool -------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -70,13 +69,16 @@ bool runCommandsInFile(const char *ExeName, std::string const &FileName,
     llvm::errs() << ExeName << ": cannot open " << FileName << "\n";
     return 1;
   }
-  while (Input.good()) {
-    std::string Line;
-    std::getline(Input, Line);
 
-    QueryRef Q = QueryParser::parse(Line, QS);
+  std::string FileContent((std::istreambuf_iterator<char>(Input)),
+                          std::istreambuf_iterator<char>());
+
+  StringRef FileContentRef(FileContent);
+  while (!FileContentRef.empty()) {
+    QueryRef Q = QueryParser::parse(FileContentRef, QS);
     if (!Q->run(llvm::outs(), QS))
       return true;
+    FileContentRef = Q->RemainingContent;
   }
   return false;
 }

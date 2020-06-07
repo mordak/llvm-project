@@ -1,6 +1,5 @@
 """Test that we handle inferiors which change their process group"""
 
-from __future__ import print_function
 
 
 import os
@@ -24,6 +23,7 @@ class ChangeProcessGroupTestCase(TestBase):
     @skipIfFreeBSD  # Times out on FreeBSD llvm.org/pr23731
     @skipIfWindows  # setpgid call does not exist on Windows
     @expectedFailureAndroid("http://llvm.org/pr23762", api_levels=[16])
+    @expectedFailureNetBSD
     def test_setpgid(self):
         self.build()
         exe = self.getBuildArtifact("a.out")

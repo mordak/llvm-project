@@ -15,8 +15,8 @@ programming languages, aiming to be the best in class implementation of
 these languages. Clang builds on the LLVM optimizer and code generator,
 allowing it to provide high-quality optimization and code generation
 support for many targets. For more general information, please see the
-`Clang Web Site <http://clang.llvm.org>`_ or the `LLVM Web
-Site <http://llvm.org>`_.
+`Clang Web Site <https://clang.llvm.org>`_ or the `LLVM Web
+Site <https://llvm.org>`_.
 
 This document describes important notes about using Clang as a compiler
 for an end-user, documenting the supported features, command line
@@ -324,26 +324,98 @@ output format of the diagnostics that it generates.
 
 .. _opt_fsave-optimization-record:
 
-**-fsave-optimization-record**
-   Write optimization remarks to a YAML file.
+.. option:: -f[no-]save-optimization-record[=<format>]
+
+   Enable optimization remarks during compilation and write them to a separate
+   file.
 
    This option, which defaults to off, controls whether Clang writes
-   optimization reports to a YAML file. By recording diagnostics in a file,
-   using a structured YAML format, users can parse or sort the remarks in a
-   convenient way.
+   optimization reports to a separate file. By recording diagnostics in a file,
+   users can parse or sort the remarks in a convenient way.
+
+   By default, the serialization format is YAML.
+
+   The supported serialization formats are:
+
+   -  .. _opt_fsave_optimization_record_yaml:
+
+      ``-fsave-optimization-record=yaml``: A structured YAML format.
+
+   -  .. _opt_fsave_optimization_record_bitstream:
+
+      ``-fsave-optimization-record=bitstream``: A binary format based on LLVM
+      Bitstream.
+
+   The output file is controlled by :ref:`-foptimization-record-file <opt_foptimization-record-file>`.
+
+   In the absence of an explicit output file, the file is chosen using the
+   following scheme:
+
+   ``<base>.opt.<format>``
+
+   where ``<base>`` is based on the output file of the compilation (whether
+   it's explicitly specified through `-o` or not) when used with `-c` or `-S`.
+   For example:
+
+   * ``clang -fsave-optimization-record -c in.c -o out.o`` will generate
+     ``out.opt.yaml``
+
+   * ``clang -fsave-optimization-record -c in.c `` will generate
+     ``in.opt.yaml``
+
+   When targeting (Thin)LTO, the base is derived from the output filename, and
+   the extension is not dropped.
+
+   When targeting ThinLTO, the following scheme is used:
+
+   ``<base>.opt.<format>.thin.<num>.<format>``
+
+   Darwin-only: when used for generating a linked binary from a source file
+   (through an intermediate object file), the driver will invoke `cc1` to
+   generate a temporary object file. The temporary remark file will be emitted
+   next to the object file, which will then be picked up by `dsymutil` and
+   emitted in the .dSYM bundle. This is available for all formats except YAML.
+
+   For example:
+
+   ``clang -fsave-optimization-record=bitstream in.c -o out`` will generate
+
+   * ``/var/folders/43/9y164hh52tv_2nrdxrj31nyw0000gn/T/a-9be59b.o``
+
+   * ``/var/folders/43/9y164hh52tv_2nrdxrj31nyw0000gn/T/a-9be59b.opt.bitstream``
+
+   * ``out``
+
+   * ``out.dSYM/Contents/Resources/Remarks/out``
+
+   Darwin-only: compiling for multiple architectures will use the following
+   scheme:
+
+   ``<base>-<arch>.opt.<format>``
+
+   Note that this is incompatible with passing the
+   :ref:`-foptimization-record-file <opt_foptimization-record-file>` option.
 
 .. _opt_foptimization-record-file:
 
 **-foptimization-record-file**
-   Control the file to which optimization reports are written.
+   Control the file to which optimization reports are written. This implies
+   :ref:`-fsave-optimization-record <opt_fsave-optimization-record>`.
+
+    On Darwin platforms, this is incompatible with passing multiple
+    ``-arch <arch>`` options.
+
+.. _opt_foptimization-record-passes:
+
+**-foptimization-record-passes**
+   Only include passes which match a specified regular expression.
 
    When optimization reports are being output (see
    :ref:`-fsave-optimization-record <opt_fsave-optimization-record>`), this
-   option controls the file to which those reports are written.
+   option controls the passes that will be included in the final report.
 
-   If this option is not used, optimization records are output to a file named
-   after the primary file being compiled. If that's "foo.c", for example,
-   optimization records are output to "foo.opt.yaml".
+   If this option is not used, all the passes are included in the optimization
+   record.
 
 .. _opt_fdiagnostics-show-hotness:
 
@@ -679,6 +751,13 @@ Other Options
 -------------
 Clang options that don't fit neatly into other categories.
 
+.. option:: -fgnuc-version=
+
+  This flag controls the value of ``__GNUC__`` and related macros. This flag
+  does not enable or disable any GCC extensions implemented in Clang. Setting
+  the version to zero causes Clang to leave ``__GNUC__`` and other
+  GNU-namespaced macros, such as ``__GXX_WEAK__``, undefined.
+
 .. option:: -MV
 
   When emitting a dependency file, use formatting conventions appropriate
@@ -970,13 +1049,24 @@ is treated as a system header.
 Enabling All Diagnostics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In addition to the traditional ``-W`` flags, one can enable **all**
-diagnostics by passing :option:`-Weverything`. This works as expected
-with
-:option:`-Werror`, and also includes the warnings from :option:`-pedantic`.
+In addition to the traditional ``-W`` flags, one can enable **all** diagnostics
+by passing :option:`-Weverything`. This works as expected with
+:option:`-Werror`, and also includes the warnings from :option:`-pedantic`. Some
+diagnostics contradict each other, therefore, users of :option:`-Weverything`
+often disable many diagnostics such as `-Wno-c++98-compat` and `-Wno-c++-compat`
+because they contradict recent C++ standards.
 
-Note that when combined with :option:`-w` (which disables all warnings), that
-flag wins.
+Since :option:`-Weverything` enables every diagnostic, we generally don't
+recommend using it. `-Wall` `-Wextra` are a better choice for most projects.
+Using :option:`-Weverything` means that updating your compiler is more difficult
+because you're exposed to experimental diagnostics which might be of lower
+quality than the default ones. If you do use :option:`-Weverything` then we
+advise that you address all new compiler diagnostics as they get added to Clang,
+either by fixing everything they find or explicitly disabling that diagnostic
+with its corresponding `Wno-` option.
+
+Note that when combined with :option:`-w` (which disables all warnings),
+disabling all warnings wins.
 
 Controlling Static Analyzer Diagnostics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -994,7 +1084,7 @@ information.
 Precompiled Headers
 -------------------
 
-`Precompiled headers <http://en.wikipedia.org/wiki/Precompiled_header>`__
+`Precompiled headers <https://en.wikipedia.org/wiki/Precompiled_header>`_
 are a general approach employed by many compilers to reduce compilation
 time. The underlying motivation of the approach is that it is common for
 the same (and often large) header files to be included by multiple
@@ -1006,7 +1096,7 @@ on-disk cache that contains the vital information necessary to reduce
 some of the work needed to process a corresponding header file. While
 details of precompiled headers vary between compilers, precompiled
 headers have been shown to be highly effective at speeding up program
-compilation on systems with very large system headers (e.g., Mac OS X).
+compilation on systems with very large system headers (e.g., macOS).
 
 Generating a PCH File
 ^^^^^^^^^^^^^^^^^^^^^
@@ -1094,6 +1184,231 @@ Relocatable precompiled headers are intended to be used in a limited
 number of cases where the compilation environment is tightly controlled
 and the precompiled header cannot be generated after headers have been
 installed.
+
+.. _controlling-fp-behavior:
+
+Controlling Floating Point Behavior
+-----------------------------------
+
+Clang provides a number of ways to control floating point behavior. The options
+are listed below.
+
+.. option:: -ffast-math
+
+   Enable fast-math mode.  This option lets the
+   compiler make aggressive, potentially-lossy assumptions about
+   floating-point math.  These include:
+
+   * Floating-point math obeys regular algebraic rules for real numbers (e.g.
+     ``+`` and ``*`` are associative, ``x/y == x * (1/y)``, and
+     ``(a + b) * c == a * c + b * c``),
+   * Operands to floating-point operations are not equal to ``NaN`` and
+     ``Inf``, and
+   * ``+0`` and ``-0`` are interchangeable.
+
+   ``-ffast-math`` also defines the ``__FAST_MATH__`` preprocessor
+   macro. Some math libraries recognize this macro and change their behavior.
+   With the exception of ``-ffp-contract=fast``, using any of the options
+   below to disable any of the individual optimizations in ``-ffast-math``
+   will cause ``__FAST_MATH__`` to no longer be set.
+
+  This option implies:
+
+   * ``-fno-honor-infinities``
+
+   * ``-fno-honor-nans``
+
+   * ``-fno-math-errno``
+
+   * ``-ffinite-math``
+
+   * ``-fassociative-math``
+
+   * ``-freciprocal-math``
+
+   * ``-fno-signed-zeros``
+
+   * ``-fno-trapping-math``
+
+   * ``-ffp-contract=fast``
+
+.. option:: -fdenormal-fp-math=<value>
+
+   Select which denormal numbers the code is permitted to require.
+
+   Valid values are: 
+
+   * ``ieee`` - IEEE 754 denormal numbers
+   * ``preserve-sign`` - the sign of a flushed-to-zero number is preserved in the sign of 0
+   * ``positive-zero`` - denormals are flushed to positive zero
+
+   Defaults to ``ieee``.
+
+.. _opt_fstrict-float-cast-overflow:
+
+**-f[no-]strict-float-cast-overflow**
+
+   When a floating-point value is not representable in a destination integer 
+   type, the code has undefined behavior according to the language standard.
+   By default, Clang will not guarantee any particular result in that case.
+   With the 'no-strict' option, Clang attempts to match the overflowing behavior
+   of the target's native float-to-int conversion instructions.
+
+.. _opt_fmath-errno:
+
+**-f[no-]math-errno**
+
+   Require math functions to indicate errors by setting errno.
+   The default varies by ToolChain.  ``-fno-math-errno`` allows optimizations
+   that might cause standard C math functions to not set ``errno``.
+   For example, on some systems, the math function ``sqrt`` is specified
+   as setting ``errno`` to ``EDOM`` when the input is negative. On these
+   systems, the compiler cannot normally optimize a call to ``sqrt`` to use
+   inline code (e.g. the x86 ``sqrtsd`` instruction) without additional
+   checking to ensure that ``errno`` is set appropriately.
+   ``-fno-math-errno`` permits these transformations.
+
+   On some targets, math library functions never set ``errno``, and so
+   ``-fno-math-errno`` is the default. This includes most BSD-derived
+   systems, including Darwin.
+
+.. _opt_ftrapping-math:
+
+**-f[no-]trapping-math**
+
+   Control floating point exception behavior. ``-fno-trapping-math`` allows optimizations that assume that floating point operations cannot generate traps such as divide-by-zero, overflow and underflow.
+
+- The option ``-ftrapping-math`` behaves identically to ``-ffp-exception-behavior=strict``.
+- The option ``-fno-trapping-math`` behaves identically to ``-ffp-exception-behavior=ignore``.   This is the default.
+
+.. option:: -ffp-contract=<value>
+
+   Specify when the compiler is permitted to form fused floating-point
+   operations, such as fused multiply-add (FMA). Fused operations are
+   permitted to produce more precise results than performing the same
+   operations separately.
+
+   The C standard permits intermediate floating-point results within an
+   expression to be computed with more precision than their type would
+   normally allow. This permits operation fusing, and Clang takes advantage
+   of this by default. This behavior can be controlled with the
+   ``FP_CONTRACT`` pragma. Please refer to the pragma documentation for a
+   description of how the pragma interacts with this option.
+
+   Valid values are:
+
+   * ``fast`` (everywhere)
+   * ``on`` (according to FP_CONTRACT pragma, default)
+   * ``off`` (never fuse)
+
+.. _opt_fhonor-infinities:
+
+**-f[no-]honor-infinities**
+
+   If both ``-fno-honor-infinities`` and ``-fno-honor-nans`` are used,
+   has the same effect as specifying ``-ffinite-math``.
+
+.. _opt_fhonor-nans:
+
+**-f[no-]honor-nans**
+
+   If both ``-fno-honor-infinities`` and ``-fno-honor-nans`` are used,
+   has the same effect as specifying ``-ffinite-math``.
+
+.. _opt_fsigned-zeros:
+
+**-f[no-]signed-zeros**
+
+   Allow optimizations that ignore the sign of floating point zeros.
+   Defaults to ``-fno-signed-zeros``.
+
+.. _opt_fassociative-math:
+
+**-f[no-]associative-math**
+
+  Allow floating point operations to be reassociated.
+  Defaults to ``-fno-associative-math``.
+
+.. _opt_freciprocal-math:
+
+**-f[no-]reciprocal-math**
+
+  Allow division operations to be transformed into multiplication by a
+  reciprocal. This can be significantly faster than an ordinary division
+  but can also have significantly less precision. Defaults to
+  ``-fno-reciprocal-math``.
+
+.. _opt_funsafe-math-optimizations:
+
+**-f[no-]unsafe-math-optimizations**
+
+   Allow unsafe floating-point optimizations. Also implies:
+
+   * ``-fassociative-math``
+   * ``-freciprocal-math``
+   * ``-fno-signed-zeroes``
+   * ``-fno-trapping-math``.
+
+   Defaults to ``-fno-unsafe-math-optimizations``.
+
+.. _opt_ffinite-math:
+
+**-f[no-]finite-math**
+
+   Allow floating-point optimizations that assume arguments and results are
+   not NaNs or +-Inf.  This defines the ``__FINITE_MATH_ONLY__`` preprocessor macro.
+   Also implies:
+
+   * ``-fno-honor-infinities``
+   * ``-fno-honor-nans``
+
+   Defaults to ``-fno-finite-math``.
+
+.. _opt_frounding-math:
+
+**-f[no-]rounding-math**
+
+Force floating-point operations to honor the dynamically-set rounding mode by default.
+
+The result of a floating-point operation often cannot be exactly represented in the result type and therefore must be rounded.  IEEE 754 describes different rounding modes that control how to perform this rounding, not all of which are supported by all implementations.  C provides interfaces (``fesetround`` and ``fesetenv``) for dynamically controlling the rounding mode, and while it also recommends certain conventions for changing the rounding mode, these conventions are not typically enforced in the ABI.  Since the rounding mode changes the numerical result of operations, the compiler must understand something about it in order to optimize floating point operations.
+
+Note that floating-point operations performed as part of constant initialization are formally performed prior to the start of the program and are therefore not subject to the current rounding mode.  This includes the initialization of global variables and local ``static`` variables.  Floating-point operations in these contexts will be rounded using ``FE_TONEAREST``.
+
+- The option ``-fno-rounding-math`` allows the compiler to assume that the rounding mode is set to ``FE_TONEAREST``.  This is the default.
+- The option ``-frounding-math`` forces the compiler to honor the dynamically-set rounding mode.  This prevents optimizations which might affect results if the rounding mode changes or is different from the default; for example, it prevents floating-point operations from being reordered across most calls and prevents constant-folding when the result is not exactly representable.
+
+.. option:: -ffp-model=<value>
+
+   Specify floating point behavior. ``-ffp-model`` is an umbrella
+   option that encompasses functionality provided by other, single
+   purpose, floating point options.  Valid values are: ``precise``, ``strict``,
+   and ``fast``.
+   Details:
+
+   * ``precise`` Disables optimizations that are not value-safe on floating-point data, although FP contraction (FMA) is enabled (``-ffp-contract=fast``).  This is the default behavior.
+   * ``strict`` Enables ``-frounding-math`` and ``-ffp-exception-behavior=strict``, and disables contractions (FMA).  All of the ``-ffast-math`` enablements are disabled.
+   * ``fast`` Behaves identically to specifying both ``-ffast-math`` and ``ffp-contract=fast``
+
+   Note: If your command line specifies multiple instances
+   of the ``-ffp-model`` option, or if your command line option specifies
+   ``-ffp-model`` and later on the command line selects a floating point
+   option that has the effect of negating part of the  ``ffp-model`` that
+   has been selected, then the compiler will issue a diagnostic warning
+   that the override has occurred.
+
+.. option:: -ffp-exception-behavior=<value>
+
+   Specify the floating-point exception behavior.
+
+   Valid values are: ``ignore``, ``maytrap``, and ``strict``.
+   The default value is ``ignore``.  Details:
+
+   * ``ignore`` The compiler assumes that the exception status flags will not be read and that floating point exceptions will be masked.
+   * ``maytrap`` The compiler avoids transformations that may raise exceptions that would not have been raised by the original code. Constant folding performed by the compiler is exempt from this option.
+   * ``strict`` The compiler ensures that all transformations strictly preserve the floating point exception semantics of the original code.
+
+
+
 
 .. _controlling-code-generation:
 
@@ -1232,36 +1547,6 @@ are listed below.
    C++ objects, i.e. the vptr is invariant during an object's lifetime.
    This enables better devirtualization. Turned off by default, because it is
    still experimental.
-
-.. option:: -ffast-math
-
-   Enable fast-math mode. This defines the ``__FAST_MATH__`` preprocessor
-   macro, and lets the compiler make aggressive, potentially-lossy assumptions
-   about floating-point math.  These include:
-
-   * Floating-point math obeys regular algebraic rules for real numbers (e.g.
-     ``+`` and ``*`` are associative, ``x/y == x * (1/y)``, and
-     ``(a + b) * c == a * c + b * c``),
-   * operands to floating-point operations are not equal to ``NaN`` and
-     ``Inf``, and
-   * ``+0`` and ``-0`` are interchangeable.
-
-.. option:: -fdenormal-fp-math=[values]
-
-   Select which denormal numbers the code is permitted to require.
-
-   Valid values are: ``ieee``, ``preserve-sign``, and ``positive-zero``,
-   which correspond to IEEE 754 denormal numbers, the sign of a
-   flushed-to-zero number is preserved in the sign of 0, denormals are
-   flushed to positive zero, respectively.
-
-.. option:: -f[no-]strict-float-cast-overflow
-
-   When a floating-point value is not representable in a destination integer 
-   type, the code has undefined behavior according to the language standard.
-   By default, Clang will not guarantee any particular result in that case.
-   With the 'no-strict' option, Clang attempts to match the overflowing behavior
-   of the target's native float-to-int conversion instructions.
 
 .. option:: -fwhole-program-vtables
 
@@ -1482,7 +1767,7 @@ usual build cycle when using sample profilers for optimization:
 
 3. Convert the collected profile data to LLVM's sample profile format.
    This is currently supported via the AutoFDO converter ``create_llvm_prof``.
-   It is available at http://github.com/google/autofdo. Once built and
+   It is available at https://github.com/google/autofdo. Once built and
    installed, you can convert the ``perf.data`` file to LLVM using
    the command:
 
@@ -1521,12 +1806,12 @@ read by the backend. LLVM supports three different sample profile formats:
 
 2. Binary encoding. This uses a more efficient encoding that yields smaller
    profile files. This is the format generated by the ``create_llvm_prof`` tool
-   in http://github.com/google/autofdo.
+   in https://github.com/google/autofdo.
 
 3. GCC encoding. This is based on the gcov format, which is accepted by GCC. It
    is only interesting in environments where GCC and Clang co-exist. This
    encoding is only generated by the ``create_gcov`` tool in
-   http://github.com/google/autofdo. It can be read by LLVM and
+   https://github.com/google/autofdo. It can be read by LLVM and
    ``llvm-profdata``, but it cannot be generated by either.
 
 If you are using Linux Perf to generate sampling profiles, you can use the
@@ -1745,7 +2030,8 @@ controlled by the GCC-compatible flags ``-fprofile-generate`` and
 ``-fprofile-use``. Although these flags are semantically equivalent to
 their GCC counterparts, they *do not* handle GCC-compatible profiles.
 They are only meant to implement GCC's semantics with respect to
-profile creation and use.
+profile creation and use. Flag ``-fcs-profile-generate`` also instruments
+programs using the same instrumentation method as ``-fprofile-generate``.
 
 .. option:: -fprofile-generate[=<dirname>]
 
@@ -1777,6 +2063,45 @@ profile creation and use.
  the profile dumping path specified at command line, the environment variable
  ``LLVM_PROFILE_FILE`` can still be used to override
  the directory and filename for the profile file at runtime.
+
+.. option:: -fcs-profile-generate[=<dirname>]
+
+  The ``-fcs-profile-generate`` and ``-fcs-profile-generate=`` flags will use
+  the same instrumentation method, and generate the same profile as in the
+  ``-fprofile-generate`` and ``-fprofile-generate=`` flags. The difference is
+  that the instrumentation is performed after inlining so that the resulted
+  profile has a better context sensitive information. They cannot be used
+  together with ``-fprofile-generate`` and ``-fprofile-generate=`` flags.
+  They are typically used in conjunction with ``-fprofile-use`` flag.
+  The profile generated by ``-fcs-profile-generate`` and ``-fprofile-generate``
+  can be merged by llvm-profdata. A use example:
+
+  .. code-block:: console
+
+    $ clang++ -O2 -fprofile-generate=yyy/zzz code.cc -o code
+    $ ./code
+    $ llvm-profdata merge -output=code.profdata yyy/zzz/
+
+  The first few steps are the same as that in ``-fprofile-generate``
+  compilation. Then perform a second round of instrumentation.
+
+  .. code-block:: console
+
+    $ clang++ -O2 -fprofile-use=code.profdata -fcs-profile-generate=sss/ttt \
+      -o cs_code
+    $ ./cs_code
+    $ llvm-profdata merge -output=cs_code.profdata sss/ttt code.profdata
+
+  The resulted ``cs_code.prodata`` combines ``code.profdata`` and the profile
+  generated from binary ``cs_code``. Profile ``cs_code.profata`` can be used by
+  ``-fprofile-use`` compilaton.
+
+  .. code-block:: console
+
+    $ clang++ -O2 -fprofile-use=cs_code.profdata
+
+  The above command will read both profiles to the compiler at the identical
+  point of instrumenations.
 
 .. option:: -fprofile-use[=<pathname>]
 
@@ -1831,9 +2156,9 @@ The profile remapping file is a text file containing lines of the form
 
 where ``fragmentkind`` is one of ``name``, ``type``, or ``encoding``,
 indicating whether the following mangled name fragments are
-<`name <http://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangle.name>`_>s,
-<`type <http://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangle.type>`_>s, or
-<`encoding <http://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangle.encoding>`_>s,
+<`name <https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangle.name>`_>s,
+<`type <https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangle.type>`_>s, or
+<`encoding <https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangle.encoding>`_>s,
 respectively.
 Blank lines and lines starting with ``#`` are ignored.
 
@@ -2335,7 +2660,9 @@ Compiling to bitcode can be done as follows:
 This will produce a generic test.bc file that can be used in vendor toolchains
 to perform machine code generation.
 
-Clang currently supports OpenCL C language standards up to v2.0.
+Clang currently supports OpenCL C language standards up to v2.0. Starting from
+clang 9 a C++ mode is available for OpenCL (see
+:ref:`C++ for OpenCL <cxx_for_opencl>`).
 
 OpenCL Specific Options
 -----------------------
@@ -2530,6 +2857,10 @@ function to the custom ``my_ext`` extension.
 
 Declaring the same types in different vendor extensions is disallowed.
 
+Clang also supports language extensions documented in `The OpenCL C Language
+Extensions Documentation
+<https://github.com/KhronosGroup/Khronosdotorg/blob/master/api/opencl/assets/OpenCL_LangExt.pdf>`_.
+
 OpenCL Metadata
 ---------------
 
@@ -2694,6 +3025,76 @@ There are some standard OpenCL functions that are implemented as Clang builtins:
   enqueue query functions from `section 6.13.17.5
   <https://www.khronos.org/registry/cl/specs/opencl-2.0-openclc.pdf#171>`_.
 
+.. _cxx_for_opencl:
+
+C++ for OpenCL
+--------------
+
+Starting from clang 9 kernel code can contain C++17 features: classes, templates,
+function overloading, type deduction, etc. Please note that this is not an
+implementation of `OpenCL C++
+<https://www.khronos.org/registry/OpenCL/specs/2.2/pdf/OpenCL_Cxx.pdf>`_ and
+there is no plan to support it in clang in any new releases in the near future.
+
+For detailed information about this language refer to `The C++ for OpenCL
+Programming Language Documentation
+<https://github.com/KhronosGroup/Khronosdotorg/blob/master/api/opencl/assets/CXX_for_OpenCL.pdf>`_.
+
+Since C++ features are to be used on top of OpenCL C functionality, all existing
+restrictions from OpenCL C v2.0 will inherently apply. All OpenCL C builtin types
+and function libraries are supported and can be used in this mode.
+
+To enable the C++ for OpenCL mode, pass one of following command line options when
+compiling ``.cl`` file ``-cl-std=clc++``, ``-cl-std=CLC++``, ``-std=clc++`` or
+``-std=CLC++``.
+
+   .. code-block:: c++
+
+     template<class T> T add( T x, T y )
+     {
+       return x + y;
+     }
+
+     __kernel void test( __global float* a, __global float* b)
+     {
+       auto index = get_global_id(0);
+       a[index] = add(b[index], b[index+1]);
+     }
+
+
+   .. code-block:: console
+
+     clang -cl-std=clc++ test.cl
+
+Constructing and destroying global objects
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Global objects must be constructed before the first kernel using the global objects
+is executed and destroyed just after the last kernel using the program objects is
+executed. In OpenCL v2.0 drivers there is no specific API for invoking global
+constructors. However, an easy workaround would be to enqueue a constructor
+initialization kernel that has a name ``@_GLOBAL__sub_I_<compiled file name>``.
+This kernel is only present if there are any global objects to be initialized in
+the compiled binary. One way to check this is by passing ``CL_PROGRAM_KERNEL_NAMES``
+to ``clGetProgramInfo`` (OpenCL v2.0 s5.8.7).
+
+Note that if multiple files are compiled and linked into libraries, multiple kernels
+that initialize global objects for multiple modules would have to be invoked.
+
+Applications are currently required to run initialization of global objects manually
+before running any kernels in which the objects are used.
+
+   .. code-block:: console
+
+     clang -cl-std=clc++ test.cl
+
+If there are any global objects to be initialized, the final binary will contain
+the ``@_GLOBAL__sub_I_test.cl`` kernel to be enqueued.
+
+Global destructors can not be invoked in OpenCL v2.0 drivers. However, all memory used
+for program scope objects is released on ``clReleaseProgram``.
+
+
 .. _target_features:
 
 Target-Specific Features and Limitations
@@ -2706,7 +3107,7 @@ X86
 ^^^
 
 The support for X86 (both 32-bit and 64-bit) is considered stable on
-Darwin (Mac OS X), Linux, FreeBSD, and Dragonfly BSD: it has been tested
+Darwin (macOS), Linux, FreeBSD, and Dragonfly BSD: it has been tested
 to correctly compile many large C, C++, Objective-C, and Objective-C++
 codebases.
 
@@ -2761,8 +3162,8 @@ backend.
 Operating System Features and Limitations
 -----------------------------------------
 
-Darwin (Mac OS X)
-^^^^^^^^^^^^^^^^^
+Darwin (macOS)
+^^^^^^^^^^^^^^
 
 Thread Sanitizer is not supported.
 
@@ -2829,7 +3230,7 @@ compatibility with the Visual C++ compiler, cl.exe.
 To enable clang-cl to find system headers, libraries, and the linker when run
 from the command-line, it should be executed inside a Visual Studio Native Tools
 Command Prompt or a regular Command Prompt where the environment has been set
-up using e.g. `vcvarsall.bat <http://msdn.microsoft.com/en-us/library/f2ccy3wt.aspx>`_.
+up using e.g. `vcvarsall.bat <https://msdn.microsoft.com/en-us/library/f2ccy3wt.aspx>`_.
 
 clang-cl can also be used from inside Visual Studio by selecting the LLVM
 Platform Toolset. The toolset is not part of the installer, but may be installed
@@ -3011,6 +3412,8 @@ Execute ``clang-cl /?`` to see a list of supported options:
       /Yc<filename>           Generate a pch file for all code up to and including <filename>
       /Yu<filename>           Load a pch file and use it instead of all code up to and including <filename>
       /Z7                     Enable CodeView debug information in object files
+      /Zc:char8_t             Enable C++2a char8_t type
+      /Zc:char8_t-            Disable C++2a char8_t type
       /Zc:dllexportInlines-   Don't dllexport/dllimport inline member functions of dllexport/import classes
       /Zc:dllexportInlines    dllexport/dllimport inline member functions of dllexport/import classes (default)
       /Zc:sizedDealloc-       Disable C++14 sized global deallocation functions

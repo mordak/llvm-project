@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -11,7 +10,7 @@
 
 // <filesystem>
 
-#include "filesystem_include.hpp"
+#include "filesystem_include.h"
 
 using namespace fs;
 
@@ -21,7 +20,9 @@ struct ConvToPath {
   }
 };
 
-int main() {
+int main(int, char**) {
   ConvToPath LHS, RHS;
   (void)(LHS / RHS); // expected-error {{invalid operands to binary expression}}
+
+  return 0;
 }

@@ -2,12 +2,8 @@
 Test setting a breakpoint by line and column.
 """
 
-from __future__ import print_function
 
 
-import os
-import time
-import re
 import lldb
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
@@ -24,12 +20,12 @@ class BreakpointByLineAndColumnTestCase(TestBase):
         self.build()
         main_c = lldb.SBFileSpec("main.c")
         _, _, _, breakpoint = lldbutil.run_to_line_breakpoint(self,
-                                                              main_c, 20, 50)
+                                                              main_c, 19, 50)
         self.expect("fr v did_call", substrs='1')
         in_then = False
         for i in range(breakpoint.GetNumLocations()):
             b_loc = breakpoint.GetLocationAtIndex(i).GetAddress().GetLineEntry()
-            self.assertEqual(b_loc.GetLine(), 20)
+            self.assertEqual(b_loc.GetLine(), 19)
             in_then |= b_loc.GetColumn() == 50
         self.assertTrue(in_then)
 
@@ -38,11 +34,11 @@ class BreakpointByLineAndColumnTestCase(TestBase):
     def testBreakpointByLine(self):
         self.build()
         main_c = lldb.SBFileSpec("main.c")
-        _, _, _, breakpoint = lldbutil.run_to_line_breakpoint(self, main_c, 20)
+        _, _, _, breakpoint = lldbutil.run_to_line_breakpoint(self, main_c, 19)
         self.expect("fr v did_call", substrs='0')
         in_condition = False
         for i in range(breakpoint.GetNumLocations()):
             b_loc = breakpoint.GetLocationAtIndex(i).GetAddress().GetLineEntry()
-            self.assertEqual(b_loc.GetLine(), 20)
+            self.assertEqual(b_loc.GetLine(), 19)
             in_condition |= b_loc.GetColumn() < 30
         self.assertTrue(in_condition)

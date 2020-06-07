@@ -1,9 +1,8 @@
-//===--- ThreadPool.h --------------------------------------------*- C++-*-===//
+//===--- Threading.h - Abstractions for multithreading -----------*- C++-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -11,10 +10,11 @@
 #define LLVM_CLANG_TOOLS_EXTRA_CLANGD_THREADING_H
 
 #include "Context.h"
-#include "Function.h"
+#include "llvm/ADT/FunctionExtras.h"
 #include "llvm/ADT/Twine.h"
 #include <cassert>
 #include <condition_variable>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -118,15 +118,18 @@ private:
   std::size_t InFlightTasks = 0;
 };
 
-enum class ThreadPriority {
-  Low = 0,
-  Normal = 1,
-};
-void setCurrentThreadPriority(ThreadPriority Priority);
-// Avoid the use of scheduler policies that may starve low-priority threads.
-// This prevents tests from timing out on loaded systems.
-// Affects subsequent setThreadPriority() calls.
-void preventThreadStarvationInTests();
+/// Runs \p Action asynchronously with a new std::thread. The context will be
+/// propagated.
+template <typename T>
+std::future<T> runAsync(llvm::unique_function<T()> Action) {
+  return std::async(
+      std::launch::async,
+      [](llvm::unique_function<T()> &&Action, Context Ctx) {
+        WithContext WithCtx(std::move(Ctx));
+        return Action();
+      },
+      std::move(Action), Context::current().clone());
+}
 
 } // namespace clangd
 } // namespace clang

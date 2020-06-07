@@ -1,9 +1,8 @@
 //===-- ModuleSpec.h --------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -125,7 +124,7 @@ public:
 
   ConstString &GetObjectName() { return m_object_name; }
 
-  const ConstString &GetObjectName() const { return m_object_name; }
+  ConstString GetObjectName() const { return m_object_name; }
 
   uint64_t GetObjectOffset() const { return m_object_offset; }
 
@@ -208,7 +207,7 @@ public:
       if (dumped_something)
         strm.PutCString(", ");
       strm.Printf("arch = ");
-      m_arch.DumpTriple(strm);
+      m_arch.DumpTriple(strm.AsRawOstream());
       dumped_something = true;
     }
     if (m_uuid.IsValid()) {
@@ -252,24 +251,18 @@ public:
     if (match_module_spec.GetObjectName() &&
         match_module_spec.GetObjectName() != GetObjectName())
       return false;
-    if (match_module_spec.GetFileSpecPtr()) {
-      const FileSpec &fspec = match_module_spec.GetFileSpec();
-      if (!FileSpec::Equal(fspec, GetFileSpec(),
-                           !fspec.GetDirectory().IsEmpty()))
-        return false;
-    }
-    if (GetPlatformFileSpec() && match_module_spec.GetPlatformFileSpecPtr()) {
-      const FileSpec &fspec = match_module_spec.GetPlatformFileSpec();
-      if (!FileSpec::Equal(fspec, GetPlatformFileSpec(),
-                           !fspec.GetDirectory().IsEmpty()))
-        return false;
+    if (!FileSpec::Match(match_module_spec.GetFileSpec(), GetFileSpec()))
+      return false;
+    if (GetPlatformFileSpec() &&
+        !FileSpec::Match(match_module_spec.GetPlatformFileSpec(),
+                         GetPlatformFileSpec())) {
+      return false;
     }
     // Only match the symbol file spec if there is one in this ModuleSpec
-    if (GetSymbolFileSpec() && match_module_spec.GetSymbolFileSpecPtr()) {
-      const FileSpec &fspec = match_module_spec.GetSymbolFileSpec();
-      if (!FileSpec::Equal(fspec, GetSymbolFileSpec(),
-                           !fspec.GetDirectory().IsEmpty()))
-        return false;
+    if (GetSymbolFileSpec() &&
+        !FileSpec::Match(match_module_spec.GetSymbolFileSpec(),
+                         GetSymbolFileSpec())) {
+      return false;
     }
     if (match_module_spec.GetArchitecturePtr()) {
       if (exact_arch_match) {
@@ -312,8 +305,10 @@ public:
 
   ModuleSpecList &operator=(const ModuleSpecList &rhs) {
     if (this != &rhs) {
-      std::lock_guard<std::recursive_mutex> lhs_guard(m_mutex);
-      std::lock_guard<std::recursive_mutex> rhs_guard(rhs.m_mutex);
+      std::lock(m_mutex, rhs.m_mutex);
+      std::lock_guard<std::recursive_mutex> lhs_guard(m_mutex, std::adopt_lock);
+      std::lock_guard<std::recursive_mutex> rhs_guard(rhs.m_mutex, 
+                                                      std::adopt_lock);
       m_specs = rhs.m_specs;
     }
     return *this;
@@ -379,8 +374,8 @@ public:
     return false;
   }
 
-  size_t FindMatchingModuleSpecs(const ModuleSpec &module_spec,
-                                 ModuleSpecList &matching_list) const {
+  void FindMatchingModuleSpecs(const ModuleSpec &module_spec,
+                               ModuleSpecList &matching_list) const {
     std::lock_guard<std::recursive_mutex> guard(m_mutex);
     bool exact_arch_match = true;
     const size_t initial_match_count = matching_list.GetSize();
@@ -399,7 +394,6 @@ public:
           matching_list.Append(spec);
       }
     }
-    return matching_list.GetSize() - initial_match_count;
   }
 
   void Dump(Stream &strm) {

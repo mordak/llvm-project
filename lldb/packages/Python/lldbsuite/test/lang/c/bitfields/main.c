@@ -1,9 +1,8 @@
 //===-- main.c --------------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 #include <stdint.h>
@@ -91,6 +90,14 @@ int main (int argc, char const *argv[])
     packed.b = 10;
     packed.c = 0x7112233;
 
+    struct LargePackedBits {
+        uint64_t a: 36;
+        uint64_t b: 36;
+    } __attribute__((packed));
+
+    struct LargePackedBits large_packed =
+      (struct LargePackedBits){ 0xcbbbbaaaa, 0xdffffeeee };
+    
     return 0;               //// Set break point at this line.
 
 }

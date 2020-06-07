@@ -1,9 +1,8 @@
 //===--- UseAfterMoveCheck.cpp - clang-tidy -------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -103,8 +102,8 @@ bool UseAfterMoveFinder::find(Stmt *FunctionBody, const Expr *MovingCall,
     return false;
 
   Sequence =
-      llvm::make_unique<ExprSequence>(TheCFG.get(), FunctionBody, Context);
-  BlockMap = llvm::make_unique<StmtToBlockMap>(TheCFG.get(), Context);
+      std::make_unique<ExprSequence>(TheCFG.get(), FunctionBody, Context);
+  BlockMap = std::make_unique<StmtToBlockMap>(TheCFG.get(), Context);
   Visited.clear();
 
   const CFGBlock *Block = BlockMap->blockContainingStmt(MovingCall);

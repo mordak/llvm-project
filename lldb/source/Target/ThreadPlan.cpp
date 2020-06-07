@@ -1,9 +1,8 @@
 //===-- ThreadPlan.cpp ------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -19,9 +18,7 @@
 using namespace lldb;
 using namespace lldb_private;
 
-//----------------------------------------------------------------------
 // ThreadPlan constructor
-//----------------------------------------------------------------------
 ThreadPlan::ThreadPlan(ThreadPlanKind kind, const char *name, Thread &thread,
                        Vote stop_vote, Vote run_vote)
     : m_thread(thread), m_stop_vote(stop_vote), m_run_vote(run_vote),
@@ -33,9 +30,7 @@ ThreadPlan::ThreadPlan(ThreadPlanKind kind, const char *name, Thread &thread,
   SetID(GetNextID());
 }
 
-//----------------------------------------------------------------------
 // Destructor
-//----------------------------------------------------------------------
 ThreadPlan::~ThreadPlan() = default;
 
 bool ThreadPlan::PlanExplainsStop(Event *event_ptr) {
@@ -113,7 +108,8 @@ bool ThreadPlan::WillResume(StateType resume_state, bool current_plan) {
       addr_t pc = reg_ctx->GetPC();
       addr_t sp = reg_ctx->GetSP();
       addr_t fp = reg_ctx->GetFP();
-      log->Printf(
+      LLDB_LOGF(
+          log,
           "%s Thread #%u (0x%p): tid = 0x%4.4" PRIx64 ", pc = 0x%8.8" PRIx64
           ", sp = 0x%8.8" PRIx64 ", fp = 0x%8.8" PRIx64 ", "
           "plan = '%s', state = %s, stop others = %d",
@@ -161,9 +157,7 @@ bool ThreadPlan::IsUsuallyUnexplainedStopReason(lldb::StopReason reason) {
   }
 }
 
-//----------------------------------------------------------------------
 // ThreadPlanNull
-//----------------------------------------------------------------------
 
 ThreadPlanNull::ThreadPlanNull(Thread &thread)
     : ThreadPlan(ThreadPlan::eKindNull, "Null Thread Plan", thread,

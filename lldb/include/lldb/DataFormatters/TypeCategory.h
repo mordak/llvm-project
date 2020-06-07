@@ -1,9 +1,8 @@
 //===-- TypeCategory.h ------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -27,7 +26,7 @@ namespace lldb_private {
 template <typename FormatterImpl> class FormatterContainerPair {
 public:
   typedef FormattersContainer<ConstString, FormatterImpl> ExactMatchContainer;
-  typedef FormattersContainer<lldb::RegularExpressionSP, FormatterImpl>
+  typedef FormattersContainer<RegularExpression, FormatterImpl>
       RegexMatchContainer;
 
   typedef typename ExactMatchContainer::MapType ExactMatchMap;
@@ -68,11 +67,7 @@ private:
   typedef FormatterContainerPair<TypeFormatImpl> FormatContainer;
   typedef FormatterContainerPair<TypeSummaryImpl> SummaryContainer;
   typedef FormatterContainerPair<TypeFilterImpl> FilterContainer;
-  typedef FormatterContainerPair<TypeValidatorImpl> ValidatorContainer;
-
-#ifndef LLDB_DISABLE_PYTHON
   typedef FormatterContainerPair<SyntheticChildren> SynthContainer;
-#endif // LLDB_DISABLE_PYTHON
 
 public:
   typedef uint16_t FormatCategoryItems;
@@ -86,13 +81,9 @@ public:
 
   typedef FilterContainer::ExactMatchContainerSP FilterContainerSP;
   typedef FilterContainer::RegexMatchContainerSP RegexFilterContainerSP;
-#ifndef LLDB_DISABLE_PYTHON
+
   typedef SynthContainer::ExactMatchContainerSP SynthContainerSP;
   typedef SynthContainer::RegexMatchContainerSP RegexSynthContainerSP;
-#endif // LLDB_DISABLE_PYTHON
-
-  typedef ValidatorContainer::ExactMatchContainerSP ValidatorContainerSP;
-  typedef ValidatorContainer::RegexMatchContainerSP RegexValidatorContainerSP;
 
   template <typename T> class ForEachCallbacks {
   public:
@@ -138,7 +129,6 @@ public:
       return *this;
     }
 
-#ifndef LLDB_DISABLE_PYTHON
     template <typename U = SyntheticChildren>
     typename std::enable_if<std::is_same<U, T>::value, ForEachCallbacks &>::type
     SetExact(SynthContainer::ExactMatchForEachCallback callback) {
@@ -149,19 +139,6 @@ public:
     typename std::enable_if<std::is_same<U, T>::value, ForEachCallbacks &>::type
     SetWithRegex(SynthContainer::RegexMatchForEachCallback callback) {
       m_synth_regex = callback;
-      return *this;
-    }
-#endif // LLDB_DISABLE_PYTHON
-    template <typename U = TypeValidatorImpl>
-    typename std::enable_if<std::is_same<U, T>::value, ForEachCallbacks &>::type
-    SetExact(ValidatorContainer::ExactMatchForEachCallback callback) {
-      m_validator_exact = callback;
-      return *this;
-    }
-    template <typename U = TypeValidatorImpl>
-    typename std::enable_if<std::is_same<U, T>::value, ForEachCallbacks &>::type
-    SetWithRegex(ValidatorContainer::RegexMatchForEachCallback callback) {
-      m_validator_regex = callback;
       return *this;
     }
 
@@ -188,22 +165,11 @@ public:
       return m_filter_regex;
     }
 
-#ifndef LLDB_DISABLE_PYTHON
     SynthContainer::ExactMatchForEachCallback GetSynthExactCallback() const {
       return m_synth_exact;
     }
     SynthContainer::RegexMatchForEachCallback GetSynthRegexCallback() const {
       return m_synth_regex;
-    }
-#endif // LLDB_DISABLE_PYTHON
-
-    ValidatorContainer::ExactMatchForEachCallback
-    GetValidatorExactCallback() const {
-      return m_validator_exact;
-    }
-    ValidatorContainer::RegexMatchForEachCallback
-    GetValidatorRegexCallback() const {
-      return m_validator_regex;
     }
 
   private:
@@ -216,17 +182,11 @@ public:
     FilterContainer::ExactMatchForEachCallback m_filter_exact;
     FilterContainer::RegexMatchForEachCallback m_filter_regex;
 
-#ifndef LLDB_DISABLE_PYTHON
     SynthContainer::ExactMatchForEachCallback m_synth_exact;
     SynthContainer::RegexMatchForEachCallback m_synth_regex;
-#endif // LLDB_DISABLE_PYTHON
-
-    ValidatorContainer::ExactMatchForEachCallback m_validator_exact;
-    ValidatorContainer::RegexMatchForEachCallback m_validator_regex;
   };
 
-  TypeCategoryImpl(IFormatChangeListener *clist, ConstString name,
-                   std::initializer_list<lldb::LanguageType> langs = {});
+  TypeCategoryImpl(IFormatChangeListener *clist, ConstString name);
 
   template <typename T> void ForEach(const ForEachCallbacks<T> &foreach) {
     GetTypeFormatsContainer()->ForEach(foreach.GetFormatExactCallback());
@@ -239,14 +199,8 @@ public:
     GetTypeFiltersContainer()->ForEach(foreach.GetFilterExactCallback());
     GetRegexTypeFiltersContainer()->ForEach(foreach.GetFilterRegexCallback());
 
-#ifndef LLDB_DISABLE_PYTHON
     GetTypeSyntheticsContainer()->ForEach(foreach.GetSynthExactCallback());
     GetRegexTypeSyntheticsContainer()->ForEach(foreach.GetSynthRegexCallback());
-#endif // LLDB_DISABLE_PYTHON
-
-    GetTypeValidatorsContainer()->ForEach(foreach.GetValidatorExactCallback());
-    GetRegexTypeValidatorsContainer()->ForEach(
-        foreach.GetValidatorRegexCallback());
   }
 
   FormatContainerSP GetTypeFormatsContainer() {
@@ -288,13 +242,8 @@ public:
   FilterContainer::MapValueType
   GetFilterForType(lldb::TypeNameSpecifierImplSP type_sp);
 
-#ifndef LLDB_DISABLE_PYTHON
   SynthContainer::MapValueType
   GetSyntheticForType(lldb::TypeNameSpecifierImplSP type_sp);
-#endif
-
-  ValidatorContainer::MapValueType
-  GetValidatorForType(lldb::TypeNameSpecifierImplSP type_sp);
 
   lldb::TypeNameSpecifierImplSP
   GetTypeNameSpecifierForFormatAtIndex(size_t index);
@@ -311,7 +260,6 @@ public:
   lldb::TypeNameSpecifierImplSP
   GetTypeNameSpecifierForFilterAtIndex(size_t index);
 
-#ifndef LLDB_DISABLE_PYTHON
   SynthContainerSP GetTypeSyntheticsContainer() {
     return m_synth_cont.GetExactMatch();
   }
@@ -326,20 +274,6 @@ public:
 
   lldb::TypeNameSpecifierImplSP
   GetTypeNameSpecifierForSyntheticAtIndex(size_t index);
-#endif // LLDB_DISABLE_PYTHON
-
-  ValidatorContainerSP GetTypeValidatorsContainer() {
-    return m_validator_cont.GetExactMatch();
-  }
-
-  RegexValidatorContainerSP GetRegexTypeValidatorsContainer() {
-    return m_validator_cont.GetRegexMatch();
-  }
-
-  ValidatorContainer::MapValueType GetValidatorAtIndex(size_t index);
-
-  lldb::TypeNameSpecifierImplSP
-  GetTypeNameSpecifierForValidatorAtIndex(size_t index);
 
   bool IsEnabled() const { return m_enabled; }
 
@@ -350,17 +284,14 @@ public:
       return m_enabled_position;
   }
 
-  bool Get(ValueObject &valobj, const FormattersMatchVector &candidates,
+  bool Get(lldb::LanguageType lang, const FormattersMatchVector &candidates,
            lldb::TypeFormatImplSP &entry, uint32_t *reason = nullptr);
 
-  bool Get(ValueObject &valobj, const FormattersMatchVector &candidates,
+  bool Get(lldb::LanguageType lang, const FormattersMatchVector &candidates,
            lldb::TypeSummaryImplSP &entry, uint32_t *reason = nullptr);
 
-  bool Get(ValueObject &valobj, const FormattersMatchVector &candidates,
+  bool Get(lldb::LanguageType lang, const FormattersMatchVector &candidates,
            lldb::SyntheticChildrenSP &entry, uint32_t *reason = nullptr);
-
-  bool Get(ValueObject &valobj, const FormattersMatchVector &candidates,
-           lldb::TypeValidatorImplSP &entry, uint32_t *reason = nullptr);
 
   void Clear(FormatCategoryItems items = ALL_ITEM_TYPES);
 
@@ -376,8 +307,6 @@ public:
 
   void AddLanguage(lldb::LanguageType lang);
 
-  bool HasLanguage(lldb::LanguageType lang);
-
   std::string GetDescription();
 
   bool AnyMatches(ConstString type_name,
@@ -392,10 +321,7 @@ private:
   FormatContainer m_format_cont;
   SummaryContainer m_summary_cont;
   FilterContainer m_filter_cont;
-#ifndef LLDB_DISABLE_PYTHON
   SynthContainer m_synth_cont;
-#endif // LLDB_DISABLE_PYTHON
-  ValidatorContainer m_validator_cont;
 
   bool m_enabled;
 
@@ -413,7 +339,7 @@ private:
 
   void Disable() { Enable(false, UINT32_MAX); }
 
-  bool IsApplicable(ValueObject &valobj);
+  bool IsApplicable(lldb::LanguageType lang);
 
   uint32_t GetLastEnabledPosition() { return m_enabled_position; }
 
@@ -432,15 +358,10 @@ private:
   friend class FormattersContainer<ConstString, TypeFilterImpl>;
   friend class FormattersContainer<lldb::RegularExpressionSP, TypeFilterImpl>;
 
-#ifndef LLDB_DISABLE_PYTHON
   friend class FormattersContainer<ConstString, ScriptedSyntheticChildren>;
   friend class FormattersContainer<lldb::RegularExpressionSP,
                                    ScriptedSyntheticChildren>;
-#endif // LLDB_DISABLE_PYTHON
 
-  friend class FormattersContainer<ConstString, TypeValidatorImpl>;
-  friend class FormattersContainer<lldb::RegularExpressionSP,
-                                   TypeValidatorImpl>;
 };
 
 } // namespace lldb_private

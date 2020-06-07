@@ -1,9 +1,8 @@
 //===---- URI.h - File URIs with schemes -------------------------*- C++-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -15,8 +14,6 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Path.h"
 #include <algorithm>
-#include <iomanip>
-#include <sstream>
 
 LLVM_INSTANTIATE_REGISTRY(clang::clangd::URISchemeRegistry)
 
@@ -29,7 +26,7 @@ inline llvm::Error make_string_error(const llvm::Twine &Message) {
                                              llvm::inconvertibleErrorCode());
 }
 
-/// \brief This manages file paths in the file system. All paths in the scheme
+/// This manages file paths in the file system. All paths in the scheme
 /// are absolute (with leading '/').
 /// Note that this scheme is hardcoded into the library and not registered in
 /// registry.
@@ -64,7 +61,7 @@ public:
 llvm::Expected<std::unique_ptr<URIScheme>>
 findSchemeByName(llvm::StringRef Scheme) {
   if (Scheme == "file")
-    return llvm::make_unique<FileSystemScheme>();
+    return std::make_unique<FileSystemScheme>();
 
   for (auto I = URISchemeRegistry::begin(), E = URISchemeRegistry::end();
        I != E; ++I) {
@@ -97,17 +94,16 @@ bool shouldEscape(unsigned char C) {
 /// - Unreserved characters are not escaped.
 /// - Reserved characters always escaped with exceptions like '/'.
 /// - All other characters are escaped.
-std::string percentEncode(llvm::StringRef Content) {
+void percentEncode(llvm::StringRef Content, std::string &Out) {
   std::string Result;
-  llvm::raw_string_ostream OS(Result);
   for (unsigned char C : Content)
     if (shouldEscape(C))
-      OS << '%' << llvm::format_hex_no_prefix(C, 2, /*Upper = */ true);
-    else
-      OS << C;
-
-  OS.flush();
-  return Result;
+    {
+      Out.push_back('%');
+      Out.push_back(llvm::hexdigit(C / 16));
+      Out.push_back(llvm::hexdigit(C % 16));
+    } else
+    { Out.push_back(C); }
 }
 
 /// Decodes a string according to percent-encoding.
@@ -150,16 +146,18 @@ URI::URI(llvm::StringRef Scheme, llvm::StringRef Authority,
 
 std::string URI::toString() const {
   std::string Result;
-  llvm::raw_string_ostream OS(Result);
-  OS << percentEncode(Scheme) << ":";
+  percentEncode(Scheme, Result);
+  Result.push_back(':');
   if (Authority.empty() && Body.empty())
-    return OS.str();
+    return Result;
   // If authority if empty, we only print body if it starts with "/"; otherwise,
   // the URI is invalid.
   if (!Authority.empty() || llvm::StringRef(Body).startswith("/"))
-    OS << "//" << percentEncode(Authority);
-  OS << percentEncode(Body);
-  OS.flush();
+  {
+    Result.append("//");
+    percentEncode(Authority, Result);
+  }
+  percentEncode(Body, Result);
   return Result;
 }
 
@@ -183,6 +181,17 @@ llvm::Expected<URI> URI::parse(llvm::StringRef OrigUri) {
   }
   U.Body = percentDecode(Uri);
   return U;
+}
+
+llvm::Expected<std::string> URI::resolve(llvm::StringRef FileURI,
+                                         llvm::StringRef HintPath) {
+  auto Uri = URI::parse(FileURI);
+  if (!Uri)
+    return Uri.takeError();
+  auto Path = URI::resolve(*Uri, HintPath);
+  if (!Path)
+    return Path.takeError();
+  return *Path;
 }
 
 llvm::Expected<URI> URI::create(llvm::StringRef AbsolutePath,

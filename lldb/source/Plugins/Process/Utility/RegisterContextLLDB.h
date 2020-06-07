@@ -1,10 +1,9 @@
 //===-- RegisterContextLLDB.h --------------------------------------------*- C++
 //-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -111,17 +110,19 @@ private:
   // user somehow.
   bool IsSkipFrame() const;
 
-  //------------------------------------------------------------------
   /// Determines if a SymbolContext is a trap handler or not
   ///
   /// Given a SymbolContext, determines if this is a trap handler function
   /// aka asynchronous signal handler.
   ///
-  /// @return
+  /// \return
   ///     Returns true if the SymbolContext is a trap handler.
-  //------------------------------------------------------------------
   bool IsTrapHandlerSymbol(lldb_private::Process *process,
                            const lldb_private::SymbolContext &m_sym_ctx) const;
+
+  /// Check if the given unwind plan indicates a signal trap handler, and
+  /// update frame type and symbol context if so.
+  void PropagateTrapHandlerFlagFromUnwindPlan(lldb::UnwindPlanSP unwind_plan);
 
   // Provide a location for where THIS function saved the CALLER's register
   // value
@@ -155,7 +156,6 @@ private:
       const lldb_private::RegisterInfo *reg_info,
       const lldb_private::RegisterValue &value);
 
-  //------------------------------------------------------------------
   /// If the unwind has to the caller frame has failed, try something else
   ///
   /// If lldb is using an assembly language based UnwindPlan for a frame and
@@ -164,12 +164,10 @@ private:
   /// better.  This is mostly helping to work around problems where the
   /// assembly language inspection fails on hand-written assembly code.
   ///
-  /// @return
+  /// \return
   ///     Returns true if a fallback unwindplan was found & was installed.
-  //------------------------------------------------------------------
   bool TryFallbackUnwindPlan();
 
-  //------------------------------------------------------------------
   /// Switch to the fallback unwind plan unconditionally without any safety
   /// checks that it is providing better results than the normal unwind plan.
   ///
@@ -177,7 +175,6 @@ private:
   /// found to be fundamentally incorrect/impossible.
   ///
   /// Returns true if it was able to install the fallback unwind plan.
-  //------------------------------------------------------------------
   bool ForceSwitchToFallbackUnwindPlan();
 
   // Get the contents of a general purpose (address-size) register for this
@@ -203,6 +200,8 @@ private:
 
   bool IsUnwindPlanValidForCurrentPC(lldb::UnwindPlanSP unwind_plan_sp,
                                      int &valid_pc_offset);
+
+  lldb::addr_t GetReturnAddressHint(int32_t plan_offset);
 
   lldb_private::Thread &m_thread;
 
@@ -250,9 +249,7 @@ private:
   lldb_private::UnwindLLDB &m_parent_unwind; // The UnwindLLDB that is creating
                                              // this RegisterContextLLDB
 
-  //------------------------------------------------------------------
   // For RegisterContextLLDB only
-  //------------------------------------------------------------------
 
   DISALLOW_COPY_AND_ASSIGN(RegisterContextLLDB);
 };

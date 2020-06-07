@@ -1,10 +1,9 @@
 // -*- C++ -*-
 //===--------------------- support/win32/locale_win32.h -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -174,7 +173,8 @@ isupper_l(int c, _locale_t loc)
 #define towupper_l _towupper_l
 #define towlower_l _towlower_l
 #if defined(__MINGW32__) && __MSVCRT_VERSION__ < 0x0800
-#define strftime_l( __s, __l, __f, __tm, __loc ) strftime( __s, __l, __f, __tm )
+_LIBCPP_FUNC_VIS size_t strftime_l(char *ret, size_t n, const char *format,
+                                   const struct tm *tm, locale_t loc);
 #else
 #define strftime_l _strftime_l
 #endif

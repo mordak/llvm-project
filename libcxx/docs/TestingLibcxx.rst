@@ -8,11 +8,14 @@ Testing libc++
 Getting Started
 ===============
 
-libc++ uses LIT to configure and run its tests. The primary way to run the
-libc++ tests is by using make check-libcxx. However since libc++ can be used
-in any number of possible configurations it is important to customize the way
-LIT builds and runs the tests. This guide provides information on how to use
-LIT directly to test libc++.
+libc++ uses LIT to configure and run its tests. 
+
+The primary way to run the libc++ tests is by using `make check-libcxx`. 
+
+However since libc++ can be used in any number of possible
+configurations it is important to customize the way LIT builds and runs
+the tests. This guide provides information on how to use LIT directly to
+test libc++.
 
 Please see the `Lit Command Guide`_ for more information about LIT.
 
@@ -182,6 +185,14 @@ configuration. Passing the option on the command line will override the default.
   Enable the use of colorized compile diagnostics. If the color_diagnostics
   option is specified or the environment variable LIBCXX_COLOR_DIAGNOSTICS is
   present then color diagnostics will be enabled.
+
+.. option:: llvm_unwinder
+
+  Enable the use of LLVM unwinder instead of libgcc.
+
+.. option:: builtins_library
+
+  Path to the builtins library to use instead of libgcc.
 
 
 Environment Variables

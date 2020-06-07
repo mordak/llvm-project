@@ -1,9 +1,8 @@
 //===--- MakeSmartPtrCheck.cpp - clang-tidy--------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -66,11 +65,13 @@ bool MakeSmartPtrCheck::isLanguageVersionSupported(
   return LangOpts.CPlusPlus11;
 }
 
-void MakeSmartPtrCheck::registerPPCallbacks(CompilerInstance &Compiler) {
+void MakeSmartPtrCheck::registerPPCallbacks(const SourceManager &SM,
+                                            Preprocessor *PP,
+                                            Preprocessor *ModuleExpanderPP) {
   if (isLanguageVersionSupported(getLangOpts())) {
-    Inserter = llvm::make_unique<utils::IncludeInserter>(
-        Compiler.getSourceManager(), Compiler.getLangOpts(), IncludeStyle);
-    Compiler.getPreprocessor().addPPCallbacks(Inserter->CreatePPCallbacks());
+    Inserter = std::make_unique<utils::IncludeInserter>(SM, getLangOpts(),
+                                                         IncludeStyle);
+    PP->addPPCallbacks(Inserter->CreatePPCallbacks());
   }
 }
 
@@ -127,7 +128,7 @@ void MakeSmartPtrCheck::check(const MatchFinder::MatchResult &Result) {
   // Be conservative for cases where we construct an array without any
   // initalization.
   // For example,
-  //    P.reset(new int[5]) // check fix: P = make_unique<int []>(5)
+  //    P.reset(new int[5]) // check fix: P = std::make_unique<int []>(5)
   //
   // The fix of the check has side effect, it introduces default initialization
   // which maybe unexpected and cause performance regression.
@@ -277,7 +278,7 @@ bool MakeSmartPtrCheck::replaceNew(DiagnosticBuilder &Diag,
     return false;
 
   std::string ArraySizeExpr;
-  if (const auto* ArraySize = New->getArraySize()) {
+  if (const auto* ArraySize = New->getArraySize().getValueOr(nullptr)) {
     ArraySizeExpr = Lexer::getSourceText(CharSourceRange::getTokenRange(
                                              ArraySize->getSourceRange()),
                                          SM, getLangOpts())
@@ -291,16 +292,26 @@ bool MakeSmartPtrCheck::replaceNew(DiagnosticBuilder &Diag,
   //   Foo{1} => false
   auto HasListIntializedArgument = [](const CXXConstructExpr *CE) {
     for (const auto *Arg : CE->arguments()) {
+      Arg = Arg->IgnoreImplicit();
+
       if (isa<CXXStdInitializerListExpr>(Arg) || isa<InitListExpr>(Arg))
         return true;
       // Check whether we implicitly construct a class from a
       // std::initializer_list.
-      if (const auto *ImplicitCE =
-              dyn_cast<CXXConstructExpr>(Arg->IgnoreImplicit())) {
-        if (ImplicitCE->isStdInitListInitialization())
+      if (const auto *CEArg = dyn_cast<CXXConstructExpr>(Arg)) {
+        // Strip the elidable move constructor, it is present in the AST for
+        // C++11/14, e.g. Foo(Bar{1, 2}), the move constructor is around the
+        // init-list constructor.
+        if (CEArg->isElidable()) {
+          if (const auto *TempExp = CEArg->getArg(0)) {
+            if (const auto *UnwrappedCE =
+                    dyn_cast<CXXConstructExpr>(TempExp->IgnoreImplicit()))
+              CEArg = UnwrappedCE;
+          }
+        }
+        if (CEArg->isStdInitListInitialization())
           return true;
       }
-      return false;
     }
     return false;
   };
@@ -365,7 +376,7 @@ bool MakeSmartPtrCheck::replaceNew(DiagnosticBuilder &Diag,
         //   struct S { S(std::initializer_list<int>); };
         //   struct S2 { S2(S, int); };
         //   smart_ptr<S>(new S{1, 2, 3});  // C++11 direct list-initialization
-        //   smart_ptr<S>(new S{});  // use initializer-list consturctor
+        //   smart_ptr<S>(new S{});  // use initializer-list constructor
         //   smart_ptr<S2>()new S2{ {1,2}, 3 }; // have a list-initialized arg
         // The above cases have to be replaced with:
         //   std::make_smart_ptr<S>(std::initializer_list<int>({1, 2, 3}));

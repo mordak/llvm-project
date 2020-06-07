@@ -1,9 +1,8 @@
 //===--- tools/extra/clang-tidy/ClangTidyMain.cpp - Clang tidy tool -------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -17,7 +16,9 @@
 
 #include "../ClangTidy.h"
 #include "../ClangTidyForceLinker.h"
+#include "../GlobList.h"
 #include "clang/Tooling/CommonOptionsParser.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetSelect.h"
@@ -85,8 +86,8 @@ headers to output diagnostics from. Diagnostics
 from the main file of each translation unit are
 always displayed.
 Can be used together with -line-filter.
-This option overrides the 'HeaderFilter' option
-in .clang-tidy file, if any.
+This option overrides the 'HeaderFilterRegex'
+option in .clang-tidy file, if any.
 )"),
                                          cl::init(""),
                                          cl::cat(ClangTidyCategory));
@@ -290,7 +291,7 @@ static std::unique_ptr<ClangTidyOptionsProvider> createOptionsProvider(
   if (!Config.empty()) {
     if (llvm::ErrorOr<ClangTidyOptions> ParsedConfig =
             parseConfiguration(Config)) {
-      return llvm::make_unique<ConfigOptionsProvider>(
+      return std::make_unique<ConfigOptionsProvider>(
           GlobalOptions,
           ClangTidyOptions::getDefaults().mergeWith(DefaultOptions),
           *ParsedConfig, OverrideOptions);
@@ -300,16 +301,15 @@ static std::unique_ptr<ClangTidyOptionsProvider> createOptionsProvider(
       return nullptr;
     }
   }
-  return llvm::make_unique<FileOptionsProvider>(GlobalOptions, DefaultOptions,
+  return std::make_unique<FileOptionsProvider>(GlobalOptions, DefaultOptions,
                                                 OverrideOptions, std::move(FS));
 }
 
 llvm::IntrusiveRefCntPtr<vfs::FileSystem>
-getVfsOverlayFromFile(const std::string &OverlayFile) {
-  llvm::IntrusiveRefCntPtr<vfs::OverlayFileSystem> OverlayFS(
-      new vfs::OverlayFileSystem(vfs::getRealFileSystem()));
+getVfsFromFile(const std::string &OverlayFile,
+               llvm::IntrusiveRefCntPtr<vfs::FileSystem> BaseFS) {
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> Buffer =
-      OverlayFS->getBufferForFile(OverlayFile);
+      BaseFS->getBufferForFile(OverlayFile);
   if (!Buffer) {
     llvm::errs() << "Can't load virtual filesystem overlay file '"
                  << OverlayFile << "': " << Buffer.getError().message()
@@ -324,19 +324,23 @@ getVfsOverlayFromFile(const std::string &OverlayFile) {
                  << OverlayFile << "'.\n";
     return nullptr;
   }
-  OverlayFS->pushOverlay(FS);
-  return OverlayFS;
+  return FS;
 }
 
 static int clangTidyMain(int argc, const char **argv) {
-  llvm::sys::PrintStackTraceOnErrorSignal(argv[0]);
+  llvm::InitLLVM X(argc, argv);
   CommonOptionsParser OptionsParser(argc, argv, ClangTidyCategory,
                                     cl::ZeroOrMore);
-  llvm::IntrusiveRefCntPtr<vfs::FileSystem> BaseFS(
-      VfsOverlay.empty() ? vfs::getRealFileSystem()
-                         : getVfsOverlayFromFile(VfsOverlay));
-  if (!BaseFS)
-    return 1;
+  llvm::IntrusiveRefCntPtr<vfs::OverlayFileSystem> BaseFS(
+      new vfs::OverlayFileSystem(vfs::getRealFileSystem()));
+
+  if (!VfsOverlay.empty()) {
+    IntrusiveRefCntPtr<vfs::FileSystem> VfsFromFile =
+        getVfsFromFile(VfsOverlay, BaseFS);
+    if (!VfsFromFile)
+      return 1;
+    BaseFS->pushOverlay(VfsFromFile);
+  }
 
   auto OwningOptionsProvider = createOptionsProvider(BaseFS);
   auto *OptionsProvider = OwningOptionsProvider.get();
@@ -441,7 +445,7 @@ static int clangTidyMain(int argc, const char **argv) {
 
   if (!ExportFixes.empty() && !Errors.empty()) {
     std::error_code EC;
-    llvm::raw_fd_ostream OS(ExportFixes, EC, llvm::sys::fs::F_None);
+    llvm::raw_fd_ostream OS(ExportFixes, EC, llvm::sys::fs::OF_None);
     if (EC) {
       llvm::errs() << "Error opening output file: " << EC.message() << '\n';
       return 1;

@@ -1,9 +1,8 @@
 //===---------- private.h - Target independent OpenMP target RTL ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.txt for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -42,8 +41,26 @@ enum kmp_target_offload_kind {
 typedef enum kmp_target_offload_kind kmp_target_offload_kind_t;
 extern kmp_target_offload_kind_t TargetOffloadPolicy;
 
+// This structure stores information of a mapped memory region.
+struct MapComponentInfoTy {
+  void *Base;
+  void *Begin;
+  int64_t Size;
+  int64_t Type;
+  MapComponentInfoTy() = default;
+  MapComponentInfoTy(void *Base, void *Begin, int64_t Size, int64_t Type)
+      : Base(Base), Begin(Begin), Size(Size), Type(Type) {}
+};
+
+// This structure stores all components of a user-defined mapper. The number of
+// components are dynamically decided, so we utilize C++ STL vector
+// implementation here.
+struct MapperComponentsTy {
+  std::vector<MapComponentInfoTy> Components;
+};
+
 ////////////////////////////////////////////////////////////////////////////////
-// implemtation for fatal messages
+// implementation for fatal messages
 ////////////////////////////////////////////////////////////////////////////////
 
 #define FATAL_MESSAGE0(_num, _str)                                    \
@@ -66,6 +83,7 @@ extern "C" {
 // functions that extract info from libomp; keep in sync
 int omp_get_default_device(void) __attribute__((weak));
 int32_t __kmpc_omp_taskwait(void *loc_ref, int32_t gtid) __attribute__((weak));
+int32_t __kmpc_global_thread_num(void *) __attribute__((weak));
 int __kmpc_get_target_offload(void) __attribute__((weak));
 #ifdef __cplusplus
 }

@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
@@ -37,7 +36,7 @@ void test()
     auto is4 = [](auto v) { return v == 4;};
     auto True  = [](auto) { return true; };
     auto False = [](auto) { return false; };
-    
+
     test0(S(), is1, S());
 
     test0(S({1}), is1, S());
@@ -56,7 +55,7 @@ void test()
     test0(S({1,2,3}), False, S({1,2,3}));
 }
 
-int main()
+int main(int, char**)
 {
     test<std::set<int>>();
     test<std::set<int, std::less<int>, min_allocator<int>>> ();
@@ -64,4 +63,6 @@ int main()
 
     test<std::set<long>>();
     test<std::set<double>>();
+
+  return 0;
 }

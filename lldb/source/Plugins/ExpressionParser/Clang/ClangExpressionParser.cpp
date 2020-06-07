@@ -1,19 +1,17 @@
 //===-- ClangExpressionParser.cpp -------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
-#include <cctype>
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTDiagnostic.h"
 #include "clang/AST/ExternalASTSource.h"
 #include "clang/AST/PrettyPrinter.h"
+#include "clang/Basic/Builtins.h"
 #include "clang/Basic/DiagnosticIDs.h"
-#include "clang/Basic/FileManager.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/Version.h"
@@ -39,14 +37,10 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
+#include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/TargetSelect.h"
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wglobal-constructors"
-#include "llvm/ExecutionEngine/MCJIT.h"
-#pragma clang diagnostic pop
 
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -58,19 +52,25 @@
 
 #include "ClangDiagnostic.h"
 #include "ClangExpressionParser.h"
+#include "ClangUserExpression.h"
 
+#include "ASTUtils.h"
 #include "ClangASTSource.h"
+#include "ClangDiagnostic.h"
 #include "ClangExpressionDeclMap.h"
 #include "ClangExpressionHelper.h"
+#include "ClangExpressionParser.h"
+#include "ClangHost.h"
 #include "ClangModulesDeclVendor.h"
 #include "ClangPersistentVariables.h"
+#include "IRDynamicChecks.h"
 #include "IRForTarget.h"
+#include "ModuleDependencyCollector.h"
 
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Disassembler.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/StreamFile.h"
-#include "lldb/Expression/IRDynamicChecks.h"
 #include "lldb/Expression/IRExecutionUnit.h"
 #include "lldb/Expression/IRInterpreter.h"
 #include "lldb/Host/File.h"
@@ -79,16 +79,21 @@
 #include "lldb/Symbol/SymbolVendor.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Language.h"
-#include "lldb/Target/ObjCLanguageRuntime.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/ThreadPlanCallFunction.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/LLDBAssert.h"
 #include "lldb/Utility/Log.h"
+#include "lldb/Utility/Reproducer.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/StringList.h"
+
+#include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
+
+#include <cctype>
+#include <memory>
 
 using namespace clang;
 using namespace llvm;
@@ -101,34 +106,39 @@ using namespace lldb_private;
 class ClangExpressionParser::LLDBPreprocessorCallbacks : public PPCallbacks {
   ClangModulesDeclVendor &m_decl_vendor;
   ClangPersistentVariables &m_persistent_vars;
+  clang::SourceManager &m_source_mgr;
   StreamString m_error_stream;
   bool m_has_errors = false;
 
 public:
   LLDBPreprocessorCallbacks(ClangModulesDeclVendor &decl_vendor,
-                            ClangPersistentVariables &persistent_vars)
-      : m_decl_vendor(decl_vendor), m_persistent_vars(persistent_vars) {}
+                            ClangPersistentVariables &persistent_vars,
+                            clang::SourceManager &source_mgr)
+      : m_decl_vendor(decl_vendor), m_persistent_vars(persistent_vars),
+        m_source_mgr(source_mgr) {}
 
   void moduleImport(SourceLocation import_location, clang::ModuleIdPath path,
                     const clang::Module * /*null*/) override {
-    std::vector<ConstString> string_path;
+    // Ignore modules that are imported in the wrapper code as these are not
+    // loaded by the user.
+    llvm::StringRef filename =
+        m_source_mgr.getPresumedLoc(import_location).getFilename();
+    if (filename == ClangExpressionSourceCode::g_prefix_file_name)
+      return;
 
-    for (const std::pair<IdentifierInfo *, SourceLocation> &component : path) {
-      string_path.push_back(ConstString(component.first->getName()));
-    }
+    SourceModule module;
+
+    for (const std::pair<IdentifierInfo *, SourceLocation> &component : path)
+      module.path.push_back(ConstString(component.first->getName()));
 
     StreamString error_stream;
 
     ClangModulesDeclVendor::ModuleVector exported_modules;
-
-    if (!m_decl_vendor.AddModule(string_path, &exported_modules,
-                                 m_error_stream)) {
+    if (!m_decl_vendor.AddModule(module, &exported_modules, m_error_stream))
       m_has_errors = true;
-    }
 
-    for (ClangModulesDeclVendor::ModuleID module : exported_modules) {
+    for (ClangModulesDeclVendor::ModuleID module : exported_modules)
       m_persistent_vars.AddHandLoadedClangModule(module);
-    }
   }
 
   bool hasErrors() { return m_has_errors; }
@@ -138,91 +148,133 @@ public:
 
 class ClangDiagnosticManagerAdapter : public clang::DiagnosticConsumer {
 public:
-  ClangDiagnosticManagerAdapter()
-      : m_passthrough(new clang::TextDiagnosticBuffer) {}
-
-  ClangDiagnosticManagerAdapter(
-      const std::shared_ptr<clang::TextDiagnosticBuffer> &passthrough)
-      : m_passthrough(passthrough) {}
+  ClangDiagnosticManagerAdapter(DiagnosticOptions &opts) {
+    DiagnosticOptions *m_options = new DiagnosticOptions(opts);
+    m_options->ShowPresumedLoc = true;
+    m_options->ShowLevel = false;
+    m_os.reset(new llvm::raw_string_ostream(m_output));
+    m_passthrough.reset(
+        new clang::TextDiagnosticPrinter(*m_os, m_options, false));
+  }
 
   void ResetManager(DiagnosticManager *manager = nullptr) {
     m_manager = manager;
   }
 
   void HandleDiagnostic(DiagnosticsEngine::Level DiagLevel,
-                        const clang::Diagnostic &Info) {
-    if (m_manager) {
-      llvm::SmallVector<char, 32> diag_str;
-      Info.FormatDiagnostic(diag_str);
-      diag_str.push_back('\0');
-      const char *data = diag_str.data();
-
-      lldb_private::DiagnosticSeverity severity;
-      bool make_new_diagnostic = true;
-
-      switch (DiagLevel) {
-      case DiagnosticsEngine::Level::Fatal:
-      case DiagnosticsEngine::Level::Error:
-        severity = eDiagnosticSeverityError;
-        break;
-      case DiagnosticsEngine::Level::Warning:
-        severity = eDiagnosticSeverityWarning;
-        break;
-      case DiagnosticsEngine::Level::Remark:
-      case DiagnosticsEngine::Level::Ignored:
-        severity = eDiagnosticSeverityRemark;
-        break;
-      case DiagnosticsEngine::Level::Note:
-        m_manager->AppendMessageToDiagnostic(data);
-        make_new_diagnostic = false;
+                        const clang::Diagnostic &Info) override {
+    if (!m_manager) {
+      // We have no DiagnosticManager before/after parsing but we still could
+      // receive diagnostics (e.g., by the ASTImporter failing to copy decls
+      // when we move the expression result ot the ScratchASTContext). Let's at
+      // least log these diagnostics until we find a way to properly render
+      // them and display them to the user.
+      Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+      if (log) {
+        llvm::SmallVector<char, 32> diag_str;
+        Info.FormatDiagnostic(diag_str);
+        diag_str.push_back('\0');
+        const char *plain_diag = diag_str.data();
+        LLDB_LOG(log, "Received diagnostic outside parsing: {0}", plain_diag);
       }
-      if (make_new_diagnostic) {
-        ClangDiagnostic *new_diagnostic =
-            new ClangDiagnostic(data, severity, Info.getID());
-        m_manager->AddDiagnostic(new_diagnostic);
-
-        // Don't store away warning fixits, since the compiler doesn't have
-        // enough context in an expression for the warning to be useful.
-        // FIXME: Should we try to filter out FixIts that apply to our generated
-        // code, and not the user's expression?
-        if (severity == eDiagnosticSeverityError) {
-          size_t num_fixit_hints = Info.getNumFixItHints();
-          for (size_t i = 0; i < num_fixit_hints; i++) {
-            const clang::FixItHint &fixit = Info.getFixItHint(i);
-            if (!fixit.isNull())
-              new_diagnostic->AddFixitHint(fixit);
-          }
-        }
-      }
+      return;
     }
 
+    // Render diagnostic message to m_output.
+    m_output.clear();
     m_passthrough->HandleDiagnostic(DiagLevel, Info);
+    m_os->flush();
+
+    lldb_private::DiagnosticSeverity severity;
+    bool make_new_diagnostic = true;
+
+    switch (DiagLevel) {
+    case DiagnosticsEngine::Level::Fatal:
+    case DiagnosticsEngine::Level::Error:
+      severity = eDiagnosticSeverityError;
+      break;
+    case DiagnosticsEngine::Level::Warning:
+      severity = eDiagnosticSeverityWarning;
+      break;
+    case DiagnosticsEngine::Level::Remark:
+    case DiagnosticsEngine::Level::Ignored:
+      severity = eDiagnosticSeverityRemark;
+      break;
+    case DiagnosticsEngine::Level::Note:
+      m_manager->AppendMessageToDiagnostic(m_output);
+      make_new_diagnostic = false;
+    }
+    if (make_new_diagnostic) {
+      // ClangDiagnostic messages are expected to have no whitespace/newlines
+      // around them.
+      std::string stripped_output = llvm::StringRef(m_output).trim();
+
+      auto new_diagnostic = std::make_unique<ClangDiagnostic>(
+          stripped_output, severity, Info.getID());
+
+      // Don't store away warning fixits, since the compiler doesn't have
+      // enough context in an expression for the warning to be useful.
+      // FIXME: Should we try to filter out FixIts that apply to our generated
+      // code, and not the user's expression?
+      if (severity == eDiagnosticSeverityError) {
+        size_t num_fixit_hints = Info.getNumFixItHints();
+        for (size_t i = 0; i < num_fixit_hints; i++) {
+          const clang::FixItHint &fixit = Info.getFixItHint(i);
+          if (!fixit.isNull())
+            new_diagnostic->AddFixitHint(fixit);
+        }
+      }
+
+      m_manager->AddDiagnostic(std::move(new_diagnostic));
+    }
   }
 
-  void FlushDiagnostics(DiagnosticsEngine &Diags) {
-    m_passthrough->FlushDiagnostics(Diags);
-  }
-
-  DiagnosticConsumer *clone(DiagnosticsEngine &Diags) const {
-    return new ClangDiagnosticManagerAdapter(m_passthrough);
-  }
-
-  clang::TextDiagnosticBuffer *GetPassthrough() { return m_passthrough.get(); }
+  clang::TextDiagnosticPrinter *GetPassthrough() { return m_passthrough.get(); }
 
 private:
   DiagnosticManager *m_manager = nullptr;
-  std::shared_ptr<clang::TextDiagnosticBuffer> m_passthrough;
+  std::shared_ptr<clang::TextDiagnosticPrinter> m_passthrough;
+  /// Output stream of m_passthrough.
+  std::shared_ptr<llvm::raw_string_ostream> m_os;
+  /// Output string filled by m_os.
+  std::string m_output;
 };
+
+static void SetupModuleHeaderPaths(CompilerInstance *compiler,
+                                   std::vector<std::string> include_directories,
+                                   lldb::TargetSP target_sp) {
+  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+
+  HeaderSearchOptions &search_opts = compiler->getHeaderSearchOpts();
+
+  for (const std::string &dir : include_directories) {
+    search_opts.AddPath(dir, frontend::System, false, true);
+    LLDB_LOG(log, "Added user include dir: {0}", dir);
+  }
+
+  llvm::SmallString<128> module_cache;
+  auto props = ModuleList::GetGlobalModuleListProperties();
+  props.GetClangModulesCachePath().GetPath(module_cache);
+  search_opts.ModuleCachePath = module_cache.str();
+  LLDB_LOG(log, "Using module cache path: {0}", module_cache.c_str());
+
+  search_opts.ResourceDir = GetClangResourceDir().GetPath();
+
+  search_opts.ImplicitModuleMaps = true;
+}
 
 //===----------------------------------------------------------------------===//
 // Implementation of ClangExpressionParser
 //===----------------------------------------------------------------------===//
 
-ClangExpressionParser::ClangExpressionParser(ExecutionContextScope *exe_scope,
-                                             Expression &expr,
-                                             bool generate_debug_info)
+ClangExpressionParser::ClangExpressionParser(
+    ExecutionContextScope *exe_scope, Expression &expr,
+    bool generate_debug_info, std::vector<std::string> include_directories,
+    std::string filename)
     : ExpressionParser(exe_scope, expr, generate_debug_info), m_compiler(),
-      m_pp_callbacks(nullptr) {
+      m_pp_callbacks(nullptr),
+      m_include_directories(std::move(include_directories)),
+      m_filename(std::move(filename)) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
 
   // We can't compile expressions without a target.  So if the exe_scope is
@@ -249,6 +301,22 @@ ClangExpressionParser::ClangExpressionParser(ExecutionContextScope *exe_scope,
 
   // 1. Create a new compiler instance.
   m_compiler.reset(new CompilerInstance());
+
+  // When capturing a reproducer, hook up the file collector with clang to
+  // collector modules and headers.
+  if (repro::Generator *g = repro::Reproducer::Instance().GetGenerator()) {
+    repro::FileProvider &fp = g->GetOrCreate<repro::FileProvider>();
+    m_compiler->setModuleDepCollector(
+        std::make_shared<ModuleDependencyCollectorAdaptor>(
+            fp.GetFileCollector()));
+    DependencyOutputOptions &opts = m_compiler->getDependencyOutputOpts();
+    opts.IncludeSystemHeaders = true;
+    opts.IncludeModuleFiles = true;
+  }
+
+  // Make sure clang uses the same VFS as LLDB.
+  m_compiler->createFileManager(FileSystem::Instance().GetVirtualFileSystem());
+
   lldb::LanguageType frame_lang =
       expr.Language(); // defaults to lldb::eLanguageTypeUnknown
   bool overridden_target_opts = false;
@@ -273,9 +341,8 @@ ClangExpressionParser::ClangExpressionParser(ExecutionContextScope *exe_scope,
 
   if (process_sp && frame_lang != lldb::eLanguageTypeUnknown) {
     lang_rt = process_sp->GetLanguageRuntime(frame_lang);
-    if (log)
-      log->Printf("Frame has language of type %s",
-                  Language::GetNameForLanguageType(frame_lang));
+    LLDB_LOGF(log, "Frame has language of type %s",
+              Language::GetNameForLanguageType(frame_lang));
   }
 
   // 2. Configure the compiler with a set of default options that are
@@ -283,9 +350,8 @@ ClangExpressionParser::ClangExpressionParser(ExecutionContextScope *exe_scope,
   if (target_arch.IsValid()) {
     std::string triple = target_arch.GetTriple().str();
     m_compiler->getTargetOpts().Triple = triple;
-    if (log)
-      log->Printf("Using %s as the target triple",
-                  m_compiler->getTargetOpts().Triple.c_str());
+    LLDB_LOGF(log, "Using %s as the target triple",
+              m_compiler->getTargetOpts().Triple.c_str());
   } else {
     // If we get here we don't have a valid target and just have to guess.
     // Sometimes this will be ok to just use the host target triple (when we
@@ -294,9 +360,8 @@ ClangExpressionParser::ClangExpressionParser(ExecutionContextScope *exe_scope,
     // the host triple. In such a case the language runtime should expose an
     // overridden options set (3), below.
     m_compiler->getTargetOpts().Triple = llvm::sys::getDefaultTargetTriple();
-    if (log)
-      log->Printf("Using default target triple of %s",
-                  m_compiler->getTargetOpts().Triple.c_str());
+    LLDB_LOGF(log, "Using default target triple of %s",
+              m_compiler->getTargetOpts().Triple.c_str());
   }
   // Now add some special fixes for known architectures: Any arm32 iOS
   // environment, but not on arm64
@@ -350,12 +415,13 @@ ClangExpressionParser::ClangExpressionParser(ExecutionContextScope *exe_scope,
   auto target_info = TargetInfo::CreateTargetInfo(
       m_compiler->getDiagnostics(), m_compiler->getInvocation().TargetOpts);
   if (log) {
-    log->Printf("Using SIMD alignment: %d", target_info->getSimdDefaultAlign());
-    log->Printf("Target datalayout string: '%s'",
-                target_info->getDataLayout().getStringRepresentation().c_str());
-    log->Printf("Target ABI: '%s'", target_info->getABI().str().c_str());
-    log->Printf("Target vector alignment: %d",
-                target_info->getMaxVectorAlign());
+    LLDB_LOGF(log, "Using SIMD alignment: %d",
+              target_info->getSimdDefaultAlign());
+    LLDB_LOGF(log, "Target datalayout string: '%s'",
+              target_info->getDataLayout().getStringRepresentation().c_str());
+    LLDB_LOGF(log, "Target ABI: '%s'", target_info->getABI().str().c_str());
+    LLDB_LOGF(log, "Target vector alignment: %d",
+              target_info->getMaxVectorAlign());
   }
   m_compiler->setTarget(target_info);
 
@@ -363,6 +429,7 @@ ClangExpressionParser::ClangExpressionParser(ExecutionContextScope *exe_scope,
 
   // 5. Set language options.
   lldb::LanguageType language = expr.Language();
+  LangOptions &lang_opts = m_compiler->getLangOpts();
 
   switch (language) {
   case lldb::eLanguageTypeC:
@@ -374,13 +441,13 @@ ClangExpressionParser::ClangExpressionParser(ExecutionContextScope *exe_scope,
     // For now, the expression parser must use C++ anytime the language is a C
     // family language, because the expression parser uses features of C++ to
     // capture values.
-    m_compiler->getLangOpts().CPlusPlus = true;
+    lang_opts.CPlusPlus = true;
     break;
   case lldb::eLanguageTypeObjC:
-    m_compiler->getLangOpts().ObjC = true;
+    lang_opts.ObjC = true;
     // FIXME: the following language option is a temporary workaround,
     // to "ask for ObjC, get ObjC++" (see comment above).
-    m_compiler->getLangOpts().CPlusPlus = true;
+    lang_opts.CPlusPlus = true;
 
     // Clang now sets as default C++14 as the default standard (with
     // GNU extensions), so we do the same here to avoid mismatches that
@@ -388,77 +455,101 @@ ClangExpressionParser::ClangExpressionParser(ExecutionContextScope *exe_scope,
     // as it's a C++11 feature). Currently lldb evaluates C++14 as C++11 (see
     // two lines below) so we decide to be consistent with that, but this could
     // be re-evaluated in the future.
-    m_compiler->getLangOpts().CPlusPlus11 = true;
+    lang_opts.CPlusPlus11 = true;
     break;
   case lldb::eLanguageTypeC_plus_plus:
   case lldb::eLanguageTypeC_plus_plus_11:
   case lldb::eLanguageTypeC_plus_plus_14:
-    m_compiler->getLangOpts().CPlusPlus11 = true;
+    lang_opts.CPlusPlus11 = true;
     m_compiler->getHeaderSearchOpts().UseLibcxx = true;
     LLVM_FALLTHROUGH;
   case lldb::eLanguageTypeC_plus_plus_03:
-    m_compiler->getLangOpts().CPlusPlus = true;
+    lang_opts.CPlusPlus = true;
     if (process_sp)
-      m_compiler->getLangOpts().ObjC =
+      lang_opts.ObjC =
           process_sp->GetLanguageRuntime(lldb::eLanguageTypeObjC) != nullptr;
     break;
   case lldb::eLanguageTypeObjC_plus_plus:
   case lldb::eLanguageTypeUnknown:
   default:
-    m_compiler->getLangOpts().ObjC = true;
-    m_compiler->getLangOpts().CPlusPlus = true;
-    m_compiler->getLangOpts().CPlusPlus11 = true;
+    lang_opts.ObjC = true;
+    lang_opts.CPlusPlus = true;
+    lang_opts.CPlusPlus11 = true;
     m_compiler->getHeaderSearchOpts().UseLibcxx = true;
     break;
   }
 
-  m_compiler->getLangOpts().Bool = true;
-  m_compiler->getLangOpts().WChar = true;
-  m_compiler->getLangOpts().Blocks = true;
-  m_compiler->getLangOpts().DebuggerSupport =
+  lang_opts.Bool = true;
+  lang_opts.WChar = true;
+  lang_opts.Blocks = true;
+  lang_opts.DebuggerSupport =
       true; // Features specifically for debugger clients
   if (expr.DesiredResultType() == Expression::eResultTypeId)
-    m_compiler->getLangOpts().DebuggerCastResultToId = true;
+    lang_opts.DebuggerCastResultToId = true;
 
-  m_compiler->getLangOpts().CharIsSigned =
-      ArchSpec(m_compiler->getTargetOpts().Triple.c_str())
-          .CharIsSignedByDefault();
+  lang_opts.CharIsSigned = ArchSpec(m_compiler->getTargetOpts().Triple.c_str())
+                               .CharIsSignedByDefault();
 
   // Spell checking is a nice feature, but it ends up completing a lot of types
   // that we didn't strictly speaking need to complete. As a result, we spend a
   // long time parsing and importing debug information.
-  m_compiler->getLangOpts().SpellChecking = false;
+  lang_opts.SpellChecking = false;
 
-  if (process_sp && m_compiler->getLangOpts().ObjC) {
-    if (process_sp->GetObjCLanguageRuntime()) {
-      if (process_sp->GetObjCLanguageRuntime()->GetRuntimeVersion() ==
+  auto *clang_expr = dyn_cast<ClangUserExpression>(&m_expr);
+  if (clang_expr && clang_expr->DidImportCxxModules()) {
+    LLDB_LOG(log, "Adding lang options for importing C++ modules");
+
+    lang_opts.Modules = true;
+    // We want to implicitly build modules.
+    lang_opts.ImplicitModules = true;
+    // To automatically import all submodules when we import 'std'.
+    lang_opts.ModulesLocalVisibility = false;
+
+    // We use the @import statements, so we need this:
+    // FIXME: We could use the modules-ts, but that currently doesn't work.
+    lang_opts.ObjC = true;
+
+    // Options we need to parse libc++ code successfully.
+    // FIXME: We should ask the driver for the appropriate default flags.
+    lang_opts.GNUMode = true;
+    lang_opts.GNUKeywords = true;
+    lang_opts.DoubleSquareBracketAttributes = true;
+    lang_opts.CPlusPlus11 = true;
+
+    // The Darwin libc expects this macro to be set.
+    lang_opts.GNUCVersion = 40201;
+
+    SetupModuleHeaderPaths(m_compiler.get(), m_include_directories,
+                           target_sp);
+  }
+
+  if (process_sp && lang_opts.ObjC) {
+    if (auto *runtime = ObjCLanguageRuntime::Get(*process_sp)) {
+      if (runtime->GetRuntimeVersion() ==
           ObjCLanguageRuntime::ObjCRuntimeVersions::eAppleObjC_V2)
-        m_compiler->getLangOpts().ObjCRuntime.set(ObjCRuntime::MacOSX,
-                                                  VersionTuple(10, 7));
+        lang_opts.ObjCRuntime.set(ObjCRuntime::MacOSX, VersionTuple(10, 7));
       else
-        m_compiler->getLangOpts().ObjCRuntime.set(ObjCRuntime::FragileMacOSX,
-                                                  VersionTuple(10, 7));
+        lang_opts.ObjCRuntime.set(ObjCRuntime::FragileMacOSX,
+                                  VersionTuple(10, 7));
 
-      if (process_sp->GetObjCLanguageRuntime()->HasNewLiteralsAndIndexing())
-        m_compiler->getLangOpts().DebuggerObjCLiteral = true;
+      if (runtime->HasNewLiteralsAndIndexing())
+        lang_opts.DebuggerObjCLiteral = true;
     }
   }
 
-  m_compiler->getLangOpts().ThreadsafeStatics = false;
-  m_compiler->getLangOpts().AccessControl =
-      false; // Debuggers get universal access
-  m_compiler->getLangOpts().DollarIdents =
-      true; // $ indicates a persistent variable name
+  lang_opts.ThreadsafeStatics = false;
+  lang_opts.AccessControl = false; // Debuggers get universal access
+  lang_opts.DollarIdents = true;   // $ indicates a persistent variable name
   // We enable all builtin functions beside the builtins from libc/libm (e.g.
   // 'fopen'). Those libc functions are already correctly handled by LLDB, and
   // additionally enabling them as expandable builtins is breaking Clang.
-  m_compiler->getLangOpts().NoBuiltin = true;
+  lang_opts.NoBuiltin = true;
 
   // Set CodeGen options
   m_compiler->getCodeGenOpts().EmitDeclMetadata = true;
   m_compiler->getCodeGenOpts().InstrumentFunctions = false;
-  m_compiler->getCodeGenOpts().DisableFPElim = true;
-  m_compiler->getCodeGenOpts().OmitLeafFramePointer = false;
+  m_compiler->getCodeGenOpts().setFramePointer(
+                                    CodeGenOptions::FramePointerKind::All);
   if (generate_debug_info)
     m_compiler->getCodeGenOpts().setDebugInfo(codegenoptions::FullDebugInfo);
   else
@@ -480,30 +571,28 @@ ClangExpressionParser::ClangExpressionParser(ExecutionContextScope *exe_scope,
 
   // 6. Set up the diagnostic buffer for reporting errors
 
-  m_compiler->getDiagnostics().setClient(new ClangDiagnosticManagerAdapter);
+  auto diag_mgr = new ClangDiagnosticManagerAdapter(
+      m_compiler->getDiagnostics().getDiagnosticOptions());
+  m_compiler->getDiagnostics().setClient(diag_mgr);
 
   // 7. Set up the source management objects inside the compiler
-
-  clang::FileSystemOptions file_system_options;
-  m_file_manager.reset(new clang::FileManager(file_system_options));
-
-  if (!m_compiler->hasSourceManager())
-    m_compiler->createSourceManager(*m_file_manager.get());
-
   m_compiler->createFileManager();
+  if (!m_compiler->hasSourceManager())
+    m_compiler->createSourceManager(m_compiler->getFileManager());
   m_compiler->createPreprocessor(TU_Complete);
 
   if (ClangModulesDeclVendor *decl_vendor =
           target_sp->GetClangModulesDeclVendor()) {
-    ClangPersistentVariables *clang_persistent_vars =
-        llvm::cast<ClangPersistentVariables>(
+    if (auto *clang_persistent_vars = llvm::cast<ClangPersistentVariables>(
             target_sp->GetPersistentExpressionStateForLanguage(
-                lldb::eLanguageTypeC));
-    std::unique_ptr<PPCallbacks> pp_callbacks(
-        new LLDBPreprocessorCallbacks(*decl_vendor, *clang_persistent_vars));
-    m_pp_callbacks =
-        static_cast<LLDBPreprocessorCallbacks *>(pp_callbacks.get());
-    m_compiler->getPreprocessor().addPPCallbacks(std::move(pp_callbacks));
+                lldb::eLanguageTypeC))) {
+      std::unique_ptr<PPCallbacks> pp_callbacks(
+          new LLDBPreprocessorCallbacks(*decl_vendor, *clang_persistent_vars,
+                                        m_compiler->getSourceManager()));
+      m_pp_callbacks =
+          static_cast<LLDBPreprocessorCallbacks *>(pp_callbacks.get());
+      m_compiler->getPreprocessor().addPPCallbacks(std::move(pp_callbacks));
+    }
   }
 
   // 8. Most of this we get from the CompilerInstance, but we also want to give
@@ -517,20 +606,7 @@ ClangExpressionParser::ClangExpressionParser(ExecutionContextScope *exe_scope,
   m_compiler->createASTContext();
   clang::ASTContext &ast_context = m_compiler->getASTContext();
 
-  ClangExpressionHelper *type_system_helper =
-      dyn_cast<ClangExpressionHelper>(m_expr.GetTypeSystemHelper());
-  ClangExpressionDeclMap *decl_map = type_system_helper->DeclMap();
-
-  if (decl_map) {
-    llvm::IntrusiveRefCntPtr<clang::ExternalASTSource> ast_source(
-        decl_map->CreateProxy());
-    decl_map->InstallASTContext(ast_context, m_compiler->getFileManager());
-    ast_context.setExternalSource(ast_source);
-  }
-
-  m_ast_context.reset(
-      new ClangASTContext(m_compiler->getTargetOpts().Triple.c_str()));
-  m_ast_context->setASTContext(&ast_context);
+  m_ast_context.reset(new ClangASTContext(ast_context));
 
   std::string module_name("$__lldb_module");
 
@@ -545,13 +621,11 @@ ClangExpressionParser::~ClangExpressionParser() {}
 
 namespace {
 
-//----------------------------------------------------------------------
-/// @class CodeComplete
+/// \class CodeComplete
 ///
 /// A code completion consumer for the clang Sema that is responsible for
 /// creating the completion suggestions when a user requests completion
 /// of an incomplete `expr` invocation.
-//----------------------------------------------------------------------
 class CodeComplete : public CodeCompleteConsumer {
   CodeCompletionTUInfo m_info;
 
@@ -624,20 +698,17 @@ class CodeComplete : public CodeCompleteConsumer {
 
 public:
   /// Constructs a CodeComplete consumer that can be attached to a Sema.
-  /// @param[out] matches
-  ///    The list of matches that the lldb completion API expects as a result.
-  ///    This may already contain matches, so it's only allowed to append
-  ///    to this variable.
-  /// @param[out] expr
+  ///
+  /// \param[out] expr
   ///    The whole expression string that we are currently parsing. This
   ///    string needs to be equal to the input the user typed, and NOT the
   ///    final code that Clang is parsing.
-  /// @param[out] position
+  /// \param[out] position
   ///    The character position of the user cursor in the `expr` parameter.
   ///
   CodeComplete(CompletionRequest &request, clang::LangOptions ops,
                std::string expr, unsigned position)
-      : CodeCompleteConsumer(CodeCompleteOptions(), false),
+      : CodeCompleteConsumer(CodeCompleteOptions()),
         m_info(std::make_shared<GlobalCodeCompletionAllocator>()), m_expr(expr),
         m_position(position), m_request(request), m_desc_policy(ops) {
 
@@ -653,7 +724,7 @@ public:
   }
 
   /// Deregisters and destroys this code-completion consumer.
-  virtual ~CodeComplete() {}
+  ~CodeComplete() override {}
 
   /// \name Code-completion filtering
   /// Check if the result should be filtered out.
@@ -788,8 +859,8 @@ bool ClangExpressionParser::Complete(CompletionRequest &request, unsigned line,
   // To actually get the raw user input here, we have to cast our expression to
   // the LLVMUserExpression which exposes the right API. This should never fail
   // as we always have a ClangUserExpression whenever we call this.
-  LLVMUserExpression &llvm_expr = *static_cast<LLVMUserExpression *>(&m_expr);
-  CodeComplete CC(request, m_compiler->getLangOpts(), llvm_expr.GetUserText(),
+  ClangUserExpression *llvm_expr = cast<ClangUserExpression>(&m_expr);
+  CodeComplete CC(request, m_compiler->getLangOpts(), llvm_expr->GetUserText(),
                   typed_pos);
   // We don't need a code generator for parsing.
   m_code_generator.reset();
@@ -810,8 +881,7 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
   ClangDiagnosticManagerAdapter *adapter =
       static_cast<ClangDiagnosticManagerAdapter *>(
           m_compiler->getDiagnostics().getClient());
-  clang::TextDiagnosticBuffer *diag_buf = adapter->GetPassthrough();
-  diag_buf->FlushDiagnostics(m_compiler->getDiagnostics());
+  auto diag_buf = adapter->GetPassthrough();
 
   adapter->ResetManager(&diagnostic_manager);
 
@@ -842,16 +912,19 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
     }
 
     if (temp_fd != -1) {
-      lldb_private::File file(temp_fd, true);
+      lldb_private::NativeFile file(temp_fd, File::eOpenOptionWrite, true);
       const size_t expr_text_len = strlen(expr_text);
       size_t bytes_written = expr_text_len;
       if (file.Write(expr_text, bytes_written).Success()) {
         if (bytes_written == expr_text_len) {
           file.Close();
-          source_mgr.setMainFileID(
-              source_mgr.createFileID(m_file_manager->getFile(result_path),
-                                      SourceLocation(), SrcMgr::C_User));
-          created_main_file = true;
+          if (auto fileEntry =
+                  m_compiler->getFileManager().getFile(result_path)) {
+            source_mgr.setMainFileID(source_mgr.createFileID(
+                *fileEntry,
+                SourceLocation(), SrcMgr::C_User));
+            created_main_file = true;
+          }
         }
       }
     }
@@ -859,7 +932,7 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
 
   if (!created_main_file) {
     std::unique_ptr<MemoryBuffer> memory_buffer =
-        MemoryBuffer::getMemBufferCopy(expr_text, __FUNCTION__);
+        MemoryBuffer::getMemBufferCopy(expr_text, m_filename);
     source_mgr.setMainFileID(source_mgr.createFileID(std::move(memory_buffer)));
   }
 
@@ -868,12 +941,6 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
 
   ClangExpressionHelper *type_system_helper =
       dyn_cast<ClangExpressionHelper>(m_expr.GetTypeSystemHelper());
-
-  ASTConsumer *ast_transformer =
-      type_system_helper->ASTTransformer(m_code_generator.get());
-
-  if (ClangExpressionDeclMap *decl_map = type_system_helper->DeclMap())
-    decl_map->InstallCodeGenerator(m_code_generator.get());
 
   // If we want to parse for code completion, we need to attach our code
   // completion consumer to the Sema and specify a completion position.
@@ -889,17 +956,71 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
     PP.SetCodeCompletionPoint(main_file, completion_line, completion_column);
   }
 
+  ASTConsumer *ast_transformer =
+      type_system_helper->ASTTransformer(m_code_generator.get());
+
+  std::unique_ptr<clang::ASTConsumer> Consumer;
   if (ast_transformer) {
-    ast_transformer->Initialize(m_compiler->getASTContext());
-    ParseAST(m_compiler->getPreprocessor(), ast_transformer,
-             m_compiler->getASTContext(), false, TU_Complete,
-             completion_consumer);
+    Consumer.reset(new ASTConsumerForwarder(ast_transformer));
+  } else if (m_code_generator) {
+    Consumer.reset(new ASTConsumerForwarder(m_code_generator.get()));
   } else {
-    m_code_generator->Initialize(m_compiler->getASTContext());
-    ParseAST(m_compiler->getPreprocessor(), m_code_generator.get(),
-             m_compiler->getASTContext(), false, TU_Complete,
-             completion_consumer);
+    Consumer.reset(new ASTConsumer());
   }
+
+  clang::ASTContext &ast_context = m_compiler->getASTContext();
+
+  m_compiler->setSema(new Sema(m_compiler->getPreprocessor(), ast_context,
+                               *Consumer, TU_Complete, completion_consumer));
+  m_compiler->setASTConsumer(std::move(Consumer));
+
+  if (ast_context.getLangOpts().Modules) {
+    m_compiler->createASTReader();
+    m_ast_context->setSema(&m_compiler->getSema());
+  }
+
+  ClangExpressionDeclMap *decl_map = type_system_helper->DeclMap();
+  if (decl_map) {
+    decl_map->InstallCodeGenerator(&m_compiler->getASTConsumer());
+
+    clang::ExternalASTSource *ast_source = decl_map->CreateProxy();
+
+    if (ast_context.getExternalSource()) {
+      auto module_wrapper =
+          new ExternalASTSourceWrapper(ast_context.getExternalSource());
+
+      auto ast_source_wrapper = new ExternalASTSourceWrapper(ast_source);
+
+      auto multiplexer =
+          new SemaSourceWithPriorities(*module_wrapper, *ast_source_wrapper);
+      IntrusiveRefCntPtr<ExternalASTSource> Source(multiplexer);
+      ast_context.setExternalSource(Source);
+    } else {
+      ast_context.setExternalSource(ast_source);
+    }
+    decl_map->InstallASTContext(*m_ast_context);
+  }
+
+  // Check that the ASTReader is properly attached to ASTContext and Sema.
+  if (ast_context.getLangOpts().Modules) {
+    assert(m_compiler->getASTContext().getExternalSource() &&
+           "ASTContext doesn't know about the ASTReader?");
+    assert(m_compiler->getSema().getExternalSource() &&
+           "Sema doesn't know about the ASTReader?");
+  }
+
+  {
+    llvm::CrashRecoveryContextCleanupRegistrar<Sema> CleanupSema(
+        &m_compiler->getSema());
+    ParseAST(m_compiler->getSema(), false, false);
+  }
+
+  // Make sure we have no pointer to the Sema we are about to destroy.
+  if (ast_context.getLangOpts().Modules)
+    m_ast_context->setSema(nullptr);
+  // Destroy the Sema. This is necessary because we want to emulate the
+  // original behavior of ParseAST (which also destroys the Sema after parsing).
+  m_compiler->setSema(nullptr);
 
   diag_buf->EndSourceFile();
 
@@ -911,15 +1032,6 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
                                  "while importing modules:");
     diagnostic_manager.AppendMessageToDiagnostic(
         m_pp_callbacks->getErrorString());
-  }
-
-  if (!num_errors) {
-    if (type_system_helper->DeclMap() &&
-        !type_system_helper->DeclMap()->ResolveUnknownTypes()) {
-      diagnostic_manager.Printf(eDiagnosticSeverityError,
-                                "Couldn't infer the type of a variable");
-      num_errors++;
-    }
   }
 
   if (!num_errors) {
@@ -982,8 +1094,8 @@ bool ClangExpressionParser::RewriteExpression(
   if (num_diags == 0)
     return false;
 
-  for (const Diagnostic *diag : diagnostic_manager.Diagnostics()) {
-    const ClangDiagnostic *diagnostic = llvm::dyn_cast<ClangDiagnostic>(diag);
+  for (const auto &diag : diagnostic_manager.Diagnostics()) {
+    const auto *diagnostic = llvm::dyn_cast<ClangDiagnostic>(diag.get());
     if (diagnostic && diagnostic->HasFixIts()) {
       for (const FixItHint &fixit : diagnostic->FixIts()) {
         // This is cobbed from clang::Rewrite::FixItRewriter.
@@ -1050,10 +1162,10 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
 
   lldb_private::Status err;
 
-  std::unique_ptr<llvm::Module> llvm_module_ap(
+  std::unique_ptr<llvm::Module> llvm_module_up(
       m_code_generator->ReleaseModule());
 
-  if (!llvm_module_ap.get()) {
+  if (!llvm_module_up) {
     err.SetErrorToGenericError();
     err.SetErrorString("IR doesn't contain a module");
     return err;
@@ -1064,16 +1176,15 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
   if (execution_policy != eExecutionPolicyTopLevel) {
     // Find the actual name of the function (it's often mangled somehow)
 
-    if (!FindFunctionInModule(function_name, llvm_module_ap.get(),
+    if (!FindFunctionInModule(function_name, llvm_module_up.get(),
                               m_expr.FunctionName())) {
       err.SetErrorToGenericError();
       err.SetErrorStringWithFormat("Couldn't find %s() in the module",
                                    m_expr.FunctionName());
       return err;
     } else {
-      if (log)
-        log->Printf("Found function %s for %s", function_name.AsCString(),
-                    m_expr.FunctionName());
+      LLDB_LOGF(log, "Found function %s for %s", function_name.AsCString(),
+                m_expr.FunctionName());
     }
   }
 
@@ -1088,9 +1199,8 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
   LLVMUserExpression::IRPasses custom_passes;
   {
     auto lang = m_expr.Language();
-    if (log)
-      log->Printf("%s - Current expression language is %s\n", __FUNCTION__,
-                  Language::GetNameForLanguageType(lang));
+    LLDB_LOGF(log, "%s - Current expression language is %s\n", __FUNCTION__,
+              Language::GetNameForLanguageType(lang));
     lldb::ProcessSP process_sp = exe_ctx.GetProcessSP();
     if (process_sp && lang != lldb::eLanguageTypeUnknown) {
       auto runtime = process_sp->GetLanguageRuntime(lang);
@@ -1100,19 +1210,19 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
   }
 
   if (custom_passes.EarlyPasses) {
-    if (log)
-      log->Printf("%s - Running Early IR Passes from LanguageRuntime on "
-                  "expression module '%s'",
-                  __FUNCTION__, m_expr.FunctionName());
+    LLDB_LOGF(log,
+              "%s - Running Early IR Passes from LanguageRuntime on "
+              "expression module '%s'",
+              __FUNCTION__, m_expr.FunctionName());
 
-    custom_passes.EarlyPasses->run(*llvm_module_ap);
+    custom_passes.EarlyPasses->run(*llvm_module_up);
   }
 
-  execution_unit_sp.reset(
-      new IRExecutionUnit(m_llvm_context, // handed off here
-                          llvm_module_ap, // handed off here
-                          function_name, exe_ctx.GetTargetSP(), sc,
-                          m_compiler->getTargetOpts().Features));
+  execution_unit_sp = std::make_shared<IRExecutionUnit>(
+      m_llvm_context, // handed off here
+      llvm_module_up, // handed off here
+      function_name, exe_ctx.GetTargetSP(), sc,
+      m_compiler->getTargetOpts().Features);
 
   ClangExpressionHelper *type_system_helper =
       dyn_cast<ClangExpressionHelper>(m_expr.GetTypeSystemHelper());
@@ -1120,12 +1230,10 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
       type_system_helper->DeclMap(); // result can be NULL
 
   if (decl_map) {
-    Stream *error_stream = NULL;
     Target *target = exe_ctx.GetTargetPtr();
-    error_stream = target->GetDebugger().GetErrorFile().get();
-
+    auto &error_stream = target->GetDebugger().GetErrorStream();
     IRForTarget ir_for_target(decl_map, m_expr.NeedsVariableResolution(),
-                              *execution_unit_sp, *error_stream,
+                              *execution_unit_sp, error_stream,
                               function_name.AsCString());
 
     bool ir_can_run =
@@ -1150,8 +1258,9 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
           interpret_error, interpret_function_calls);
 
       if (!can_interpret && execution_policy == eExecutionPolicyNever) {
-        err.SetErrorStringWithFormat("Can't run the expression locally: %s",
-                                     interpret_error.AsCString());
+        err.SetErrorStringWithFormat(
+            "Can't evaluate the expression without a running target due to: %s",
+            interpret_error.AsCString());
         return err;
       }
     }
@@ -1172,8 +1281,8 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
         (execution_policy != eExecutionPolicyTopLevel && !can_interpret)) {
       if (m_expr.NeedsValidation() && process) {
         if (!process->GetDynamicCheckers()) {
-          DynamicCheckerFunctions *dynamic_checkers =
-              new DynamicCheckerFunctions();
+          ClangDynamicCheckerFunctions *dynamic_checkers =
+              new ClangDynamicCheckerFunctions();
 
           DiagnosticManager install_diagnostics;
 
@@ -1188,28 +1297,30 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
 
           process->SetDynamicCheckers(dynamic_checkers);
 
-          if (log)
-            log->Printf("== [ClangUserExpression::Evaluate] Finished "
-                        "installing dynamic checkers ==");
+          LLDB_LOGF(log, "== [ClangExpressionParser::PrepareForExecution] "
+                         "Finished installing dynamic checkers ==");
         }
 
-        IRDynamicChecks ir_dynamic_checks(*process->GetDynamicCheckers(),
-                                          function_name.AsCString());
+        if (auto *checker_funcs = llvm::dyn_cast<ClangDynamicCheckerFunctions>(
+                process->GetDynamicCheckers())) {
+          IRDynamicChecks ir_dynamic_checks(*checker_funcs,
+                                            function_name.AsCString());
 
-        llvm::Module *module = execution_unit_sp->GetModule();
-        if (!module || !ir_dynamic_checks.runOnModule(*module)) {
-          err.SetErrorToGenericError();
-          err.SetErrorString("Couldn't add dynamic checks to the expression");
-          return err;
-        }
+          llvm::Module *module = execution_unit_sp->GetModule();
+          if (!module || !ir_dynamic_checks.runOnModule(*module)) {
+            err.SetErrorToGenericError();
+            err.SetErrorString("Couldn't add dynamic checks to the expression");
+            return err;
+          }
 
-        if (custom_passes.LatePasses) {
-          if (log)
-            log->Printf("%s - Running Late IR Passes from LanguageRuntime on "
-                        "expression module '%s'",
-                        __FUNCTION__, m_expr.FunctionName());
+          if (custom_passes.LatePasses) {
+            LLDB_LOGF(log,
+                      "%s - Running Late IR Passes from LanguageRuntime on "
+                      "expression module '%s'",
+                      __FUNCTION__, m_expr.FunctionName());
 
-          custom_passes.LatePasses->run(*module);
+            custom_passes.LatePasses->run(*module);
+          }
         }
       }
     }

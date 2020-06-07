@@ -1,9 +1,8 @@
 //===-- ABISysV_hexagon.cpp -------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -1010,14 +1009,13 @@ ABISysV_hexagon::GetRegisterInfoArray(uint32_t &count) {
 */
 size_t ABISysV_hexagon::GetRedZoneSize() const { return 0; }
 
-//------------------------------------------------------------------
 // Static Functions
-//------------------------------------------------------------------
 
 ABISP
 ABISysV_hexagon::CreateInstance(lldb::ProcessSP process_sp, const ArchSpec &arch) {
   if (arch.GetTriple().getArch() == llvm::Triple::hexagon) {
-    return ABISP(new ABISysV_hexagon(process_sp));
+    return ABISP(
+        new ABISysV_hexagon(std::move(process_sp), MakeMCRegisterInfo(arch)));
   }
   return ABISP();
 }
@@ -1104,7 +1102,7 @@ bool ABISysV_hexagon::PrepareTrivialCall(
     sp -= argSize;
 
     // write this argument onto the stack of the host process
-    proc->WriteMemory(sp, arg.data_ap.get(), arg.size, error);
+    proc->WriteMemory(sp, arg.data_up.get(), arg.size, error);
     if (error.Fail())
       return false;
 
@@ -1250,6 +1248,7 @@ bool ABISysV_hexagon::CreateDefaultUnwindPlan(UnwindPlan &unwind_plan) {
   unwind_plan.SetSourceName("hexagon default unwind plan");
   unwind_plan.SetSourcedFromCompiler(eLazyBoolNo);
   unwind_plan.SetUnwindPlanValidAtAllInstructions(eLazyBoolNo);
+  unwind_plan.SetUnwindPlanForSignalTrap(eLazyBoolNo);
   return true;
 }
 
@@ -1295,9 +1294,7 @@ lldb_private::ConstString ABISysV_hexagon::GetPluginNameStatic() {
   return g_name;
 }
 
-//------------------------------------------------------------------
 // PluginInterface protocol
-//------------------------------------------------------------------
 
 lldb_private::ConstString ABISysV_hexagon::GetPluginName() {
   return GetPluginNameStatic();

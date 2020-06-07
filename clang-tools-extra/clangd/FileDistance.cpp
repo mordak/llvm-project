@@ -1,9 +1,8 @@
 //===--- FileDistance.cpp - File contents container -------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -209,7 +208,7 @@ createScopeFileDistance(llvm::ArrayRef<std::string> QueryScopes) {
     Param.MaxUpTraversals = std::max(Path.second - 1, 0);
     Sources[Path.first] = std::move(Param);
   }
-  return FileDistance(Sources, Opts);
+  return FileDistance(std::move(Sources), Opts);
 }
 
 ScopeDistance::ScopeDistance(llvm::ArrayRef<std::string> QueryScopes)

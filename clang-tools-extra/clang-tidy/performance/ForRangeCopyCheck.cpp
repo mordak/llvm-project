@@ -1,9 +1,8 @@
 //===--- ForRangeCopyCheck.cpp - clang-tidy--------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -14,6 +13,7 @@
 #include "../utils/OptionsUtils.h"
 #include "../utils/TypeTraits.h"
 #include "clang/Analysis/Analyses/ExprMutationAnalyzer.h"
+#include "clang/Basic/Diagnostic.h"
 
 using namespace clang::ast_matchers;
 
@@ -78,8 +78,11 @@ bool ForRangeCopyCheck::handleConstValueCopy(const VarDecl &LoopVar,
            "the loop variable's type is not a reference type; this creates a "
            "copy in each iteration; consider making this a reference")
       << utils::fixit::changeVarDeclToReference(LoopVar, Context);
-  if (!LoopVar.getType().isConstQualified())
-    Diagnostic << utils::fixit::changeVarDeclToConst(LoopVar);
+  if (!LoopVar.getType().isConstQualified()) {
+    if (llvm::Optional<FixItHint> Fix = utils::fixit::addQualifierToVarDecl(
+            LoopVar, Context, DeclSpec::TQ::TQ_const))
+      Diagnostic << *Fix;
+  }
   return true;
 }
 
@@ -102,11 +105,15 @@ bool ForRangeCopyCheck::handleCopyIsOnlyConstReferenced(
       !utils::decl_ref_expr::allDeclRefExprs(LoopVar, *ForRange.getBody(),
                                              Context)
            .empty()) {
-    diag(LoopVar.getLocation(),
-         "loop variable is copied but only used as const reference; consider "
-         "making it a const reference")
-        << utils::fixit::changeVarDeclToConst(LoopVar)
-        << utils::fixit::changeVarDeclToReference(LoopVar, Context);
+    auto Diag = diag(
+        LoopVar.getLocation(),
+        "loop variable is copied but only used as const reference; consider "
+        "making it a const reference");
+
+    if (llvm::Optional<FixItHint> Fix = utils::fixit::addQualifierToVarDecl(
+            LoopVar, Context, DeclSpec::TQ::TQ_const))
+      Diag << *Fix << utils::fixit::changeVarDeclToReference(LoopVar, Context);
+
     return true;
   }
   return false;

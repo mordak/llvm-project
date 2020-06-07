@@ -1,9 +1,8 @@
 //===-- PlatformMacOSX.cpp --------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -71,8 +70,8 @@ PlatformSP PlatformMacOSX::CreateInstance(bool force, const ArchSpec *arch) {
     const char *triple_cstr =
         arch ? arch->GetTriple().getTriple().c_str() : "<null>";
 
-    log->Printf("PlatformMacOSX::%s(force=%s, arch={%s,%s})", __FUNCTION__,
-                force ? "true" : "false", arch_name, triple_cstr);
+    LLDB_LOGF(log, "PlatformMacOSX::%s(force=%s, arch={%s,%s})", __FUNCTION__,
+              force ? "true" : "false", arch_name, triple_cstr);
   }
 
   // The only time we create an instance is when we are creating a remote
@@ -118,14 +117,12 @@ PlatformSP PlatformMacOSX::CreateInstance(bool force, const ArchSpec *arch) {
     }
   }
   if (create) {
-    if (log)
-      log->Printf("PlatformMacOSX::%s() creating platform", __FUNCTION__);
+    LLDB_LOGF(log, "PlatformMacOSX::%s() creating platform", __FUNCTION__);
     return PlatformSP(new PlatformMacOSX(is_host));
   }
 
-  if (log)
-    log->Printf("PlatformMacOSX::%s() aborting creation of platform",
-                __FUNCTION__);
+  LLDB_LOGF(log, "PlatformMacOSX::%s() aborting creation of platform",
+            __FUNCTION__);
 
   return PlatformSP();
 }
@@ -147,17 +144,13 @@ const char *PlatformMacOSX::GetDescriptionStatic(bool is_host) {
     return "Remote Mac OS X user platform plug-in.";
 }
 
-//------------------------------------------------------------------
 /// Default Constructor
-//------------------------------------------------------------------
 PlatformMacOSX::PlatformMacOSX(bool is_host) : PlatformDarwin(is_host) {}
 
-//------------------------------------------------------------------
 /// Destructor.
 ///
 /// The destructor is virtual since this class is designed to be
 /// inherited from by the plug-in instance.
-//------------------------------------------------------------------
 PlatformMacOSX::~PlatformMacOSX() {}
 
 ConstString PlatformMacOSX::GetSDKDirectory(lldb_private::Target &target) {
@@ -168,8 +161,8 @@ ConstString PlatformMacOSX::GetSDKDirectory(lldb_private::Target &target) {
       std::string xcode_contents_path;
       std::string default_xcode_sdk;
       FileSpec fspec;
-      uint32_t versions[2];
-      if (objfile->GetSDKVersion(versions, sizeof(versions))) {
+      llvm::VersionTuple version = objfile->GetSDKVersion();
+      if (!version.empty()) {
         fspec = HostInfo::GetShlibDir();
         if (fspec) {
           std::string path;
@@ -187,11 +180,11 @@ ConstString PlatformMacOSX::GetSDKDirectory(lldb_private::Target &target) {
             std::string output;
             const char *command = "xcrun -sdk macosx --show-sdk-path";
             lldb_private::Status error = RunShellCommand(
-                command, // shell command to run
-                NULL,    // current working directory
-                &status, // Put the exit status of the process in here
-                &signo,  // Put the signal that caused the process to exit in
-                         // here
+                command,    // shell command to run
+                FileSpec(), // current working directory
+                &status,    // Put the exit status of the process in here
+                &signo,     // Put the signal that caused the process to exit in
+                            // here
                 &output, // Get the output from the command and place it in this
                          // string
                 std::chrono::seconds(3));
@@ -213,8 +206,8 @@ ConstString PlatformMacOSX::GetSDKDirectory(lldb_private::Target &target) {
           StreamString sdk_path;
           sdk_path.Printf("%sDeveloper/Platforms/MacOSX.platform/Developer/"
                           "SDKs/MacOSX%u.%u.sdk",
-                          xcode_contents_path.c_str(), versions[0],
-                          versions[1]);
+                          xcode_contents_path.c_str(), version.getMajor(),
+                          version.getMinor().getValue());
           fspec.SetFile(sdk_path.GetString(), FileSpec::Style::native);
           if (FileSystem::Instance().Exists(fspec))
             return ConstString(sdk_path.GetString());
@@ -314,7 +307,7 @@ lldb_private::Status PlatformMacOSX::GetSharedModule(
     if (module_spec.GetArchitecture().GetCore() ==
         ArchSpec::eCore_x86_64_x86_64h) {
       ObjectFile *objfile = module_sp->GetObjectFile();
-      if (objfile == NULL) {
+      if (objfile == nullptr) {
         // We didn't find an x86_64h slice, fall back to a x86_64 slice
         ModuleSpec module_spec_x86_64(module_spec);
         module_spec_x86_64.GetArchitecture() = ArchSpec("x86_64-apple-macosx");

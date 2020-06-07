@@ -1,9 +1,8 @@
 //===--- UseDefaultMemberInitCheck.cpp - clang-tidy------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -30,7 +29,7 @@ static StringRef getValueOfValueInit(const QualType InitType) {
     return "false";
 
   case Type::STK_Integral:
-    switch (InitType->getAs<BuiltinType>()->getKind()) {
+    switch (InitType->castAs<BuiltinType>()->getKind()) {
     case BuiltinType::Char_U:
     case BuiltinType::UChar:
     case BuiltinType::Char_S:
@@ -48,7 +47,7 @@ static StringRef getValueOfValueInit(const QualType InitType) {
     }
 
   case Type::STK_Floating:
-    switch (InitType->getAs<BuiltinType>()->getKind()) {
+    switch (InitType->castAs<BuiltinType>()->getKind()) {
     case BuiltinType::Half:
     case BuiltinType::Float:
       return "0.0f";
@@ -59,10 +58,10 @@ static StringRef getValueOfValueInit(const QualType InitType) {
   case Type::STK_FloatingComplex:
   case Type::STK_IntegralComplex:
     return getValueOfValueInit(
-        InitType->getAs<ComplexType>()->getElementType());
+        InitType->castAs<ComplexType>()->getElementType());
 
   case Type::STK_FixedPoint:
-    switch (InitType->getAs<BuiltinType>()->getKind()) {
+    switch (InitType->castAs<BuiltinType>()->getKind()) {
     case BuiltinType::ShortAccum:
     case BuiltinType::SatShortAccum:
       return "0.0hk";
@@ -138,7 +137,7 @@ static const Expr *ignoreUnaryPlus(const Expr *E) {
 static const Expr *getInitializer(const Expr *E) {
   auto *InitList = dyn_cast<InitListExpr>(E);
   if (InitList && InitList->getNumInits() == 1)
-    return InitList->getInit(0);
+    return InitList->getInit(0)->IgnoreParenImpCasts();
   return E;
 }
 
@@ -202,7 +201,7 @@ void UseDefaultMemberInitCheck::registerMatchers(MatchFinder *Finder) {
             unaryOperator(anyOf(hasOperatorName("+"), hasOperatorName("-")),
                           hasUnaryOperand(floatLiteral())),
             cxxBoolLiteral(), cxxNullPtrLiteralExpr(), implicitValueInitExpr(),
-            declRefExpr(to(enumConstantDecl())));
+            initListExpr(), declRefExpr(to(enumConstantDecl())));
 
   Finder->addMatcher(
       cxxConstructorDecl(
@@ -256,17 +255,20 @@ void UseDefaultMemberInitCheck::checkDefaultInit(
   CharSourceRange InitRange =
       CharSourceRange::getCharRange(LParenEnd, Init->getRParenLoc());
 
+  bool ValueInit = isa<ImplicitValueInitExpr>(Init->getInit());
+  bool CanAssign = UseAssignment && (!ValueInit || !Init->getInit()->getType()->isEnumeralType());
+
   auto Diag =
       diag(Field->getLocation(), "use default member initializer for %0")
       << Field
-      << FixItHint::CreateInsertion(FieldEnd, UseAssignment ? " = " : "{")
+      << FixItHint::CreateInsertion(FieldEnd, CanAssign ? " = " : "{")
       << FixItHint::CreateInsertionFromRange(FieldEnd, InitRange);
 
-  if (UseAssignment && isa<ImplicitValueInitExpr>(Init->getInit()))
+  if (CanAssign && ValueInit)
     Diag << FixItHint::CreateInsertion(
         FieldEnd, getValueOfValueInit(Init->getInit()->getType()));
 
-  if (!UseAssignment)
+  if (!CanAssign)
     Diag << FixItHint::CreateInsertion(FieldEnd, "}");
 
   Diag << FixItHint::CreateRemoval(Init->getSourceRange());
@@ -274,7 +276,7 @@ void UseDefaultMemberInitCheck::checkDefaultInit(
 
 void UseDefaultMemberInitCheck::checkExistingInit(
     const MatchFinder::MatchResult &Result, const CXXCtorInitializer *Init) {
-  const FieldDecl *Field = Init->getMember();
+  const FieldDecl *Field = Init->getAnyMember();
 
   if (!sameValue(Field->getInClassInitializer(), Init->getInit()))
     return;

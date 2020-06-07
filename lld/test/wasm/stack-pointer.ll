@@ -18,8 +18,9 @@ entry:
 ; CHECK-NEXT:   - Type:            TYPE
 ; CHECK-NEXT:     Signatures:
 ; CHECK-NEXT:       - Index:           0
-; CHECK-NEXT:         ReturnType:      I32
 ; CHECK-NEXT:         ParamTypes:
+; CHECK-NEXT:         ReturnTypes:
+; CHECK-NEXT:           - I32
 ; CHECK-NEXT:   - Type:            IMPORT
 ; CHECK-NEXT:     Imports:
 ; CHECK-NEXT:       - Module:          env
@@ -41,7 +42,7 @@ entry:
 ; CHECK-NEXT:       - Initial:         0x00000000
 ; CHECK-NEXT:   - Type:            CODE
 ; CHECK-NEXT:     Relocations:
-; CHECK-NEXT:       - Type:            R_WEBASSEMBLY_GLOBAL_INDEX_LEB
+; CHECK-NEXT:       - Type:            R_WASM_GLOBAL_INDEX_LEB
 ; CHECK-NEXT:         Index:           1
 ; CHECK-NEXT:         Offset:          0x00000004
 ; CHECK-NEXT:     Functions:

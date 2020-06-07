@@ -4,10 +4,9 @@
 
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.txt for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,6 +15,7 @@
 
 #include "kmp.h"
 
+#if OMPT_SUPPORT
 /*****************************************************************************
  * forward declarations
  ****************************************************************************/
@@ -27,7 +27,7 @@ void __ompt_lw_taskteam_init(ompt_lw_taskteam_t *lwt, kmp_info_t *thr,
                              int gtid, ompt_data_t *ompt_pid, void *codeptr);
 
 void __ompt_lw_taskteam_link(ompt_lw_taskteam_t *lwt, kmp_info_t *thr,
-                             int on_heap);
+                             int on_heap, bool always = false);
 
 void __ompt_lw_taskteam_unlink(kmp_info_t *thr);
 
@@ -50,6 +50,8 @@ ompt_data_t *__ompt_get_thread_data_internal();
  * Unused currently
 static uint64_t __ompt_get_get_unique_id_internal();
 */
+
+ompt_sync_region_t __ompt_get_barrier_kind(enum barrier_type, kmp_info_t *);
 
 /*****************************************************************************
  * macros
@@ -100,5 +102,30 @@ inline void ompt_set_thread_state(kmp_info_t *thread, ompt_state_t state) {
 inline const char *ompt_get_runtime_version() {
   return &__kmp_version_lib_ver[KMP_VERSION_MAGIC_LEN];
 }
+#endif // OMPT_SUPPRORT
+
+// macros providing the OMPT callbacks for reduction clause
+#if OMPT_SUPPORT && OMPT_OPTIONAL
+#define OMPT_REDUCTION_DECL(this_thr, gtid)                                    \
+  ompt_data_t *my_task_data = OMPT_CUR_TASK_DATA(this_thr);                    \
+  ompt_data_t *my_parallel_data = OMPT_CUR_TEAM_DATA(this_thr);                \
+  void *return_address = OMPT_LOAD_RETURN_ADDRESS(gtid);
+#define OMPT_REDUCTION_BEGIN                                                   \
+  if (ompt_enabled.enabled && ompt_enabled.ompt_callback_reduction) {          \
+    ompt_callbacks.ompt_callback(ompt_callback_reduction)(                     \
+        ompt_sync_region_reduction, ompt_scope_begin, my_parallel_data,        \
+        my_task_data, return_address);                                         \
+  }
+#define OMPT_REDUCTION_END                                                     \
+  if (ompt_enabled.enabled && ompt_enabled.ompt_callback_reduction) {          \
+    ompt_callbacks.ompt_callback(ompt_callback_reduction)(                     \
+        ompt_sync_region_reduction, ompt_scope_end, my_parallel_data,          \
+        my_task_data, return_address);                                         \
+  }
+#else // OMPT_SUPPORT && OMPT_OPTIONAL
+#define OMPT_REDUCTION_DECL(this_thr, gtid)
+#define OMPT_REDUCTION_BEGIN
+#define OMPT_REDUCTION_END
+#endif // ! OMPT_SUPPORT && OMPT_OPTIONAL
 
 #endif

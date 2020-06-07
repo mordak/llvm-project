@@ -1,9 +1,8 @@
 //===-- Highlighter.h -------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -19,17 +18,13 @@
 
 namespace lldb_private {
 
-//----------------------------------------------------------------------
 /// Represents style that the highlighter should apply to the given source code.
 /// Stores information about how every kind of token should be annotated.
-//----------------------------------------------------------------------
 struct HighlightStyle {
 
-  //----------------------------------------------------------------------
   /// A pair of strings that should be placed around a certain token. Usually
   /// stores color codes in these strings (the suffix string is often used for
   /// resetting the terminal attributes back to normal).
-  //----------------------------------------------------------------------
   class ColorStyle {
     std::string m_prefix;
     std::string m_suffix;
@@ -48,8 +43,6 @@ struct HighlightStyle {
     void Apply(Stream &s, llvm::StringRef value) const;
 
     /// Sets the prefix and suffix strings.
-    /// @param prefix
-    /// @param suffix
     void Set(llvm::StringRef prefix, llvm::StringRef suffix);
   };
 
@@ -84,9 +77,7 @@ struct HighlightStyle {
   /// Matches '(' or ')'
   ColorStyle parentheses;
 
-  //-----------------------------------------------------------------------
   // C language specific options
-  //-----------------------------------------------------------------------
 
   /// Matches directives to a preprocessor (if the language has any).
   ColorStyle pp_directive;
@@ -95,9 +86,7 @@ struct HighlightStyle {
   static HighlightStyle MakeVimStyle();
 };
 
-//----------------------------------------------------------------------
 /// Annotates source code with color attributes.
-//----------------------------------------------------------------------
 class Highlighter {
 public:
   Highlighter() = default;
@@ -109,6 +98,7 @@ public:
 
   /// Highlights the given line
   /// \param options
+  ///     The highlight options.
   /// \param line
   ///     The user supplied line that needs to be highlighted.
   /// \param cursor_pos

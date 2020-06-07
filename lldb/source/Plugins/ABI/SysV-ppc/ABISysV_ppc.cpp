@@ -1,9 +1,8 @@
 //===-- ABISysV_ppc.cpp -----------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -214,14 +213,13 @@ ABISysV_ppc::GetRegisterInfoArray(uint32_t &count) {
 
 size_t ABISysV_ppc::GetRedZoneSize() const { return 224; }
 
-//------------------------------------------------------------------
 // Static Functions
-//------------------------------------------------------------------
 
 ABISP
 ABISysV_ppc::CreateInstance(lldb::ProcessSP process_sp, const ArchSpec &arch) {
   if (arch.GetTriple().getArch() == llvm::Triple::ppc) {
-     return ABISP(new ABISysV_ppc(process_sp));
+    return ABISP(
+        new ABISysV_ppc(std::move(process_sp), MakeMCRegisterInfo(arch)));
   }
   return ABISP();
 }
@@ -258,18 +256,16 @@ bool ABISysV_ppc::PrepareTrivialCall(Thread &thread, addr_t sp,
   for (size_t i = 0; i < args.size(); ++i) {
     reg_info = reg_ctx->GetRegisterInfo(eRegisterKindGeneric,
                                         LLDB_REGNUM_GENERIC_ARG1 + i);
-    if (log)
-      log->Printf("About to write arg%" PRIu64 " (0x%" PRIx64 ") into %s",
-                  static_cast<uint64_t>(i + 1), args[i], reg_info->name);
+    LLDB_LOGF(log, "About to write arg%" PRIu64 " (0x%" PRIx64 ") into %s",
+              static_cast<uint64_t>(i + 1), args[i], reg_info->name);
     if (!reg_ctx->WriteRegisterFromUnsigned(reg_info, args[i]))
       return false;
   }
 
   // First, align the SP
 
-  if (log)
-    log->Printf("16-byte aligning SP: 0x%" PRIx64 " to 0x%" PRIx64,
-                (uint64_t)sp, (uint64_t)(sp & ~0xfull));
+  LLDB_LOGF(log, "16-byte aligning SP: 0x%" PRIx64 " to 0x%" PRIx64,
+            (uint64_t)sp, (uint64_t)(sp & ~0xfull));
 
   sp &= ~(0xfull); // 16-byte alignment
 
@@ -284,10 +280,10 @@ bool ABISysV_ppc::PrepareTrivialCall(Thread &thread, addr_t sp,
 
   RegisterValue reg_value;
 
-  if (log)
-    log->Printf("Pushing the return address onto the stack: 0x%" PRIx64
-                ": 0x%" PRIx64,
-                (uint64_t)sp, (uint64_t)return_addr);
+  LLDB_LOGF(log,
+            "Pushing the return address onto the stack: 0x%" PRIx64
+            ": 0x%" PRIx64,
+            (uint64_t)sp, (uint64_t)return_addr);
 
   // Save return address onto the stack
   if (!process_sp->WritePointerToMemory(sp, return_addr, error))
@@ -295,16 +291,14 @@ bool ABISysV_ppc::PrepareTrivialCall(Thread &thread, addr_t sp,
 
   // %r1 is set to the actual stack value.
 
-  if (log)
-    log->Printf("Writing SP: 0x%" PRIx64, (uint64_t)sp);
+  LLDB_LOGF(log, "Writing SP: 0x%" PRIx64, (uint64_t)sp);
 
   if (!reg_ctx->WriteRegisterFromUnsigned(sp_reg_info, sp))
     return false;
 
   // %pc is set to the address of the called function.
 
-  if (log)
-    log->Printf("Writing IP: 0x%" PRIx64, (uint64_t)func_addr);
+  LLDB_LOGF(log, "Writing IP: 0x%" PRIx64, (uint64_t)func_addr);
 
   if (!reg_ctx->WriteRegisterFromUnsigned(pc_reg_info, func_addr))
     return false;
@@ -619,16 +613,16 @@ ValueObjectSP ABISysV_ppc::GetReturnValueObjectSimple(
         if (*byte_size <= altivec_reg->byte_size) {
           ProcessSP process_sp(thread.GetProcess());
           if (process_sp) {
-            std::unique_ptr<DataBufferHeap> heap_data_ap(
+            std::unique_ptr<DataBufferHeap> heap_data_up(
                 new DataBufferHeap(*byte_size, 0));
             const ByteOrder byte_order = process_sp->GetByteOrder();
             RegisterValue reg_value;
             if (reg_ctx->ReadRegister(altivec_reg, reg_value)) {
               Status error;
               if (reg_value.GetAsMemoryData(
-                      altivec_reg, heap_data_ap->GetBytes(),
-                      heap_data_ap->GetByteSize(), byte_order, error)) {
-                DataExtractor data(DataBufferSP(heap_data_ap.release()),
+                      altivec_reg, heap_data_up->GetBytes(),
+                      heap_data_up->GetByteSize(), byte_order, error)) {
+                DataExtractor data(DataBufferSP(heap_data_up.release()),
                                    byte_order,
                                    process_sp->GetTarget()
                                        .GetArchitecture()
@@ -913,6 +907,7 @@ bool ABISysV_ppc::CreateDefaultUnwindPlan(UnwindPlan &unwind_plan) {
   unwind_plan.SetSourceName("ppc default unwind plan");
   unwind_plan.SetSourcedFromCompiler(eLazyBoolNo);
   unwind_plan.SetUnwindPlanValidAtAllInstructions(eLazyBoolNo);
+  unwind_plan.SetUnwindPlanForSignalTrap(eLazyBoolNo);
   unwind_plan.SetReturnAddressRegister(dwarf_lr);
   return true;
 }
@@ -976,9 +971,7 @@ lldb_private::ConstString ABISysV_ppc::GetPluginNameStatic() {
   return g_name;
 }
 
-//------------------------------------------------------------------
 // PluginInterface protocol
-//------------------------------------------------------------------
 
 lldb_private::ConstString ABISysV_ppc::GetPluginName() {
   return GetPluginNameStatic();

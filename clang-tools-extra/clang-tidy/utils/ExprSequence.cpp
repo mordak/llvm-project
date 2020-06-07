@@ -1,9 +1,8 @@
 //===---------- ExprSequence.cpp - clang-tidy -----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -146,17 +145,24 @@ const Stmt *ExprSequence::getSequenceSuccessor(const Stmt *S) const {
         return ForRange->getBody();
     } else if (const auto *TheIfStmt = dyn_cast<IfStmt>(Parent)) {
       // If statement:
-      // - Sequence init statement before variable declaration.
+      // - Sequence init statement before variable declaration, if present;
+      //   before condition evaluation, otherwise.
       // - Sequence variable declaration (along with the expression used to
       //   initialize it) before the evaluation of the condition.
-      if (S == TheIfStmt->getInit())
-        return TheIfStmt->getConditionVariableDeclStmt();
+      if (S == TheIfStmt->getInit()) {
+        if (TheIfStmt->getConditionVariableDeclStmt() != nullptr)
+          return TheIfStmt->getConditionVariableDeclStmt();
+        return TheIfStmt->getCond();
+      }
       if (S == TheIfStmt->getConditionVariableDeclStmt())
         return TheIfStmt->getCond();
     } else if (const auto *TheSwitchStmt = dyn_cast<SwitchStmt>(Parent)) {
       // Ditto for switch statements.
-      if (S == TheSwitchStmt->getInit())
-        return TheSwitchStmt->getConditionVariableDeclStmt();
+      if (S == TheSwitchStmt->getInit()) {
+        if (TheSwitchStmt->getConditionVariableDeclStmt() != nullptr)
+          return TheSwitchStmt->getConditionVariableDeclStmt();
+        return TheSwitchStmt->getCond();
+      }
       if (S == TheSwitchStmt->getConditionVariableDeclStmt())
         return TheSwitchStmt->getCond();
     } else if (const auto *TheWhileStmt = dyn_cast<WhileStmt>(Parent)) {

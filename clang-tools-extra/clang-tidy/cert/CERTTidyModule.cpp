@@ -1,15 +1,16 @@
 //===--- CERTTidyModule.cpp - clang-tidy ----------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "../ClangTidy.h"
 #include "../ClangTidyModule.h"
 #include "../ClangTidyModuleRegistry.h"
+#include "../bugprone/UnhandledSelfAssignmentCheck.h"
+#include "../bugprone/BadSignalToKillThreadCheck.h"
 #include "../google/UnnamedNamespaceInHeaderCheck.h"
 #include "../misc/NewDeleteOverloadsCheck.h"
 #include "../misc/NonCopyableObjects.h"
@@ -18,9 +19,11 @@
 #include "../performance/MoveConstructorInitCheck.h"
 #include "../readability/UppercaseLiteralSuffixCheck.h"
 #include "CommandProcessorCheck.h"
+#include "DefaultOperatorNewAlignmentCheck.h"
 #include "DontModifyStdNamespaceCheck.h"
 #include "FloatLoopCounter.h"
 #include "LimitedRandomnessCheck.h"
+#include "MutatingCopyCheck.h"
 #include "PostfixOperatorCheck.h"
 #include "ProperlySeededRandomGeneratorCheck.h"
 #include "SetLongJmpCheck.h"
@@ -47,9 +50,6 @@ public:
         "cert-dcl58-cpp");
     CheckFactories.registerCheck<google::build::UnnamedNamespaceInHeaderCheck>(
         "cert-dcl59-cpp");
-    // OOP
-    CheckFactories.registerCheck<performance::MoveConstructorInitCheck>(
-        "cert-oop11-cpp");
     // ERR
     CheckFactories.registerCheck<misc::ThrowByValueCatchByReferenceCheck>(
         "cert-err09-cpp");
@@ -58,10 +58,20 @@ public:
     CheckFactories.registerCheck<ThrownExceptionTypeCheck>("cert-err60-cpp");
     CheckFactories.registerCheck<misc::ThrowByValueCatchByReferenceCheck>(
         "cert-err61-cpp");
+    // MEM
+    CheckFactories.registerCheck<DefaultOperatorNewAlignmentCheck>(
+        "cert-mem57-cpp");
     // MSC
     CheckFactories.registerCheck<LimitedRandomnessCheck>("cert-msc50-cpp");
     CheckFactories.registerCheck<ProperlySeededRandomGeneratorCheck>(
         "cert-msc51-cpp");
+    // OOP
+    CheckFactories.registerCheck<performance::MoveConstructorInitCheck>(
+        "cert-oop11-cpp");
+    CheckFactories.registerCheck<bugprone::UnhandledSelfAssignmentCheck>(
+        "cert-oop54-cpp");
+    CheckFactories.registerCheck<MutatingCopyCheck>(
+        "cert-oop58-cpp");
 
     // C checkers
     // DCL
@@ -80,12 +90,16 @@ public:
     CheckFactories.registerCheck<LimitedRandomnessCheck>("cert-msc30-c");
     CheckFactories.registerCheck<ProperlySeededRandomGeneratorCheck>(
         "cert-msc32-c");
+    // POS
+    CheckFactories.registerCheck<bugprone::BadSignalToKillThreadCheck>(
+        "cert-pos44-c");
   }
 
   ClangTidyOptions getModuleOptions() override {
     ClangTidyOptions Options;
     ClangTidyOptions::OptionMap &Opts = Options.CheckOptions;
     Opts["cert-dcl16-c.NewSuffixes"] = "L;LL;LU;LLU";
+    Opts["cert-oop54-cpp.WarnOnlyIfThisHasSuspiciousField"] = "0";
     return Options;
   }
 };

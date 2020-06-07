@@ -1,10 +1,9 @@
 //===-- Language.h ---------------------------------------------------*- C++
 //-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -21,6 +20,7 @@
 #include "lldb/DataFormatters/DumpValueObjectOptions.h"
 #include "lldb/DataFormatters/FormatClasses.h"
 #include "lldb/DataFormatters/StringPrinter.h"
+#include "lldb/Symbol/TypeSystem.h"
 #include "lldb/lldb-private.h"
 #include "lldb/lldb-public.h"
 
@@ -176,9 +176,6 @@ public:
   virtual HardcodedFormatters::HardcodedSyntheticFinder
   GetHardcodedSynthetics();
 
-  virtual HardcodedFormatters::HardcodedValidatorFinder
-  GetHardcodedValidators();
-
   virtual std::vector<ConstString>
   GetPossibleFormattersMatches(ValueObject &valobj,
                                lldb::DynamicValueType use_dynamic);
@@ -190,6 +187,14 @@ public:
   virtual std::unique_ptr<TypeScavenger> GetTypeScavenger();
 
   virtual const char *GetLanguageSpecificTypeLookupHelp();
+
+  // If a language can have more than one possible name for a method, this
+  // function can be used to enumerate them. This is useful when doing name
+  // lookups.
+  virtual std::vector<ConstString>
+  GetMethodNameVariants(ConstString method_name) const {
+    return std::vector<ConstString>();
+  };
 
   // if an individual data formatter can apply to several types and cross a
   // language boundary it makes sense for individual languages to want to
@@ -248,23 +253,23 @@ public:
 
   static bool LanguageIsC(lldb::LanguageType language);
 
+  /// Equivalent to \c LanguageIsC||LanguageIsObjC||LanguageIsCPlusPlus.
+  static bool LanguageIsCFamily(lldb::LanguageType language);
+
   static bool LanguageIsPascal(lldb::LanguageType language);
 
   // return the primary language, so if LanguageIsC(l), return eLanguageTypeC,
   // etc.
   static lldb::LanguageType GetPrimaryLanguage(lldb::LanguageType language);
 
-  static void GetLanguagesSupportingTypeSystems(
-      std::set<lldb::LanguageType> &languages,
-      std::set<lldb::LanguageType> &languages_for_expressions);
+  static std::set<lldb::LanguageType> GetSupportedLanguages();
 
-  static void
-  GetLanguagesSupportingREPLs(std::set<lldb::LanguageType> &languages);
+  static LanguageSet GetLanguagesSupportingTypeSystems();
+  static LanguageSet GetLanguagesSupportingTypeSystemsForExpressions();
+  static LanguageSet GetLanguagesSupportingREPLs();
 
 protected:
-  //------------------------------------------------------------------
   // Classes that inherit from Language can see and modify these
-  //------------------------------------------------------------------
 
   Language();
 

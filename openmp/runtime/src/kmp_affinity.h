@@ -4,10 +4,9 @@
 
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.txt for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -161,6 +160,7 @@ public:
 };
 #endif /* KMP_USE_HWLOC */
 
+#if KMP_OS_LINUX || KMP_OS_FREEBSD
 #if KMP_OS_LINUX
 /* On some of the older OS's that we build on, these constants aren't present
    in <asm/unistd.h> #included from <sys.syscall.h>. They must be the same on
@@ -235,6 +235,10 @@ public:
 #endif /* __NR_sched_getaffinity */
 #error Unknown or unsupported architecture
 #endif /* KMP_ARCH_* */
+#elif KMP_OS_FREEBSD
+#include <pthread.h>
+#include <pthread_np.h>
+#endif
 class KMPNativeAffinity : public KMPAffinity {
   class Mask : public KMPAffinity::Mask {
     typedef unsigned char mask_t;
@@ -295,8 +299,13 @@ class KMPNativeAffinity : public KMPAffinity {
     int get_system_affinity(bool abort_on_error) override {
       KMP_ASSERT2(KMP_AFFINITY_CAPABLE(),
                   "Illegal get affinity operation when not capable");
+#if KMP_OS_LINUX
       int retval =
           syscall(__NR_sched_getaffinity, 0, __kmp_affin_mask_size, mask);
+#elif KMP_OS_FREEBSD
+      int retval =
+          pthread_getaffinity_np(pthread_self(), __kmp_affin_mask_size, reinterpret_cast<cpuset_t *>(mask));
+#endif
       if (retval >= 0) {
         return 0;
       }
@@ -309,8 +318,13 @@ class KMPNativeAffinity : public KMPAffinity {
     int set_system_affinity(bool abort_on_error) const override {
       KMP_ASSERT2(KMP_AFFINITY_CAPABLE(),
                   "Illegal get affinity operation when not capable");
+#if KMP_OS_LINUX
       int retval =
           syscall(__NR_sched_setaffinity, 0, __kmp_affin_mask_size, mask);
+#elif KMP_OS_FREEBSD
+      int retval =
+          pthread_setaffinity_np(pthread_self(), __kmp_affin_mask_size, reinterpret_cast<cpuset_t *>(mask));
+#endif
       if (retval >= 0) {
         return 0;
       }
@@ -348,7 +362,7 @@ class KMPNativeAffinity : public KMPAffinity {
   }
   api_type get_api_type() const override { return NATIVE_OS; }
 };
-#endif /* KMP_OS_LINUX */
+#endif /* KMP_OS_LINUX || KMP_OS_FREEBSD */
 
 #if KMP_OS_WINDOWS
 class KMPNativeAffinity : public KMPAffinity {

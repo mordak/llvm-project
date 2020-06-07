@@ -3,7 +3,7 @@
 # RUN: llvm-mc %s -triple=riscv32 \
 # RUN:     | FileCheck -check-prefixes=CHECK-EXPAND,CHECK-ALIAS %s
 # RUN: llvm-mc -filetype=obj -triple riscv32 < %s \
-# RUN:     | llvm-objdump -riscv-no-aliases -d -r - \
+# RUN:     | llvm-objdump -M no-aliases -d -r - \
 # RUN:     | FileCheck -check-prefixes=CHECK-OBJ-NOALIAS,CHECK-EXPAND,CHECK-INST %s
 # RUN: llvm-mc -filetype=obj -triple riscv32 < %s \
 # RUN:     | llvm-objdump -d -r - \
@@ -104,3 +104,21 @@ rdcycleh x27
 # CHECK-INST: csrrs t3, timeh, zero
 # CHECK-ALIAS: rdtimeh t3
 rdtimeh x28
+
+# CHECK-EXPAND: lb a0, 0(a1)
+lb x10, (x11)
+# CHECK-EXPAND: lh a0, 0(a1)
+lh x10, (x11)
+# CHECK-EXPAND: lw a0, 0(a1)
+lw x10, (x11)
+# CHECK-EXPAND: lbu a0, 0(a1)
+lbu x10, (x11)
+# CHECK-EXPAND: lhu a0, 0(a1)
+lhu x10, (x11)
+
+# CHECK-EXPAND: sb a0, 0(a1)
+sb x10, (x11)
+# CHECK-EXPAND: sh a0, 0(a1)
+sh x10, (x11)
+# CHECK-EXPAND: sw a0, 0(a1)
+sw x10, (x11)

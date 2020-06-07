@@ -1,9 +1,8 @@
 //===-------------------- Layer.cpp - Layer interfaces --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -20,7 +19,7 @@ IRLayer::IRLayer(ExecutionSession &ES) : ES(ES) {}
 IRLayer::~IRLayer() {}
 
 Error IRLayer::add(JITDylib &JD, ThreadSafeModule TSM, VModuleKey K) {
-  return JD.define(llvm::make_unique<BasicIRLayerMaterializationUnit>(
+  return JD.define(std::make_unique<BasicIRLayerMaterializationUnit>(
       *this, std::move(K), std::move(TSM)));
 }
 
@@ -30,15 +29,17 @@ IRMaterializationUnit::IRMaterializationUnit(ExecutionSession &ES,
 
   assert(this->TSM && "Module must not be null");
 
-  MangleAndInterner Mangle(ES, this->TSM.getModule()->getDataLayout());
-  for (auto &G : this->TSM.getModule()->global_values()) {
-    if (G.hasName() && !G.isDeclaration() && !G.hasLocalLinkage() &&
-        !G.hasAvailableExternallyLinkage() && !G.hasAppendingLinkage()) {
-      auto MangledName = Mangle(G.getName());
-      SymbolFlags[MangledName] = JITSymbolFlags::fromGlobalValue(G);
-      SymbolToDefinition[MangledName] = &G;
+  MangleAndInterner Mangle(ES, this->TSM.getModuleUnlocked()->getDataLayout());
+  this->TSM.withModuleDo([&](Module &M) {
+    for (auto &G : M.global_values()) {
+      if (G.hasName() && !G.isDeclaration() && !G.hasLocalLinkage() &&
+          !G.hasAvailableExternallyLinkage() && !G.hasAppendingLinkage()) {
+        auto MangledName = Mangle(G.getName());
+        SymbolFlags[MangledName] = JITSymbolFlags::fromGlobalValue(G);
+        SymbolToDefinition[MangledName] = &G;
+      }
     }
-  }
+  });
 }
 
 IRMaterializationUnit::IRMaterializationUnit(
@@ -48,8 +49,9 @@ IRMaterializationUnit::IRMaterializationUnit(
       TSM(std::move(TSM)), SymbolToDefinition(std::move(SymbolToDefinition)) {}
 
 StringRef IRMaterializationUnit::getName() const {
-  if (TSM.getModule())
-    return TSM.getModule()->getModuleIdentifier();
+  if (TSM)
+    return TSM.withModuleDo(
+        [](const Module &M) -> StringRef { return M.getModuleIdentifier(); });
   return "<null module>";
 }
 
@@ -88,17 +90,14 @@ void BasicIRLayerMaterializationUnit::materialize(
 
 #ifndef NDEBUG
   auto &ES = R.getTargetJITDylib().getExecutionSession();
+  auto &N = R.getTargetJITDylib().getName();
 #endif // NDEBUG
 
-  auto Lock = TSM.getContextLock();
-  LLVM_DEBUG(ES.runSessionLocked([&]() {
-    dbgs() << "Emitting, for " << R.getTargetJITDylib().getName() << ", "
-           << *this << "\n";
-  }););
+  LLVM_DEBUG(ES.runSessionLocked(
+      [&]() { dbgs() << "Emitting, for " << N << ", " << *this << "\n"; }););
   L.emit(std::move(R), std::move(TSM));
   LLVM_DEBUG(ES.runSessionLocked([&]() {
-    dbgs() << "Finished emitting, for " << R.getTargetJITDylib().getName()
-           << ", " << *this << "\n";
+    dbgs() << "Finished emitting, for " << N << ", " << *this << "\n";
   }););
 }
 

@@ -1,9 +1,8 @@
 //===-- FileSystemTest.cpp --------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -289,3 +288,18 @@ TEST(FileSystemTest, EnumerateDirectory) {
   EXPECT_THAT(visited,
               testing::UnorderedElementsAre("/foo", "/bar", "/baz", "/qux"));
 }
+
+TEST(FileSystemTest, OpenErrno) {
+#ifdef _WIN32
+  FileSpec spec("C:\\FILE\\THAT\\DOES\\NOT\\EXIST.TXT");
+#else
+  FileSpec spec("/file/that/does/not/exist.txt");
+#endif
+  FileSystem fs;
+  auto file = fs.Open(spec, File::eOpenOptionRead, 0, true);
+  ASSERT_FALSE(file);
+  std::error_code code = errorToErrorCode(file.takeError());
+  EXPECT_EQ(code.category(), std::system_category());
+  EXPECT_EQ(code.value(), ENOENT);
+}
+

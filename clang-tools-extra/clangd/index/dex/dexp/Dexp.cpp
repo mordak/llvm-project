@@ -1,9 +1,8 @@
 //===--- Dexp.cpp - Dex EXPloration tool ------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -258,11 +257,11 @@ struct {
   const char *Description;
   std::function<std::unique_ptr<Command>()> Implementation;
 } CommandInfo[] = {
-    {"find", "Search for symbols with fuzzyFind", llvm::make_unique<FuzzyFind>},
+    {"find", "Search for symbols with fuzzyFind", std::make_unique<FuzzyFind>},
     {"lookup", "Dump symbol details by ID or qualified name",
-     llvm::make_unique<Lookup>},
+     std::make_unique<Lookup>},
     {"refs", "Find references by ID or qualified name",
-     llvm::make_unique<Refs>},
+     std::make_unique<Refs>},
 };
 
 std::unique_ptr<SymbolIndex> openIndex(llvm::StringRef Index) {

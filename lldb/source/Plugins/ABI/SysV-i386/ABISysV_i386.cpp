@@ -1,9 +1,8 @@
 //===----------------------- ABISysV_i386.cpp -------------------*- C++ -*-===//
 //
-//                   The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //===----------------------------------------------------------------------===//
 
 #include "ABISysV_i386.h"
@@ -193,15 +192,14 @@ ABISysV_i386::GetRegisterInfoArray(uint32_t &count) {
   return g_register_infos;
 }
 
-//------------------------------------------------------------------
 // Static Functions
-//------------------------------------------------------------------
 
 ABISP
 ABISysV_i386::CreateInstance(lldb::ProcessSP process_sp, const ArchSpec &arch) {
   if (arch.GetTriple().getVendor() != llvm::Triple::Apple) {
     if (arch.GetTriple().getArch() == llvm::Triple::x86) {
-      return ABISP(new ABISysV_i386(process_sp));
+      return ABISP(
+          new ABISysV_i386(std::move(process_sp), MakeMCRegisterInfo(arch)));
     }
   }
   return ABISP();
@@ -649,19 +647,20 @@ ValueObjectSP ABISysV_i386::GetReturnValueObjectSimple(
         if (*byte_size <= vec_reg->byte_size) {
           ProcessSP process_sp(thread.GetProcess());
           if (process_sp) {
-            std::unique_ptr<DataBufferHeap> heap_data_ap(
+            std::unique_ptr<DataBufferHeap> heap_data_up(
                 new DataBufferHeap(*byte_size, 0));
             const ByteOrder byte_order = process_sp->GetByteOrder();
             RegisterValue reg_value;
             if (reg_ctx->ReadRegister(vec_reg, reg_value)) {
               Status error;
-              if (reg_value.GetAsMemoryData(vec_reg, heap_data_ap->GetBytes(),
-                                            heap_data_ap->GetByteSize(),
+              if (reg_value.GetAsMemoryData(vec_reg, heap_data_up->GetBytes(),
+                                            heap_data_up->GetByteSize(),
                                             byte_order, error)) {
-                DataExtractor data(DataBufferSP(heap_data_ap.release()),
-                                   byte_order, process_sp->GetTarget()
-                                                   .GetArchitecture()
-                                                   .GetAddressByteSize());
+                DataExtractor data(DataBufferSP(heap_data_up.release()),
+                                   byte_order,
+                                   process_sp->GetTarget()
+                                       .GetArchitecture()
+                                       .GetAddressByteSize());
                 return_valobj_sp = ValueObjectConstResult::Create(
                     &thread, return_compiler_type, ConstString(""), data);
               }
@@ -673,7 +672,7 @@ ValueObjectSP ABISysV_i386::GetReturnValueObjectSimple(
           if (vec_reg2) {
             ProcessSP process_sp(thread.GetProcess());
             if (process_sp) {
-              std::unique_ptr<DataBufferHeap> heap_data_ap(
+              std::unique_ptr<DataBufferHeap> heap_data_up(
                   new DataBufferHeap(*byte_size, 0));
               const ByteOrder byte_order = process_sp->GetByteOrder();
               RegisterValue reg_value;
@@ -682,17 +681,18 @@ ValueObjectSP ABISysV_i386::GetReturnValueObjectSimple(
                   reg_ctx->ReadRegister(vec_reg2, reg_value2)) {
 
                 Status error;
-                if (reg_value.GetAsMemoryData(vec_reg, heap_data_ap->GetBytes(),
+                if (reg_value.GetAsMemoryData(vec_reg, heap_data_up->GetBytes(),
                                               vec_reg->byte_size, byte_order,
                                               error) &&
                     reg_value2.GetAsMemoryData(
-                        vec_reg2, heap_data_ap->GetBytes() + vec_reg->byte_size,
-                        heap_data_ap->GetByteSize() - vec_reg->byte_size,
+                        vec_reg2, heap_data_up->GetBytes() + vec_reg->byte_size,
+                        heap_data_up->GetByteSize() - vec_reg->byte_size,
                         byte_order, error)) {
-                  DataExtractor data(DataBufferSP(heap_data_ap.release()),
-                                     byte_order, process_sp->GetTarget()
-                                                     .GetArchitecture()
-                                                     .GetAddressByteSize());
+                  DataExtractor data(DataBufferSP(heap_data_up.release()),
+                                     byte_order,
+                                     process_sp->GetTarget()
+                                         .GetArchitecture()
+                                         .GetAddressByteSize());
                   return_valobj_sp = ValueObjectConstResult::Create(
                       &thread, return_compiler_type, ConstString(""), data);
                 }
@@ -786,6 +786,7 @@ bool ABISysV_i386::CreateDefaultUnwindPlan(UnwindPlan &unwind_plan) {
   unwind_plan.SetSourceName("i386 default unwind plan");
   unwind_plan.SetSourcedFromCompiler(eLazyBoolNo);
   unwind_plan.SetUnwindPlanValidAtAllInstructions(eLazyBoolNo);
+  unwind_plan.SetUnwindPlanForSignalTrap(eLazyBoolNo);
   return true;
 }
 
@@ -838,9 +839,7 @@ void ABISysV_i386::Terminate() {
   PluginManager::UnregisterPlugin(CreateInstance);
 }
 
-//------------------------------------------------------------------
 // PluginInterface protocol
-//------------------------------------------------------------------
 
 lldb_private::ConstString ABISysV_i386::GetPluginNameStatic() {
   static ConstString g_name("sysv-i386");

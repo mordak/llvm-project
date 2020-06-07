@@ -1,9 +1,8 @@
 //===-- BreakpointResolverScripted.h -----------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -17,20 +16,17 @@
 
 namespace lldb_private {
 
-//----------------------------------------------------------------------
-/// @class BreakpointResolverScripted BreakpointResolverScripted.h
+/// \class BreakpointResolverScripted BreakpointResolverScripted.h
 /// "lldb/Breakpoint/BreakpointResolverScripted.h" This class sets breakpoints
 /// on a given Address.  This breakpoint only takes once, and then it won't
 /// attempt to reset itself.
-//----------------------------------------------------------------------
 
 class BreakpointResolverScripted : public BreakpointResolver {
 public:
   BreakpointResolverScripted(Breakpoint *bkpt,
                              const llvm::StringRef class_name,
                              lldb::SearchDepth depth,
-                             StructuredDataImpl *args_data,
-                             ScriptInterpreter &script_interp);
+                             StructuredDataImpl *args_data);
 
   ~BreakpointResolverScripted() override;
 
@@ -42,8 +38,8 @@ public:
   StructuredData::ObjectSP SerializeToStructuredData() override;
 
   Searcher::CallbackReturn SearchCallback(SearchFilter &filter,
-                                          SymbolContext &context, Address *addr,
-                                          bool containing) override;
+                                          SymbolContext &context,
+                                          Address *addr) override;
 
   lldb::SearchDepth GetDepth() override;
 

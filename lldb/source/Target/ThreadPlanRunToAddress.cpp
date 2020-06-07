@@ -1,9 +1,8 @@
 //===-- ThreadPlanRunToAddress.cpp ------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -18,9 +17,7 @@
 using namespace lldb;
 using namespace lldb_private;
 
-//----------------------------------------------------------------------
 // ThreadPlanRunToAddress: Continue plan
-//----------------------------------------------------------------------
 
 ThreadPlanRunToAddress::ThreadPlanRunToAddress(Thread &thread, Address &address,
                                                bool stop_others)
@@ -100,7 +97,7 @@ void ThreadPlanRunToAddress::GetDescription(Stream *s,
       s->Printf("run to addresses: ");
 
     for (size_t i = 0; i < num_addresses; i++) {
-      s->Address(m_addresses[i], sizeof(addr_t));
+      DumpAddress(s->AsRawOstream(), m_addresses[i], sizeof(addr_t));
       s->Printf(" ");
     }
   } else {
@@ -119,7 +116,7 @@ void ThreadPlanRunToAddress::GetDescription(Stream *s,
         s->Indent();
       }
 
-      s->Address(m_addresses[i], sizeof(addr_t));
+      DumpAddress(s->AsRawOstream(), m_addresses[i], sizeof(addr_t));
       s->Printf(" using breakpoint: %d - ", m_break_ids[i]);
       Breakpoint *breakpoint =
           m_thread.CalculateTarget()->GetBreakpointByID(m_break_ids[i]).get();
@@ -146,7 +143,7 @@ bool ThreadPlanRunToAddress::ValidatePlan(Stream *error) {
       all_bps_good = false;
       if (error) {
         error->Printf("Could not set breakpoint for address: ");
-        error->Address(m_addresses[i], sizeof(addr_t));
+        DumpAddress(error->AsRawOstream(), m_addresses[i], sizeof(addr_t));
         error->Printf("\n");
       }
     }
@@ -185,8 +182,7 @@ bool ThreadPlanRunToAddress::MischiefManaged() {
         m_break_ids[i] = LLDB_INVALID_BREAK_ID;
       }
     }
-    if (log)
-      log->Printf("Completed run to address plan.");
+    LLDB_LOGF(log, "Completed run to address plan.");
     ThreadPlan::MischiefManaged();
     return true;
   } else

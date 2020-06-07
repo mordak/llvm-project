@@ -5,10 +5,9 @@
 
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.txt for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -25,7 +24,7 @@
    On Linux* OS, alloca() function is declared in <alloca.h> header, while on
    Windows* OS there is no <alloca.h> header, function _alloca() (note
    underscore!) is declared in <malloc.h>. This header eliminates these
-   differences, so client code incluiding "kmp_wrapper_malloc.h" can rely on
+   differences, so client code including "kmp_wrapper_malloc.h" can rely on
    following routines:
 
         malloc

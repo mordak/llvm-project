@@ -3,6 +3,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR}/..)
 
 add_clang_tool(clangd
   ClangdMain.cpp
+  $<TARGET_OBJECTS:obj.clangDaemonTweaks>
   )
 
 set(LLVM_LINK_COMPONENTS
@@ -14,14 +15,22 @@ if(CLANGD_BUILD_XPC)
   list(APPEND CLANGD_XPC_LIBS "clangdXpcJsonConversions" "clangdXpcTransport")
 endif()
 
-target_link_libraries(clangd
+clang_target_link_libraries(clangd
   PRIVATE
+  clangAST
   clangBasic
-  clangDaemon
   clangFormat
   clangFrontend
+  clangLex
   clangSema
   clangTooling
   clangToolingCore
+  clangToolingRefactoring
+  clangToolingSyntax
+  )
+target_link_libraries(clangd
+  PRIVATE
+  clangTidy
+  clangDaemon
   ${CLANGD_XPC_LIBS}
   )

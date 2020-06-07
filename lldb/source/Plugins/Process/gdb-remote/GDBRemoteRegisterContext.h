@@ -1,9 +1,8 @@
 //===-- GDBRemoteRegisterContext.h ------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -42,7 +41,7 @@ class GDBRemoteRegisterContext : public RegisterContext {
 public:
   GDBRemoteRegisterContext(ThreadGDBRemote &thread, uint32_t concrete_frame_idx,
                            GDBRemoteDynamicRegisterInfo &reg_info,
-                           bool read_all_at_once);
+                           bool read_all_at_once, bool write_all_at_once);
 
   ~GDBRemoteRegisterContext() override;
 
@@ -115,6 +114,7 @@ protected:
   std::vector<bool> m_reg_valid;
   DataExtractor m_reg_data;
   bool m_read_all_at_once;
+  bool m_write_all_at_once;
 
 private:
   // Helper function for ReadRegisterBytes().

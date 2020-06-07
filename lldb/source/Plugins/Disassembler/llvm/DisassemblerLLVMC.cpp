@@ -1,9 +1,8 @@
 //===-- DisassemblerLLVMC.cpp -----------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -21,6 +20,7 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/MCTargetOptions.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -357,7 +357,7 @@ public:
               return;
             else {
               const uint8_t *bytes = data.PeekData(offset, inst_size);
-              if (bytes == NULL)
+              if (bytes == nullptr)
                 return;
               m_opcode_name.assign(".byte");
               m_opcode.SetOpcodeBytes(bytes, inst_size);
@@ -382,11 +382,10 @@ public:
         static RegularExpression s_regex(
             llvm::StringRef("[ \t]*([^ ^\t]+)[ \t]*([^ ^\t].*)?"));
 
-        RegularExpression::Match matches(3);
-
+        llvm::SmallVector<llvm::StringRef, 4> matches;
         if (s_regex.Execute(out_string, &matches)) {
-          matches.GetMatchAtIndex(out_string.c_str(), 1, m_opcode_name);
-          matches.GetMatchAtIndex(out_string.c_str(), 2, m_mnemonics);
+          m_opcode_name = matches[1].str();
+          m_mnemonics = matches[2].str();
         }
       }
     }
@@ -951,13 +950,14 @@ DisassemblerLLVMC::MCDisasmInstance::Create(const char *triple, const char *cpu,
   if (!subtarget_info_up)
     return Instance();
 
+  llvm::MCTargetOptions MCOptions;
   std::unique_ptr<llvm::MCAsmInfo> asm_info_up(
-      curr_target->createMCAsmInfo(*reg_info_up, triple));
+      curr_target->createMCAsmInfo(*reg_info_up, triple, MCOptions));
   if (!asm_info_up)
     return Instance();
 
   std::unique_ptr<llvm::MCContext> context_up(
-      new llvm::MCContext(asm_info_up.get(), reg_info_up.get(), 0));
+      new llvm::MCContext(asm_info_up.get(), reg_info_up.get(), nullptr));
   if (!context_up)
     return Instance();
 
@@ -1020,7 +1020,7 @@ uint64_t DisassemblerLLVMC::MCDisasmInstance::GetMCInst(
 
   uint64_t new_inst_size;
   status = m_disasm_up->getInstruction(mc_inst, new_inst_size, data, pc,
-                                       llvm::nulls(), llvm::nulls());
+                                       llvm::nulls());
   if (status == llvm::MCDisassembler::Success)
     return new_inst_size;
   else
@@ -1034,8 +1034,8 @@ void DisassemblerLLVMC::MCDisasmInstance::PrintMCInst(
   llvm::raw_string_ostream comments_stream(comments_string);
 
   m_instr_printer_up->setCommentStream(comments_stream);
-  m_instr_printer_up->printInst(&mc_inst, inst_stream, llvm::StringRef(),
-                                *m_subtarget_info_up);
+  m_instr_printer_up->printInst(&mc_inst, 0, llvm::StringRef(),
+                                *m_subtarget_info_up, inst_stream);
   m_instr_printer_up->setCommentStream(llvm::nulls());
   comments_stream.flush();
 
@@ -1080,7 +1080,7 @@ bool DisassemblerLLVMC::MCDisasmInstance::IsCall(llvm::MCInst &mc_inst) const {
 
 DisassemblerLLVMC::DisassemblerLLVMC(const ArchSpec &arch,
                                      const char *flavor_string)
-    : Disassembler(arch, flavor_string), m_exe_ctx(NULL), m_inst(NULL),
+    : Disassembler(arch, flavor_string), m_exe_ctx(nullptr), m_inst(nullptr),
       m_data_from_file(false) {
   if (!FlavorValidForArchSpec(arch, m_flavor.c_str())) {
     m_flavor.assign("default");
@@ -1179,10 +1179,7 @@ DisassemblerLLVMC::DisassemblerLLVMC(const ArchSpec &arch,
     break;
   }
 
-  if (triple.getArch() == llvm::Triple::mips ||
-      triple.getArch() == llvm::Triple::mipsel ||
-      triple.getArch() == llvm::Triple::mips64 ||
-      triple.getArch() == llvm::Triple::mips64el) {
+  if (arch.IsMIPS()) {
     uint32_t arch_flags = arch.GetFlags();
     if (arch_flags & ArchSpec::eMIPSAse_msa)
       features_str += "+msa,";
@@ -1192,12 +1189,19 @@ DisassemblerLLVMC::DisassemblerLLVMC(const ArchSpec &arch,
       features_str += "+dspr2,";
   }
 
-  // If any AArch64 variant, enable the ARMv8.2 ISA extensions so we can
-  // disassemble newer instructions.
-  if (triple.getArch() == llvm::Triple::aarch64)
-    features_str += "+v8.2a";
+  // If any AArch64 variant, enable the ARMv8.5 ISA with SVE extensions so we
+  // can disassemble newer instructions.
+  if (triple.getArch() == llvm::Triple::aarch64 || 
+      triple.getArch() == llvm::Triple::aarch64_32)
+    features_str += "+v8.5a,+sve2";
 
-  // We use m_disasm_ap.get() to tell whether we are valid or not, so if this
+  if ((triple.getArch() == llvm::Triple::aarch64 ||
+       triple.getArch() == llvm::Triple::aarch64_32)
+      && triple.getVendor() == llvm::Triple::Apple) {
+    cpu = "apple-latest";
+  }
+
+  // We use m_disasm_up.get() to tell whether we are valid or not, so if this
   // isn't good for some reason, we won't be valid and FindPlugin will fail and
   // we won't get used.
   m_disasm_up = MCDisasmInstance::Create(triple_str, cpu, features_str.c_str(),
@@ -1210,15 +1214,12 @@ DisassemblerLLVMC::DisassemblerLLVMC(const ArchSpec &arch,
   if (llvm_arch == llvm::Triple::arm) {
     std::string thumb_triple(thumb_arch.GetTriple().getTriple());
     m_alternate_disasm_up =
-        MCDisasmInstance::Create(thumb_triple.c_str(), "", features_str.c_str(), 
+        MCDisasmInstance::Create(thumb_triple.c_str(), "", features_str.c_str(),
                                  flavor, *this);
     if (!m_alternate_disasm_up)
       m_disasm_up.reset();
 
-  } else if (llvm_arch == llvm::Triple::mips ||
-             llvm_arch == llvm::Triple::mipsel ||
-             llvm_arch == llvm::Triple::mips64 ||
-             llvm_arch == llvm::Triple::mips64el) {
+  } else if (arch.IsMIPS()) {
     /* Create alternate disassembler for MIPS16 and microMIPS */
     uint32_t arch_flags = arch.GetFlags();
     if (arch_flags & ArchSpec::eMIPSAse_mips16)
@@ -1238,13 +1239,13 @@ DisassemblerLLVMC::~DisassemblerLLVMC() = default;
 Disassembler *DisassemblerLLVMC::CreateInstance(const ArchSpec &arch,
                                                 const char *flavor) {
   if (arch.GetTriple().getArch() != llvm::Triple::UnknownArch) {
-    std::unique_ptr<DisassemblerLLVMC> disasm_ap(
+    std::unique_ptr<DisassemblerLLVMC> disasm_up(
         new DisassemblerLLVMC(arch, flavor));
 
-    if (disasm_ap.get() && disasm_ap->IsValid())
-      return disasm_ap.release();
+    if (disasm_up.get() && disasm_up->IsValid())
+      return disasm_up.release();
   }
-  return NULL;
+  return nullptr;
 }
 
 size_t DisassemblerLLVMC::DecodeInstructions(const Address &base_addr,
@@ -1331,7 +1332,7 @@ const char *DisassemblerLLVMC::SymbolLookupCallback(void *disassembler,
 bool DisassemblerLLVMC::FlavorValidForArchSpec(
     const lldb_private::ArchSpec &arch, const char *flavor) {
   llvm::Triple triple = arch.GetTriple();
-  if (flavor == NULL || strcmp(flavor, "default") == 0)
+  if (flavor == nullptr || strcmp(flavor, "default") == 0)
     return true;
 
   if (triple.getArch() == llvm::Triple::x86 ||
@@ -1360,7 +1361,7 @@ const char *DisassemblerLLVMC::SymbolLookup(uint64_t value, uint64_t *type_ptr,
   if (*type_ptr) {
     if (m_exe_ctx && m_inst) {
       // std::string remove_this_prior_to_checkin;
-      Target *target = m_exe_ctx ? m_exe_ctx->GetTargetPtr() : NULL;
+      Target *target = m_exe_ctx ? m_exe_ctx->GetTargetPtr() : nullptr;
       Address value_so_addr;
       Address pc_so_addr;
       if (m_inst->UsingFileAddress()) {
@@ -1425,13 +1426,11 @@ const char *DisassemblerLLVMC::SymbolLookup(uint64_t value, uint64_t *type_ptr,
   }
 
   *type_ptr = LLVMDisassembler_ReferenceType_InOut_None;
-  *name = NULL;
-  return NULL;
+  *name = nullptr;
+  return nullptr;
 }
 
-//------------------------------------------------------------------
 // PluginInterface protocol
-//------------------------------------------------------------------
 ConstString DisassemblerLLVMC::GetPluginName() { return GetPluginNameStatic(); }
 
 uint32_t DisassemblerLLVMC::GetPluginVersion() { return 1; }

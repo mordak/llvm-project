@@ -1,10 +1,9 @@
 //===-- LanguageCategory.h----------------------------------------*- C++
 //-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -26,27 +25,11 @@ public:
 
   LanguageCategory(lldb::LanguageType lang_type);
 
-  bool Get(FormattersMatchData &match_data, lldb::TypeFormatImplSP &format_sp);
-
-  bool Get(FormattersMatchData &match_data, lldb::TypeSummaryImplSP &format_sp);
-
-  bool Get(FormattersMatchData &match_data,
-           lldb::SyntheticChildrenSP &format_sp);
-
-  bool Get(FormattersMatchData &match_data,
-           lldb::TypeValidatorImplSP &format_sp);
-
+  template <typename ImplSP>
+  bool Get(FormattersMatchData &match_data, ImplSP &format_sp);
+  template <typename ImplSP>
   bool GetHardcoded(FormatManager &fmt_mgr, FormattersMatchData &match_data,
-                    lldb::TypeFormatImplSP &format_sp);
-
-  bool GetHardcoded(FormatManager &fmt_mgr, FormattersMatchData &match_data,
-                    lldb::TypeSummaryImplSP &format_sp);
-
-  bool GetHardcoded(FormatManager &fmt_mgr, FormattersMatchData &match_data,
-                    lldb::SyntheticChildrenSP &format_sp);
-
-  bool GetHardcoded(FormatManager &fmt_mgr, FormattersMatchData &match_data,
-                    lldb::TypeValidatorImplSP &format_sp);
+                    ImplSP &format_sp);
 
   lldb::TypeCategoryImplSP GetCategory() const;
 
@@ -64,7 +47,9 @@ private:
   HardcodedFormatters::HardcodedFormatFinder m_hardcoded_formats;
   HardcodedFormatters::HardcodedSummaryFinder m_hardcoded_summaries;
   HardcodedFormatters::HardcodedSyntheticFinder m_hardcoded_synthetics;
-  HardcodedFormatters::HardcodedValidatorFinder m_hardcoded_validators;
+
+  template <typename ImplSP>
+  auto &GetHardcodedFinder();
 
   lldb_private::FormatCache m_format_cache;
 

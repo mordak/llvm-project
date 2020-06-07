@@ -1,9 +1,8 @@
 //===--- UnnecessaryCopyInitialization.cpp - clang-tidy--------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -13,6 +12,7 @@
 #include "../utils/FixItHintUtils.h"
 #include "../utils/Matchers.h"
 #include "../utils/OptionsUtils.h"
+#include "clang/Basic/Diagnostic.h"
 
 namespace clang {
 namespace tidy {
@@ -22,8 +22,11 @@ namespace {
 void recordFixes(const VarDecl &Var, ASTContext &Context,
                  DiagnosticBuilder &Diagnostic) {
   Diagnostic << utils::fixit::changeVarDeclToReference(Var, Context);
-  if (!Var.getType().isLocalConstQualified())
-    Diagnostic << utils::fixit::changeVarDeclToConst(Var);
+  if (!Var.getType().isLocalConstQualified()) {
+    if (llvm::Optional<FixItHint> Fix = utils::fixit::addQualifierToVarDecl(
+            Var, Context, DeclSpec::TQ::TQ_const))
+      Diagnostic << *Fix;
+  }
 }
 
 } // namespace

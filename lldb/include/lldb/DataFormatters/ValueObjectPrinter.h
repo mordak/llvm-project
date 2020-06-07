@@ -1,10 +1,9 @@
 //===-- ValueObjectPrinter.h ---------------------------------------*- C++
 //-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -63,8 +62,6 @@ protected:
 
   bool ShouldPrintValueObject();
 
-  bool ShouldPrintValidation();
-
   bool IsNil();
 
   bool IsUninitialized();
@@ -76,10 +73,6 @@ protected:
   bool IsInstancePointer();
 
   bool IsAggregate();
-
-  bool PrintValidationMarkerIfNeeded();
-
-  bool PrintValidationErrorIfNeeded();
 
   bool PrintLocationIfNeeded();
 
@@ -146,7 +139,6 @@ private:
   std::string m_summary;
   std::string m_error;
   bool m_val_summary_ok;
-  std::pair<TypeValidatorResult, std::string> m_validation;
 
   friend struct StringSummaryFormat;
 

@@ -1,9 +1,8 @@
 //===--- UnnecessaryValueParamCheck.cpp - clang-tidy-----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -163,16 +162,19 @@ void UnnecessaryValueParamCheck::check(const MatchFinder::MatchResult &Result) {
     // The parameter of each declaration needs to be checked individually as to
     // whether it is const or not as constness can differ between definition and
     // declaration.
-    if (!CurrentParam.getType().getCanonicalType().isConstQualified())
-      Diag << utils::fixit::changeVarDeclToConst(CurrentParam);
+    if (!CurrentParam.getType().getCanonicalType().isConstQualified()) {
+      if (llvm::Optional<FixItHint> Fix = utils::fixit::addQualifierToVarDecl(
+              CurrentParam, *Result.Context, DeclSpec::TQ::TQ_const))
+        Diag << *Fix;
+    }
   }
 }
 
 void UnnecessaryValueParamCheck::registerPPCallbacks(
-    CompilerInstance &Compiler) {
-  Inserter.reset(new utils::IncludeInserter(
-      Compiler.getSourceManager(), Compiler.getLangOpts(), IncludeStyle));
-  Compiler.getPreprocessor().addPPCallbacks(Inserter->CreatePPCallbacks());
+    const SourceManager &SM, Preprocessor *PP, Preprocessor *ModuleExpanderPP) {
+  Inserter = std::make_unique<utils::IncludeInserter>(SM, getLangOpts(),
+                                                      IncludeStyle);
+  PP->addPPCallbacks(Inserter->CreatePPCallbacks());
 }
 
 void UnnecessaryValueParamCheck::storeOptions(
