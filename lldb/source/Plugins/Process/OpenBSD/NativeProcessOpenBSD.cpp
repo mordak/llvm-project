@@ -449,7 +449,7 @@ NativeThreadOpenBSD &NativeProcessOpenBSD::AddThread(lldb::tid_t thread_id) {
   if (m_threads.empty())
     SetCurrentThreadID(thread_id);
 
-  m_threads.push_back(llvm::make_unique<NativeThreadOpenBSD>(*this, thread_id));
+  m_threads.push_back(std::make_unique<NativeThreadOpenBSD>(*this, thread_id));
   return static_cast<NativeThreadOpenBSD &>(*m_threads.back());
 }
 

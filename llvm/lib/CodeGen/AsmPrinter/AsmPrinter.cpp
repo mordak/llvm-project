@@ -2190,25 +2190,22 @@ void AsmPrinter::EmitAlignment(Align Alignment, const GlobalObject *GV) const {
 /// EmitTrapAlignment - Emit an alignment directive to the specified power of
 /// two boundary, but call EmitTrapToAlignment to fill with Trap instructions
 /// if the Target implements EmitTrapToAlignment.
-void AsmPrinter::EmitTrapAlignment(unsigned NumBits, const GlobalObject *GV) const {
+void AsmPrinter::EmitTrapAlignment(Align Alignment, const GlobalObject *GV) const {
   if (GV)
-    NumBits = getGVAlignmentLog2(GV, GV->getParent()->getDataLayout(), NumBits);
+    Alignment = getGVAlignment(GV, GV->getParent()->getDataLayout(), Alignment);
 
-  if (NumBits == 0) return;   // 1-byte aligned: no need to emit alignment.
+  if (Alignment == Align::None()) return;   // 1-byte aligned: no need to emit alignment.
 
-  assert(NumBits <
-             static_cast<unsigned>(std::numeric_limits<unsigned>::digits) &&
-         "undefined behavior");
-  EmitTrapToAlignment(NumBits);
+  EmitTrapToAlignment(Alignment);
 }
 
 //===----------------------------------------------------------------------===//
 /// EmitTrapToAlignment - Emit an alignment directive to the specified power
 /// of two boundary. This default implementation calls EmitCodeAlignment on
 /// the OutStreamer, but can be overridden by Target implementations.
-void AsmPrinter::EmitTrapToAlignment(unsigned NumBits) const {
-  if (NumBits == 0) return;
-  OutStreamer->EmitCodeAlignment(1u << NumBits);
+void AsmPrinter::EmitTrapToAlignment(Align Alignment) const {
+  if (Alignment == Align::None()) return;
+  OutStreamer->EmitCodeAlignment(Alignment.value());
 }
 
 
@@ -2968,12 +2965,13 @@ void AsmPrinter::EmitBasicBlockStart(const MachineBasicBlock &MBB) {
     }
   }
 
-  MCCodePaddingContext Context;
-  setupCodePaddingContext(MBB, Context);
+  bool isReachableViaFallthrough =
+    std::find(MBB.pred_begin(), MBB.pred_end(), MBB.getPrevNode()) !=
+      MBB.pred_end();
   // Emit an alignment directive for this block, if needed.
   const Align Alignment = MBB.getAlignment();
   if (Alignment != Align::None()) {
-    if (Context.IsBasicBlockReachableViaFallthrough)
+    if (isReachableViaFallthrough)
       EmitAlignment(Alignment);
     else
       EmitTrapAlignment(Alignment);

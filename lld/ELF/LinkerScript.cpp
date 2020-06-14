@@ -830,7 +830,7 @@ void LinkerScript::assignOffsets(OutputSection *sec) {
   if (MemoryRegion *mr = sec->lmaRegion)
     ctx->lmaOffset = mr->curPos - dot;
 
-  switchTo(Sec);
+  switchTo(sec);
 
   // If neither AT nor AT> is specified for an allocatable section, the linker
   // will set the LMA such that the difference between VMA and LMA for the

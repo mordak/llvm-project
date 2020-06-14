@@ -197,7 +197,6 @@ protected:
 
   bool FrameInfoSet;
   int FrameOffset;
-  unsigned GPReg;
   unsigned FrameReg;
   unsigned GPReg;
   unsigned ReturnReg;

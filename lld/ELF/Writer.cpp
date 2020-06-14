@@ -1110,8 +1110,8 @@ template <class ELFT> void Writer<ELFT>::setReservedSymbolSections() {
   if (ElfSym::bss)
     ElfSym::bss->section = findSection(".bss");
 
-  if (ElfSym::Data)
-    ElfSym::Data->Section = findSection(".data");
+  if (ElfSym::data)
+    ElfSym::data->section = findSection(".data");
 
   // Setup MIPS _gp_disp/__gnu_local_gp symbols which should
   // be equal to the _gp symbol's value.

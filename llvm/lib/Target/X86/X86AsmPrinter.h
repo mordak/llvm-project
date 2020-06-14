@@ -129,7 +129,7 @@ public:
 
   void EmitInstruction(const MachineInstr *MI) override;
 
-  void EmitTrapToAlignment(unsigned NumBits) const override;
+  void EmitTrapToAlignment(Align Alignment) const override;
 
   void EmitBasicBlockEnd(const MachineBasicBlock &MBB) override {
     AsmPrinter::EmitBasicBlockEnd(MBB);

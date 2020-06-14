@@ -8156,7 +8156,8 @@ CheckPrintfHandler::HandlePrintfSpecifier(const analyze_printf::PrintfSpecifier
           getSpecifierRange(startSpecifier, specifierLen));
     } else {
       // Check the length modifier for %b
-      if (!FS.hasValidLengthModifier(S.getASTContext().getTargetInfo()))
+      if (!FS.hasValidLengthModifier(S.getASTContext().getTargetInfo(),
+                                     S.getLangOpts()))
         HandleInvalidLengthModifier(FS, CS, startSpecifier, specifierLen,
                                     diag::warn_format_nonsensical_length);
       else if (!FS.hasStandardLengthModifier())

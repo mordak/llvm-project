@@ -2211,7 +2211,9 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     // Make a symbol for the end of the trapsled and emit a jump to it
     MCSymbol *RGSuccSym = OutContext.createTempSymbol();
     const MCExpr *RGSuccExpr = MCSymbolRefExpr::create(RGSuccSym, OutContext);
-    EmitAndCountInstruction(MCInstBuilder(X86::JE_1).addExpr(RGSuccExpr));
+    EmitAndCountInstruction(MCInstBuilder(X86::JCC_1)
+                              .addExpr(RGSuccExpr)
+                              .addImm(X86::COND_E));
 
     // Emit at least two trap instructions
     EmitAndCountInstruction(MCInstBuilder(X86::INT3));
@@ -2683,7 +2685,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 }
 
 /// Emit Trap bytes to the specified power of two alignment
-void X86AsmPrinter::EmitTrapToAlignment(unsigned NumBits) const {
-  if (NumBits == 0) return;
-  OutStreamer->EmitValueToAlignment(1u << NumBits, 0xCC, 1);
+void X86AsmPrinter::EmitTrapToAlignment(Align Alignment) const {
+  if (Alignment == Align::None()) return;
+  OutStreamer->EmitValueToAlignment(Alignment.value(), 0xCC, 1);
 }

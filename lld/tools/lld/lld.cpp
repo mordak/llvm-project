@@ -64,13 +64,13 @@ static Flavor getFlavor(StringRef s) {
       .Default(Invalid);
 }
 
+#ifndef __OpenBSD__
 static cl::TokenizerCallback getDefaultQuotingStyle() {
   if (Triple(sys::getProcessTriple()).getOS() == Triple::Win32)
     return cl::TokenizeWindowsCommandLine;
   return cl::TokenizeGNUCommandLine;
 }
 
-#ifndef __OpenBSD__
 static bool isPETargetName(StringRef s) {
   return s == "i386pe" || s == "i386pep" || s == "thumb2pe" || s == "arm64pe";
 }
