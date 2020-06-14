@@ -326,12 +326,3 @@ std::string OpenBSD::getCompilerRT(const ArgList &Args,
   llvm::sys::path::append(P, "/usr/lib/libcompiler_rt.a");
   return P.str();
 }
-
-void OpenBSD::addClangTargetOptions(const ArgList &DriverArgs,
-                                    ArgStringList &CC1Args,
-                                    Action::OffloadKind) const {
-  // Support for .init_array is still new (Aug 2016).
-  if (!DriverArgs.hasFlag(options::OPT_fuse_init_array,
-                          options::OPT_fno_use_init_array, false))
-    CC1Args.push_back("-fno-use-init-array");
-}
