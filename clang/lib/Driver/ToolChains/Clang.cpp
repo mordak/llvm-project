@@ -4266,8 +4266,16 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Discard value names in assert builds unless otherwise specified.
   if (Args.hasFlag(options::OPT_fdiscard_value_names,
-                   options::OPT_fno_discard_value_names, !IsAssertBuild))
+                   options::OPT_fno_discard_value_names, !IsAssertBuild)) {
+    if (Args.hasArg(options::OPT_fdiscard_value_names) &&
+        (std::any_of(Inputs.begin(), Inputs.end(),
+                     [](const clang::driver::InputInfo &II) {
+                       return types::isLLVMIR(II.getType());
+                     }))) {
+      D.Diag(diag::warn_ignoring_fdiscard_for_bitcode);
+    }
     CmdArgs.push_back("-discard-value-names");
+  }
 
   // Set the main file name, so that debug info works even with
   // -save-temps.
@@ -4695,6 +4703,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                                                  : "-");
   }
 
+  // Give the gen diagnostics more chances to succeed, by avoiding intentional
+  // crashes.
+  if (D.CCGenDiagnostics)
+    CmdArgs.push_back("-disable-pragma-debug-crash");
+
   bool UseSeparateSections = isUseSeparateSections(Triple);
 
   if (Args.hasFlag(options::OPT_ffunction_sections,
@@ -5093,20 +5106,23 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   if (Arg *A = Args.getLastArg(options::OPT_fpatchable_function_entry_EQ)) {
     StringRef S0 = A->getValue(), S = S0;
-    unsigned Size, Start = 0;
+    unsigned Size, Offset = 0;
     if (!Triple.isAArch64() && Triple.getArch() != llvm::Triple::x86 &&
         Triple.getArch() != llvm::Triple::x86_64)
       D.Diag(diag::err_drv_unsupported_opt_for_target)
           << A->getAsString(Args) << TripleStr;
     else if (S.consumeInteger(10, Size) ||
              (!S.empty() && (!S.consume_front(",") ||
-                             S.consumeInteger(10, Start) || !S.empty())))
+                             S.consumeInteger(10, Offset) || !S.empty())))
       D.Diag(diag::err_drv_invalid_argument_to_option)
           << S0 << A->getOption().getName();
-    else if (Start)
+    else if (Size < Offset)
       D.Diag(diag::err_drv_unsupported_fpatchable_function_entry_argument);
-    else
+    else {
       CmdArgs.push_back(Args.MakeArgString(A->getSpelling() + Twine(Size)));
+      CmdArgs.push_back(Args.MakeArgString(
+          "-fpatchable-function-entry-offset=" + Twine(Offset)));
+    }
   }
 
   if (TC.SupportsProfiling()) {
@@ -6111,7 +6127,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Output.getType() == types::TY_Object &&
       Args.hasFlag(options::OPT__SLASH_showFilenames,
                    options::OPT__SLASH_showFilenames_, false)) {
-    C.getJobs().getJobs().back()->setPrintInputFilenames(true);
+    C.getJobs().getJobs().back()->PrintInputFilenames = true;
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_pg))

@@ -7373,7 +7373,14 @@ private:
     ///   resolution [...]
     CandidateSet.exclude(FD);
 
-    S.LookupOverloadedBinOp(CandidateSet, OO, Fns, Args);
+    if (Args[0]->getType()->isOverloadableType())
+      S.LookupOverloadedBinOp(CandidateSet, OO, Fns, Args);
+    else {
+      // FIXME: We determine whether this is a valid expression by checking to
+      // see if there's a viable builtin operator candidate for it. That isn't
+      // really what the rules ask us to do, but should give the right results.
+      S.AddBuiltinOperatorCandidates(OO, FD->getLocation(), Args, CandidateSet);
+    }
 
     Result R;
 
@@ -7438,6 +7445,31 @@ private:
 
       if (OO == OO_Spaceship && FD->getReturnType()->isUndeducedAutoType()) {
         if (auto *BestFD = Best->Function) {
+          // If any callee has an undeduced return type, deduce it now.
+          // FIXME: It's not clear how a failure here should be handled. For
+          // now, we produce an eager diagnostic, because that is forward
+          // compatible with most (all?) other reasonable options.
+          if (BestFD->getReturnType()->isUndeducedType() &&
+              S.DeduceReturnType(BestFD, FD->getLocation(),
+                                 /*Diagnose=*/false)) {
+            // Don't produce a duplicate error when asked to explain why the
+            // comparison is deleted: we diagnosed that when initially checking
+            // the defaulted operator.
+            if (Diagnose == NoDiagnostics) {
+              S.Diag(
+                  FD->getLocation(),
+                  diag::err_defaulted_comparison_cannot_deduce_undeduced_auto)
+                  << Subobj.Kind << Subobj.Decl;
+              S.Diag(
+                  Subobj.Loc,
+                  diag::note_defaulted_comparison_cannot_deduce_undeduced_auto)
+                  << Subobj.Kind << Subobj.Decl;
+              S.Diag(BestFD->getLocation(),
+                     diag::note_defaulted_comparison_cannot_deduce_callee)
+                  << Subobj.Kind << Subobj.Decl;
+            }
+            return Result::deleted();
+          }
           if (auto *Info = S.Context.CompCategories.lookupInfoForType(
               BestFD->getCallResultType())) {
             R.Category = Info->Kind;
@@ -7826,10 +7858,14 @@ private:
       return StmtError();
 
     OverloadedOperatorKind OO = FD->getOverloadedOperator();
-    ExprResult Op = S.CreateOverloadedBinOp(
-        Loc, BinaryOperator::getOverloadedOpcode(OO), Fns,
-        Obj.first.get(), Obj.second.get(), /*PerformADL=*/true,
-        /*AllowRewrittenCandidates=*/true, FD);
+    BinaryOperatorKind Opc = BinaryOperator::getOverloadedOpcode(OO);
+    ExprResult Op;
+    if (Type->isOverloadableType())
+      Op = S.CreateOverloadedBinOp(Loc, Opc, Fns, Obj.first.get(),
+                                   Obj.second.get(), /*PerformADL=*/true,
+                                   /*AllowRewrittenCandidates=*/true, FD);
+    else
+      Op = S.CreateBuiltinBinOp(Loc, Opc, Obj.first.get(), Obj.second.get());
     if (Op.isInvalid())
       return StmtError();
 
@@ -7869,8 +7905,12 @@ private:
       llvm::APInt ZeroVal(S.Context.getIntWidth(S.Context.IntTy), 0);
       Expr *Zero =
           IntegerLiteral::Create(S.Context, ZeroVal, S.Context.IntTy, Loc);
-      ExprResult Comp = S.CreateOverloadedBinOp(Loc, BO_NE, Fns, VDRef.get(),
-                                                Zero, true, true, FD);
+      ExprResult Comp;
+      if (VDRef.get()->getType()->isOverloadableType())
+        Comp = S.CreateOverloadedBinOp(Loc, BO_NE, Fns, VDRef.get(), Zero, true,
+                                       true, FD);
+      else
+        Comp = S.CreateBuiltinBinOp(Loc, BO_NE, VDRef.get(), Zero);
       if (Comp.isInvalid())
         return StmtError();
       Sema::ConditionResult Cond = S.ActOnCondition(
@@ -17385,4 +17425,51 @@ MSPropertyDecl *Sema::HandleMSProperty(Scope *S, RecordDecl *Record,
     Record->addDecl(NewPD);
 
   return NewPD;
+}
+
+void Sema::ActOnStartFunctionDeclarationDeclarator(
+    Declarator &Declarator, unsigned TemplateParameterDepth) {
+  auto &Info = InventedParameterInfos.emplace_back();
+  TemplateParameterList *ExplicitParams = nullptr;
+  ArrayRef<TemplateParameterList *> ExplicitLists =
+      Declarator.getTemplateParameterLists();
+  if (!ExplicitLists.empty()) {
+    bool IsMemberSpecialization, IsInvalid;
+    ExplicitParams = MatchTemplateParametersToScopeSpecifier(
+        Declarator.getBeginLoc(), Declarator.getIdentifierLoc(),
+        Declarator.getCXXScopeSpec(), /*TemplateId=*/nullptr,
+        ExplicitLists, /*IsFriend=*/false, IsMemberSpecialization, IsInvalid,
+        /*SuppressDiagnostic=*/true);
+  }
+  if (ExplicitParams) {
+    Info.AutoTemplateParameterDepth = ExplicitParams->getDepth();
+    for (NamedDecl *Param : *ExplicitParams)
+      Info.TemplateParams.push_back(Param);
+    Info.NumExplicitTemplateParams = ExplicitParams->size();
+  } else {
+    Info.AutoTemplateParameterDepth = TemplateParameterDepth;
+    Info.NumExplicitTemplateParams = 0;
+  }
+}
+
+void Sema::ActOnFinishFunctionDeclarationDeclarator(Declarator &Declarator) {
+  auto &FSI = InventedParameterInfos.back();
+  if (FSI.TemplateParams.size() > FSI.NumExplicitTemplateParams) {
+    if (FSI.NumExplicitTemplateParams != 0) {
+      TemplateParameterList *ExplicitParams =
+          Declarator.getTemplateParameterLists().back();
+      Declarator.setInventedTemplateParameterList(
+          TemplateParameterList::Create(
+              Context, ExplicitParams->getTemplateLoc(),
+              ExplicitParams->getLAngleLoc(), FSI.TemplateParams,
+              ExplicitParams->getRAngleLoc(),
+              ExplicitParams->getRequiresClause()));
+    } else {
+      Declarator.setInventedTemplateParameterList(
+          TemplateParameterList::Create(
+              Context, SourceLocation(), SourceLocation(), FSI.TemplateParams,
+              SourceLocation(), /*RequiresClause=*/nullptr));
+    }
+  }
+  InventedParameterInfos.pop_back();
 }

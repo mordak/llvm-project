@@ -1336,6 +1336,11 @@ static bool removeBitcastsFromLoadStoreOnMinMax(InstCombiner &IC,
   if (!isMinMaxWithLoads(LoadAddr, CmpLoadTy))
     return false;
 
+  // Make sure the type would actually change.
+  // This condition can be hit with chains of bitcasts.
+  if (LI->getType() == CmpLoadTy)
+    return false;
+
   // Make sure we're not changing the size of the load/store.
   const auto &DL = IC.getDataLayout();
   if (DL.getTypeStoreSizeInBits(LI->getType()) !=
@@ -1439,9 +1444,12 @@ Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
       if (PrevSI->isUnordered() && equivalentAddressValues(PrevSI->getOperand(1),
                                                         SI.getOperand(1))) {
         ++NumDeadStore;
-        ++BBI;
+        // Manually add back the original store to the worklist now, so it will
+        // be processed after the operands of the removed store, as this may
+        // expose additional DSE opportunities.
+        Worklist.Add(&SI);
         eraseInstFromFunction(*PrevSI);
-        continue;
+        return nullptr;
       }
       break;
     }
