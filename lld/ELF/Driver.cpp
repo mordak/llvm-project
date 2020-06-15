@@ -138,8 +138,8 @@ static std::tuple<ELFKind, uint16_t, uint8_t> parseEmulation(StringRef emul) {
           .Cases("elf32btsmip", "elf32btsmipn32", {ELF32BEKind, EM_MIPS})
           .Cases("elf32ltsmip", "elf32ltsmipn32", {ELF32LEKind, EM_MIPS})
           .Case("elf32lriscv", {ELF32LEKind, EM_RISCV})
-          .Case("elf64_sparc", {ELF64BEKind, EM_SPARCV9})
           .Cases("elf32ppc", "elf32ppclinux", {ELF32BEKind, EM_PPC})
+          .Case("elf64_sparc", {ELF64BEKind, EM_SPARCV9})
           .Case("elf64btsmip", {ELF64BEKind, EM_MIPS})
           .Case("elf64ltsmip", {ELF64LEKind, EM_MIPS})
           .Case("elf64lriscv", {ELF64LEKind, EM_RISCV})
@@ -891,7 +891,8 @@ static void readConfigs(opt::InputArgList &args) {
   config->ignoreDataAddressEquality =
       args.hasArg(OPT_ignore_data_address_equality);
   config->ignoreFunctionAddressEquality =
-      args.hasArg(OPT_ignore_function_address_equality);
+      args.hasFlag(OPT_ignore_function_address_equality,
+      OPT_no_ignore_function_address_equality, true);
   config->init = args.getLastArgValue(OPT_init, "_init");
   config->ltoAAPipeline = args.getLastArgValue(OPT_lto_aa_pipeline);
   config->ltoCSProfileGenerate = args.hasArg(OPT_lto_cs_profile_generate);
