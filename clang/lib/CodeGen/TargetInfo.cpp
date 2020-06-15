@@ -9920,7 +9920,8 @@ const TargetCodeGenInfo &CodeGenModule::getTargetCodeGenInfo() {
     bool RetSmallStructInRegABI =
         PPC32TargetCodeGenInfo::isStructReturnInRegABI(Triple, CodeGenOpts);
     return SetCGInfo(
-        new PPC32TargetCodeGenInfo(Types, CodeGenOpts.FloatABI == "soft",
+        new PPC32TargetCodeGenInfo(Types, CodeGenOpts.FloatABI == "soft" ||
+                                   getTarget().hasFeature("spe"),
                                    RetSmallStructInRegABI));
   }
   case llvm::Triple::ppc64:
