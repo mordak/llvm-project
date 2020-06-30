@@ -396,6 +396,7 @@ public:
       SuitableAlign = 64;
 
     if (Triple.isOSFreeBSD() || Triple.getOS() == llvm::Triple::AIX ||
+        Triple.isOSOpenBSD() ||
         Triple.isMusl()) {
       LongDoubleWidth = LongDoubleAlign = 64;
       LongDoubleFormat = &llvm::APFloat::IEEEdouble();
