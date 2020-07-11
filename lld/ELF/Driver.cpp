@@ -1309,7 +1309,7 @@ void LinkerDriver::inferMachineType() {
 }
 
 // Parse -z max-page-size=<value>. The default value is defined by
-// each target.
+// each target. Is set to 1 if given nmagic or omagic.
 static uint64_t getMaxPageSize(opt::InputArgList &args) {
   uint64_t val = args::getZOptionValue(args, OPT_z, "max-page-size",
                                        target->defaultMaxPageSize);
@@ -1324,7 +1324,7 @@ static uint64_t getMaxPageSize(opt::InputArgList &args) {
 }
 
 // Parse -z common-page-size=<value>. The default value is defined by
-// each target.
+// each target. Is set to 1 if given nmagic or omagic.
 static uint64_t getCommonPageSize(opt::InputArgList &args) {
   uint64_t val = args::getZOptionValue(args, OPT_z, "common-page-size",
                                        target->defaultCommonPageSize);
@@ -1338,6 +1338,16 @@ static uint64_t getCommonPageSize(opt::InputArgList &args) {
   // commonPageSize can't be larger than maxPageSize.
   if (val > config->maxPageSize)
     val = config->maxPageSize;
+  return val;
+}
+
+// Parse -z max-page-size=<value>. The default value is defined by
+// each target.
+static uint64_t getRealMaxPageSize(opt::InputArgList &args) {
+  uint64_t val = args::getZOptionValue(args, OPT_z, "max-page-size",
+                                       target->defaultMaxPageSize);
+  if (!isPowerOf2_64(val))
+    error("max-page-size: value isn't a power of 2");
   return val;
 }
 
@@ -1947,6 +1957,11 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
   // optimizations such as DATA_SEGMENT_ALIGN in linker scripts. LLD's use of it
   // is limited to writing trap instructions on the last executable segment.
   config->commonPageSize = getCommonPageSize(args);
+  // textAlignPageSize is the alignment page size to use when aligning PT_LOAD
+  // sections. This is the same as maxPageSize except under -omagic, where data
+  // sections are non-aligned (maxPageSize set to 1) but text sections are aligned
+  // to the target page size.
+  config->textAlignPageSize = config->omagic ? getRealMaxPageSize(args) : config->maxPageSize;
 
   config->imageBase = getImageBase(args);
 
