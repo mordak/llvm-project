@@ -2360,28 +2360,8 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
                                 ? RegInfo->getBaseRegister()
                                 : (unsigned)AArch64::NoRegister;
 
-  unsigned SpillEstimate = SavedRegs.count();
-  for (unsigned i = 0; CSRegs[i]; ++i) {
-    unsigned Reg = CSRegs[i];
-    unsigned PairedReg = CSRegs[i ^ 1];
-    if (Reg == BasePointerReg)
-      SpillEstimate++;
-    if (produceCompactUnwindFrame(MF) && !SavedRegs.test(PairedReg))
-      SpillEstimate++;
-  }
-
   if (MFI.hasReturnProtectorRegister() && MFI.getReturnProtectorNeedsStore()) {
     SavedRegs.set(MFI.getReturnProtectorRegister());
-    SpillEstimate++;
-  }
-
-  SpillEstimate += 2; // Conservatively include FP+LR in the estimate
-  unsigned StackEstimate = MFI.estimateStackSize(MF) + 8 * SpillEstimate;
-
-  // The frame record needs to be created by saving the appropriate registers
-  if (hasFP(MF) || windowsRequiresStackProbe(MF, StackEstimate)) {
-    SavedRegs.set(AArch64::FP);
-    SavedRegs.set(AArch64::LR);
   }
 
   unsigned ExtraCSSpill = 0;
