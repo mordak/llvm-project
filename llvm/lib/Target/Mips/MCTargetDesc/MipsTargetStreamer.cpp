@@ -41,7 +41,6 @@ static bool isMicroMips(const MCSubtargetInfo *STI) {
 MipsTargetStreamer::MipsTargetStreamer(MCStreamer &S)
     : MCTargetStreamer(S), GPReg(Mips::GP), ModuleDirectiveAllowed(true) {
   GPRInfoSet = FPRInfoSet = FrameInfoSet = false;
-  GPReg = Mips::GP;
 }
 void MipsTargetStreamer::emitDirectiveSetMicroMips() {}
 void MipsTargetStreamer::emitDirectiveSetNoMicroMips() {}

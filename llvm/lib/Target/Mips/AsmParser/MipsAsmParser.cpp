@@ -332,11 +332,6 @@ class MipsAsmParser : public MCTargetAsmParser {
   bool expandSeqI(MCInst &Inst, SMLoc IDLoc, MCStreamer &Out,
                   const MCSubtargetInfo *STI);
 
-  bool expandSGE(MCInst &Inst, SMLoc IDLoc, MCStreamer &Out,
-                 const MCSubtargetInfo *STI);
-  bool expandSGEImm(MCInst &Inst, SMLoc IDLoc, MCStreamer &Out,
-                    const MCSubtargetInfo *STI);
-
   bool expandMXTRAlias(MCInst &Inst, SMLoc IDLoc, MCStreamer &Out,
                        const MCSubtargetInfo *STI);
 
@@ -5330,72 +5325,6 @@ bool MipsAsmParser::expandSeqI(MCInst &Inst, SMLoc IDLoc, MCStreamer &Out,
   return false;
 }
 
-bool MipsAsmParser::expandSGE(MCInst &Inst, SMLoc IDLoc, MCStreamer &Out,
-                              const MCSubtargetInfo *STI) {
-  MipsTargetStreamer &TOut = getTargetStreamer();
-  unsigned DReg = Inst.getOperand(0).getReg();
-  unsigned SReg = Inst.getOperand(1).getReg();
-  unsigned TReg = Inst.getOperand(2).getReg();
-  unsigned OpCode;
-
-  warnIfNoMacro(IDLoc);
-
-  /* "$sr >= $tr" is equivalent to "not ($sr < $tr)". */
-  switch (Inst.getOpcode()) {
-    case Mips::SGE:
-      OpCode = Mips::SLT;
-      break;
-    case Mips::SGEU:
-      OpCode = Mips::SLTu;
-      break;
-    default:
-      llvm_unreachable("unexpected 'sge' opcode");
-  }
-  TOut.emitRRR(OpCode, DReg, SReg, TReg, IDLoc, STI);
-  TOut.emitRRI(Mips::XORi, DReg, DReg, 1, IDLoc, STI);
-
-  return false;
-}
-
-bool MipsAsmParser::expandSGEImm(MCInst &Inst, SMLoc IDLoc, MCStreamer &Out,
-                                 const MCSubtargetInfo *STI) {
-  MipsTargetStreamer &TOut = getTargetStreamer();
-  unsigned DReg = Inst.getOperand(0).getReg();
-  unsigned SReg = Inst.getOperand(1).getReg();
-  int64_t ImmVal = Inst.getOperand(2).getImm();
-  unsigned OpCode, OpiCode;
-
-  warnIfNoMacro(IDLoc);
-
-  /* "$sr >= $imm" is equivalent to "not ($sr < $imm)". */
-  switch (Inst.getOpcode()) {
-    case Mips::SGEImm:
-    case Mips::SGEImm64:
-      OpCode = Mips::SLT;
-      OpiCode = Mips::SLTi;
-      break;
-    case Mips::SGEUImm:
-    case Mips::SGEUImm64:
-      OpCode = Mips::SLTu;
-      OpiCode = Mips::SLTiu;
-      break;
-    default:
-      llvm_unreachable("unexpected 'sge' opcode with immediate");
-  }
-
-  if (isInt<16>(ImmVal)) {
-    TOut.emitRRI(OpiCode, DReg, SReg, ImmVal, IDLoc, STI);
-  } else {
-    if (loadImmediate(ImmVal, DReg, Mips::NoRegister, isInt<32>(ImmVal), false,
-                      IDLoc, Out, STI))
-      return true;
-    TOut.emitRRR(OpCode, DReg, SReg, DReg, IDLoc, STI);
-  }
-  TOut.emitRRI(Mips::XORi, DReg, DReg, 1, IDLoc, STI);
-
-  return false;
-}
-
 // Map the DSP accumulator and control register to the corresponding gpr
 // operand. Unlike the other alias, the m(f|t)t(lo|hi|acx) instructions
 // do not map the DSP registers contigously to gpr registers.
@@ -8396,10 +8325,6 @@ bool MipsAsmParser::ParseDirective(AsmToken DirectiveID) {
 
   if (IDVal == ".cpload") {
     parseDirectiveCpLoad(DirectiveID.getLoc());
-    return false;
-  }
-  if (IDVal == ".cplocal") {
-    parseDirectiveCpLocal(DirectiveID.getLoc());
     return false;
   }
   if (IDVal == ".cprestore") {

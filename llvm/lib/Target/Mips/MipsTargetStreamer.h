@@ -179,10 +179,6 @@ public:
     return *ABI;
   }
 
-  void setGPReg(unsigned GPReg) {
-    this->GPReg = GPReg;
-  }
-
 protected:
   llvm::Optional<MipsABIInfo> ABI;
   MipsABIFlagsSection ABIFlagsSection;
