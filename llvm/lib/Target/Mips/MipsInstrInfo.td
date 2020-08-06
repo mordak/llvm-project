@@ -3075,7 +3075,6 @@ def LDMacro : MipsAsmPseudoInst<(outs GPR32Opnd:$rt),
 def SDMacro : MipsAsmPseudoInst<(outs GPR32Opnd:$rt),
                                 (ins mem_simm16:$addr), "sd $rt, $addr">,
                                 ISA_MIPS1_NOT_MIPS3;
-
 //===----------------------------------------------------------------------===//
 //  Arbitrary patterns that map to one or more instructions
 //===----------------------------------------------------------------------===//
