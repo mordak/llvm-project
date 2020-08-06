@@ -2274,9 +2274,12 @@ template <class ELFT> void Writer<ELFT>::fixSectionAlignments() {
 
     for (Partition &part : partitions) {
       PhdrEntry *firstRW = nullptr;
-      for (PhdrEntry *P : part.phdrs)
-        if (P->p_type == PT_LOAD && (P->p_flags & PF_W))
+      for (PhdrEntry *P : part.phdrs) {
+        if (P->p_type == PT_LOAD && (P->p_flags & PF_W)) {
           firstRW = P;
+          break;
+        }
+      }
 
       if (firstRW)
         NXAlign(firstRW->firstSec);
