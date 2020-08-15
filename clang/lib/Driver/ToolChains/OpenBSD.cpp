@@ -324,7 +324,5 @@ void OpenBSD::AddCXXStdlibLibArgs(const ArgList &Args,
 std::string OpenBSD::getCompilerRT(const ArgList &Args,
                                    StringRef Component,
                                    FileType Type) const {
-  SmallString<128> P(getDriver().SysRoot);
-  llvm::sys::path::append(P, "/usr/lib/libcompiler_rt.a");
-  return P.str();
+  return getDriver().SysRoot + "/usr/lib/libcompiler_rt.a";
 }
