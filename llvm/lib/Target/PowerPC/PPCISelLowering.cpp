@@ -9114,13 +9114,15 @@ SDValue PPCTargetLowering::LowerBITCAST(SDValue Op, SelectionDAG &DAG) const {
                      Op0.getOperand(1));
 }
 
-static const SDValue *getNormalLoadInput(const SDValue &Op) {
+static const SDValue *getNormalLoadInput(const SDValue &Op, bool &IsPermuted) {
   const SDValue *InputLoad = &Op;
   if (InputLoad->getOpcode() == ISD::BITCAST)
     InputLoad = &InputLoad->getOperand(0);
   if (InputLoad->getOpcode() == ISD::SCALAR_TO_VECTOR ||
-      InputLoad->getOpcode() == PPCISD::SCALAR_TO_VECTOR_PERMUTED)
+      InputLoad->getOpcode() == PPCISD::SCALAR_TO_VECTOR_PERMUTED) {
+    IsPermuted = InputLoad->getOpcode() == PPCISD::SCALAR_TO_VECTOR_PERMUTED;
     InputLoad = &InputLoad->getOperand(0);
+  }
   if (InputLoad->getOpcode() != ISD::LOAD)
     return nullptr;
   LoadSDNode *LD = cast<LoadSDNode>(*InputLoad);
@@ -9292,7 +9294,9 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
 
   if (!BVNIsConstantSplat || SplatBitSize > 32) {
 
-    const SDValue *InputLoad = getNormalLoadInput(Op.getOperand(0));
+    bool IsPermutedLoad = false;
+    const SDValue *InputLoad =
+        getNormalLoadInput(Op.getOperand(0), IsPermutedLoad);
     // Handle load-and-splat patterns as we have instructions that will do this
     // in one go.
     if (InputLoad && DAG.isSplatValue(Op, true)) {
@@ -9915,13 +9919,24 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
   // If this is a load-and-splat, we can do that with a single instruction
   // in some cases. However if the load has multiple uses, we don't want to
   // combine it because that will just produce multiple loads.
-  const SDValue *InputLoad = getNormalLoadInput(V1);
+  bool IsPermutedLoad = false;
+  const SDValue *InputLoad = getNormalLoadInput(V1, IsPermutedLoad);
   if (InputLoad && Subtarget.hasVSX() && V2.isUndef() &&
       (PPC::isSplatShuffleMask(SVOp, 4) || PPC::isSplatShuffleMask(SVOp, 8)) &&
       InputLoad->hasOneUse()) {
     bool IsFourByte = PPC::isSplatShuffleMask(SVOp, 4);
     int SplatIdx =
       PPC::getSplatIdxForPPCMnemonics(SVOp, IsFourByte ? 4 : 8, DAG);
+
+    // The splat index for permuted loads will be in the left half of the vector
+    // which is strictly wider than the loaded value by 8 bytes. So we need to
+    // adjust the splat index to point to the correct address in memory.
+    if (IsPermutedLoad) {
+      assert(isLittleEndian && "Unexpected permuted load on big endian target");
+      SplatIdx += IsFourByte ? 2 : 1;
+      assert((SplatIdx < (IsFourByte ? 4 : 2)) &&
+             "Splat of a value outside of the loaded memory");
+    }
 
     LoadSDNode *LD = cast<LoadSDNode>(*InputLoad);
     // For 4-byte load-and-splat, we need Power9.
@@ -9932,10 +9947,6 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
       else
         Offset = isLittleEndian ? (1 - SplatIdx) * 8 : SplatIdx * 8;
 
-      // If we are loading a partial vector, it does not make sense to adjust
-      // the base pointer. This happens with (splat (s_to_v_permuted (ld))).
-      if (LD->getMemoryVT().getSizeInBits() == (IsFourByte ? 32 : 64))
-        Offset = 0;
       SDValue BasePtr = LD->getBasePtr();
       if (Offset != 0)
         BasePtr = DAG.getNode(ISD::ADD, dl, getPointerTy(DAG.getDataLayout()),
@@ -11953,17 +11964,33 @@ PPCTargetLowering::emitProbedAlloca(MachineInstr &MI,
   Register SPReg = isPPC64 ? PPC::X1 : PPC::R1;
   Register FinalStackPtr = MRI.createVirtualRegister(isPPC64 ? G8RC : GPRC);
   Register FramePointer = MRI.createVirtualRegister(isPPC64 ? G8RC : GPRC);
+  Register ActualNegSizeReg = MRI.createVirtualRegister(isPPC64 ? G8RC : GPRC);
 
-  // Get the canonical FinalStackPtr like what
-  // PPCRegisterInfo::lowerDynamicAlloc does.
-  BuildMI(*MBB, {MI}, DL,
-          TII->get(isPPC64 ? PPC::PREPARE_PROBED_ALLOCA_64
-                           : PPC::PREPARE_PROBED_ALLOCA_32),
-          FramePointer)
-      .addDef(FinalStackPtr)
+  // Since value of NegSizeReg might be realigned in prologepilog, insert a
+  // PREPARE_PROBED_ALLOCA pseudo instruction to get actual FramePointer and
+  // NegSize.
+  unsigned ProbeOpc;
+  if (!MRI.hasOneNonDBGUse(NegSizeReg))
+    ProbeOpc =
+        isPPC64 ? PPC::PREPARE_PROBED_ALLOCA_64 : PPC::PREPARE_PROBED_ALLOCA_32;
+  else
+    // By introducing PREPARE_PROBED_ALLOCA_NEGSIZE_OPT, ActualNegSizeReg
+    // and NegSizeReg will be allocated in the same phyreg to avoid
+    // redundant copy when NegSizeReg has only one use which is current MI and
+    // will be replaced by PREPARE_PROBED_ALLOCA then.
+    ProbeOpc = isPPC64 ? PPC::PREPARE_PROBED_ALLOCA_NEGSIZE_SAME_REG_64
+                       : PPC::PREPARE_PROBED_ALLOCA_NEGSIZE_SAME_REG_32;
+  BuildMI(*MBB, {MI}, DL, TII->get(ProbeOpc), FramePointer)
+      .addDef(ActualNegSizeReg)
       .addReg(NegSizeReg)
       .add(MI.getOperand(2))
       .add(MI.getOperand(3));
+
+  // Calculate final stack pointer, which equals to SP + ActualNegSize.
+  BuildMI(*MBB, {MI}, DL, TII->get(isPPC64 ? PPC::ADD8 : PPC::ADD4),
+          FinalStackPtr)
+      .addReg(SPReg)
+      .addReg(ActualNegSizeReg);
 
   // Materialize a scratch register for update.
   int64_t NegProbeSize = -(int64_t)ProbeSize;
@@ -11985,7 +12012,7 @@ PPCTargetLowering::emitProbedAlloca(MachineInstr &MI,
     // Probing leading residual part.
     Register Div = MRI.createVirtualRegister(isPPC64 ? G8RC : GPRC);
     BuildMI(*MBB, {MI}, DL, TII->get(isPPC64 ? PPC::DIVD : PPC::DIVW), Div)
-        .addReg(NegSizeReg)
+        .addReg(ActualNegSizeReg)
         .addReg(ScratchReg);
     Register Mul = MRI.createVirtualRegister(isPPC64 ? G8RC : GPRC);
     BuildMI(*MBB, {MI}, DL, TII->get(isPPC64 ? PPC::MULLD : PPC::MULLW), Mul)
@@ -11994,7 +12021,7 @@ PPCTargetLowering::emitProbedAlloca(MachineInstr &MI,
     Register NegMod = MRI.createVirtualRegister(isPPC64 ? G8RC : GPRC);
     BuildMI(*MBB, {MI}, DL, TII->get(isPPC64 ? PPC::SUBF8 : PPC::SUBF), NegMod)
         .addReg(Mul)
-        .addReg(NegSizeReg);
+        .addReg(ActualNegSizeReg);
     BuildMI(*MBB, {MI}, DL, TII->get(isPPC64 ? PPC::STDUX : PPC::STWUX), SPReg)
         .addReg(FramePointer)
         .addReg(SPReg)
