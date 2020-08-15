@@ -82,51 +82,23 @@ static bool IsSigned(Scalar::Type type) {
 
 // Promote to max type currently follows the ANSI C rule for type promotion in
 // expressions.
-static Scalar::Type PromoteToMaxType(
-    const Scalar &lhs,  // The const left hand side object
-    const Scalar &rhs,  // The const right hand side object
-    Scalar &temp_value, // A modifiable temp value than can be used to hold
-                        // either the promoted lhs or rhs object
-    const Scalar *&promoted_lhs_ptr, // Pointer to the resulting possibly
-                                     // promoted value of lhs (at most one of
-                                     // lhs/rhs will get promoted)
-    const Scalar *&promoted_rhs_ptr  // Pointer to the resulting possibly
-                                     // promoted value of rhs (at most one of
-                                     // lhs/rhs will get promoted)
-) {
-  Scalar result;
-  // Initialize the promoted values for both the right and left hand side
-  // values to be the objects themselves. If no promotion is needed (both right
-  // and left have the same type), then the temp_value will not get used.
-  promoted_lhs_ptr = &lhs;
-  promoted_rhs_ptr = &rhs;
+static Scalar::Type PromoteToMaxType(Scalar &lhs, Scalar &rhs) {
   // Extract the types of both the right and left hand side values
   Scalar::Type lhs_type = lhs.GetType();
   Scalar::Type rhs_type = rhs.GetType();
 
-  if (lhs_type > rhs_type) {
-    // Right hand side need to be promoted
-    temp_value = rhs; // Copy right hand side into the temp value
-    if (temp_value.Promote(lhs_type)) // Promote it
-      promoted_rhs_ptr =
-          &temp_value; // Update the pointer for the promoted right hand side
-  } else if (lhs_type < rhs_type) {
-    // Left hand side need to be promoted
-    temp_value = lhs; // Copy left hand side value into the temp value
-    if (temp_value.Promote(rhs_type)) // Promote it
-      promoted_lhs_ptr =
-          &temp_value; // Update the pointer for the promoted left hand side
-  }
+  if (lhs_type > rhs_type)
+    rhs.Promote(lhs_type);
+  else if (lhs_type < rhs_type)
+    lhs.Promote(rhs_type);
 
   // Make sure our type promotion worked as expected
-  if (promoted_lhs_ptr->GetType() == promoted_rhs_ptr->GetType())
-    return promoted_lhs_ptr->GetType(); // Return the resulting max type
+  if (lhs.GetType() == rhs.GetType())
+    return lhs.GetType(); // Return the resulting max type
 
   // Return the void type (zero) if we fail to promote either of the values.
   return Scalar::e_void;
 }
-
-Scalar::Scalar() : m_type(e_void), m_float(static_cast<float>(0)) {}
 
 bool Scalar::GetData(DataExtractor &data, size_t limit_byte_size) const {
   size_t byte_size = GetByteSize();
@@ -160,7 +132,7 @@ bool Scalar::GetData(DataExtractor &data, size_t limit_byte_size) const {
 void Scalar::GetBytes(llvm::MutableArrayRef<uint8_t> storage) const {
   assert(storage.size() >= GetByteSize());
 
-  const auto &store = [&](const llvm::APInt val) {
+  const auto &store = [&](const llvm::APInt &val) {
     StoreIntToMemory(val, storage.data(), (val.getBitWidth() + 7) / 8);
   };
   switch (GetCategory(m_type)) {
@@ -231,8 +203,6 @@ void Scalar::GetValue(Stream *s, bool show_type) const {
     break;
   }
 }
-
-Scalar::~Scalar() = default;
 
 Scalar::Type Scalar::GetBestTypeForBitSize(size_t bit_size, bool sign) {
   // Scalar types are always host types, hence the sizeof().
@@ -688,21 +658,18 @@ long double Scalar::LongDouble(long double fail_value) const {
   return static_cast<long double>(Double(fail_value));
 }
 
-Scalar &Scalar::operator+=(const Scalar &rhs) {
-  Scalar temp_value;
-  const Scalar *a;
-  const Scalar *b;
-  if ((m_type = PromoteToMaxType(*this, rhs, temp_value, a, b)) !=
-      Scalar::e_void) {
+Scalar &Scalar::operator+=(Scalar rhs) {
+  Scalar copy = *this;
+  if ((m_type = PromoteToMaxType(copy, rhs)) != Scalar::e_void) {
     switch (GetCategory(m_type)) {
     case Category::Void:
       break;
     case Category::Integral:
-      m_integer = a->m_integer + b->m_integer;
+      m_integer = copy.m_integer + rhs.m_integer;
       break;
 
     case Category::Float:
-      m_float = a->m_float + b->m_float;
+      m_float = copy.m_float + rhs.m_float;
       break;
     }
   }
@@ -845,46 +812,38 @@ const Scalar lldb_private::operator+(const Scalar &lhs, const Scalar &rhs) {
   return result;
 }
 
-const Scalar lldb_private::operator-(const Scalar &lhs, const Scalar &rhs) {
+const Scalar lldb_private::operator-(Scalar lhs, Scalar rhs) {
   Scalar result;
-  Scalar temp_value;
-  const Scalar *a;
-  const Scalar *b;
-  if ((result.m_type = PromoteToMaxType(lhs, rhs, temp_value, a, b)) !=
-      Scalar::e_void) {
+  if ((result.m_type = PromoteToMaxType(lhs, rhs)) != Scalar::e_void) {
     switch (GetCategory(result.m_type)) {
     case Category::Void:
       break;
     case Category::Integral:
-      result.m_integer = a->m_integer - b->m_integer;
+      result.m_integer = lhs.m_integer - rhs.m_integer;
       break;
     case Category::Float:
-      result.m_float = a->m_float - b->m_float;
+      result.m_float = lhs.m_float - rhs.m_float;
       break;
     }
   }
   return result;
 }
 
-const Scalar lldb_private::operator/(const Scalar &lhs, const Scalar &rhs) {
+const Scalar lldb_private::operator/(Scalar lhs, Scalar rhs) {
   Scalar result;
-  Scalar temp_value;
-  const Scalar *a;
-  const Scalar *b;
-  if ((result.m_type = PromoteToMaxType(lhs, rhs, temp_value, a, b)) !=
-          Scalar::e_void &&
-      !b->IsZero()) {
+  if ((result.m_type = PromoteToMaxType(lhs, rhs)) != Scalar::e_void &&
+      !rhs.IsZero()) {
     switch (GetCategory(result.m_type)) {
     case Category::Void:
       break;
     case Category::Integral:
       if (IsSigned(result.m_type))
-        result.m_integer = a->m_integer.sdiv(b->m_integer);
-      else 
-        result.m_integer = a->m_integer.udiv(b->m_integer);
+        result.m_integer = lhs.m_integer.sdiv(rhs.m_integer);
+      else
+        result.m_integer = lhs.m_integer.udiv(rhs.m_integer);
       return result;
     case Category::Float:
-      result.m_float = a->m_float / b->m_float;
+      result.m_float = lhs.m_float / rhs.m_float;
       return result;
     }
   }
@@ -894,69 +853,53 @@ const Scalar lldb_private::operator/(const Scalar &lhs, const Scalar &rhs) {
   return result;
 }
 
-const Scalar lldb_private::operator*(const Scalar &lhs, const Scalar &rhs) {
+const Scalar lldb_private::operator*(Scalar lhs, Scalar rhs) {
   Scalar result;
-  Scalar temp_value;
-  const Scalar *a;
-  const Scalar *b;
-  if ((result.m_type = PromoteToMaxType(lhs, rhs, temp_value, a, b)) !=
-      Scalar::e_void) {
+  if ((result.m_type = PromoteToMaxType(lhs, rhs)) != Scalar::e_void) {
     switch (GetCategory(result.m_type)) {
     case Category::Void:
       break;
     case Category::Integral:
-      result.m_integer = a->m_integer * b->m_integer;
+      result.m_integer = lhs.m_integer * rhs.m_integer;
       break;
     case Category::Float:
-      result.m_float = a->m_float * b->m_float;
+      result.m_float = lhs.m_float * rhs.m_float;
       break;
     }
   }
   return result;
 }
 
-const Scalar lldb_private::operator&(const Scalar &lhs, const Scalar &rhs) {
+const Scalar lldb_private::operator&(Scalar lhs, Scalar rhs) {
   Scalar result;
-  Scalar temp_value;
-  const Scalar *a;
-  const Scalar *b;
-  if ((result.m_type = PromoteToMaxType(lhs, rhs, temp_value, a, b)) !=
-      Scalar::e_void) {
+  if ((result.m_type = PromoteToMaxType(lhs, rhs)) != Scalar::e_void) {
     if (GetCategory(result.m_type) == Category::Integral)
-      result.m_integer = a->m_integer & b->m_integer;
+      result.m_integer = lhs.m_integer & rhs.m_integer;
     else
       result.m_type = Scalar::e_void;
   }
   return result;
 }
 
-const Scalar lldb_private::operator|(const Scalar &lhs, const Scalar &rhs) {
+const Scalar lldb_private::operator|(Scalar lhs, Scalar rhs) {
   Scalar result;
-  Scalar temp_value;
-  const Scalar *a;
-  const Scalar *b;
-  if ((result.m_type = PromoteToMaxType(lhs, rhs, temp_value, a, b)) !=
-      Scalar::e_void) {
+  if ((result.m_type = PromoteToMaxType(lhs, rhs)) != Scalar::e_void) {
     if (GetCategory(result.m_type) == Category::Integral)
-      result.m_integer = a->m_integer | b->m_integer;
+      result.m_integer = lhs.m_integer | rhs.m_integer;
     else
       result.m_type = Scalar::e_void;
   }
   return result;
 }
 
-const Scalar lldb_private::operator%(const Scalar &lhs, const Scalar &rhs) {
+const Scalar lldb_private::operator%(Scalar lhs, Scalar rhs) {
   Scalar result;
-  Scalar temp_value;
-  const Scalar *a;
-  const Scalar *b;
-  if ((result.m_type = PromoteToMaxType(lhs, rhs, temp_value, a, b)) !=
-      Scalar::e_void) {
-    if (!b->IsZero() && GetCategory(result.m_type) == Category::Integral) {
+  if ((result.m_type = PromoteToMaxType(lhs, rhs)) != Scalar::e_void) {
+    if (!rhs.IsZero() && GetCategory(result.m_type) == Category::Integral) {
       if (IsSigned(result.m_type))
-        result.m_integer = a->m_integer.srem(b->m_integer);
+        result.m_integer = lhs.m_integer.srem(rhs.m_integer);
       else
-        result.m_integer = a->m_integer.urem(b->m_integer);
+        result.m_integer = lhs.m_integer.urem(rhs.m_integer);
       return result;
     }
   }
@@ -964,15 +907,11 @@ const Scalar lldb_private::operator%(const Scalar &lhs, const Scalar &rhs) {
   return result;
 }
 
-const Scalar lldb_private::operator^(const Scalar &lhs, const Scalar &rhs) {
+const Scalar lldb_private::operator^(Scalar lhs, Scalar rhs) {
   Scalar result;
-  Scalar temp_value;
-  const Scalar *a;
-  const Scalar *b;
-  if ((result.m_type = PromoteToMaxType(lhs, rhs, temp_value, a, b)) !=
-      Scalar::e_void) {
+  if ((result.m_type = PromoteToMaxType(lhs, rhs)) != Scalar::e_void) {
     if (GetCategory(result.m_type) == Category::Integral)
-      result.m_integer = a->m_integer ^ b->m_integer;
+      result.m_integer = lhs.m_integer ^ rhs.m_integer;
     else
       result.m_type = Scalar::e_void;
   }
@@ -1068,12 +1007,9 @@ Status Scalar::SetValueFromCString(const char *value_str, Encoding encoding,
   return error;
 }
 
-Status Scalar::SetValueFromData(DataExtractor &data, lldb::Encoding encoding,
-                                size_t byte_size) {
+Status Scalar::SetValueFromData(const DataExtractor &data,
+                                lldb::Encoding encoding, size_t byte_size) {
   Status error;
-
-  type128 int128;
-  type256 int256;
   switch (encoding) {
   case lldb::eEncodingInvalid:
     error.SetErrorString("invalid encoding");
@@ -1081,100 +1017,26 @@ Status Scalar::SetValueFromData(DataExtractor &data, lldb::Encoding encoding,
   case lldb::eEncodingVector:
     error.SetErrorString("vector encoding unsupported");
     break;
-  case lldb::eEncodingUint: {
-    lldb::offset_t offset = 0;
-
-    switch (byte_size) {
-    case 1:
-      operator=(data.GetU8(&offset));
-      break;
-    case 2:
-      operator=(data.GetU16(&offset));
-      break;
-    case 4:
-      operator=(data.GetU32(&offset));
-      break;
-    case 8:
-      operator=(data.GetU64(&offset));
-      break;
-    case 16:
-      if (data.GetByteOrder() == eByteOrderBig) {
-        int128.x[1] = data.GetU64(&offset);
-        int128.x[0] = data.GetU64(&offset);
-      } else {
-        int128.x[0] = data.GetU64(&offset);
-        int128.x[1] = data.GetU64(&offset);
-      }
-      operator=(llvm::APInt(BITWIDTH_INT128, NUM_OF_WORDS_INT128, int128.x));
-      break;
-    case 32:
-      if (data.GetByteOrder() == eByteOrderBig) {
-        int256.x[3] = data.GetU64(&offset);
-        int256.x[2] = data.GetU64(&offset);
-        int256.x[1] = data.GetU64(&offset);
-        int256.x[0] = data.GetU64(&offset);
-      } else {
-        int256.x[0] = data.GetU64(&offset);
-        int256.x[1] = data.GetU64(&offset);
-        int256.x[2] = data.GetU64(&offset);
-        int256.x[3] = data.GetU64(&offset);
-      }
-      operator=(llvm::APInt(BITWIDTH_INT256, NUM_OF_WORDS_INT256, int256.x));
-      break;
-    default:
-      error.SetErrorStringWithFormat(
-          "unsupported unsigned integer byte size: %" PRIu64 "",
-          static_cast<uint64_t>(byte_size));
-      break;
-    }
-  } break;
+  case lldb::eEncodingUint:
   case lldb::eEncodingSint: {
-    lldb::offset_t offset = 0;
-
-    switch (byte_size) {
-    case 1:
-      operator=(static_cast<int8_t>(data.GetU8(&offset)));
-      break;
-    case 2:
-      operator=(static_cast<int16_t>(data.GetU16(&offset)));
-      break;
-    case 4:
-      operator=(static_cast<int32_t>(data.GetU32(&offset)));
-      break;
-    case 8:
-      operator=(static_cast<int64_t>(data.GetU64(&offset)));
-      break;
-    case 16:
-      if (data.GetByteOrder() == eByteOrderBig) {
-        int128.x[1] = data.GetU64(&offset);
-        int128.x[0] = data.GetU64(&offset);
-      } else {
-        int128.x[0] = data.GetU64(&offset);
-        int128.x[1] = data.GetU64(&offset);
-      }
-      operator=(llvm::APInt(BITWIDTH_INT128, NUM_OF_WORDS_INT128, int128.x));
-      break;
-    case 32:
-      if (data.GetByteOrder() == eByteOrderBig) {
-        int256.x[3] = data.GetU64(&offset);
-        int256.x[2] = data.GetU64(&offset);
-        int256.x[1] = data.GetU64(&offset);
-        int256.x[0] = data.GetU64(&offset);
-      } else {
-        int256.x[0] = data.GetU64(&offset);
-        int256.x[1] = data.GetU64(&offset);
-        int256.x[2] = data.GetU64(&offset);
-        int256.x[3] = data.GetU64(&offset);
-      }
-      operator=(llvm::APInt(BITWIDTH_INT256, NUM_OF_WORDS_INT256, int256.x));
-      break;
-    default:
-      error.SetErrorStringWithFormat(
-          "unsupported signed integer byte size: %" PRIu64 "",
-          static_cast<uint64_t>(byte_size));
-      break;
+    if (data.GetByteSize() < byte_size)
+      return Status("insufficient data");
+    Type type = GetBestTypeForBitSize(byte_size*8, encoding == lldb::eEncodingSint);
+    if (type == e_void) {
+      return Status("unsupported integer byte size: %" PRIu64 "",
+                    static_cast<uint64_t>(byte_size));
     }
-  } break;
+    m_type = type;
+    if (data.GetByteOrder() == endian::InlHostByteOrder()) {
+      m_integer = APInt::getNullValue(8 * byte_size);
+      llvm::LoadIntFromMemory(m_integer, data.GetDataStart(), byte_size);
+    } else {
+      std::vector<uint8_t> buffer(byte_size);
+      std::copy_n(data.GetDataStart(), byte_size, buffer.rbegin());
+      llvm::LoadIntFromMemory(m_integer, buffer.data(), byte_size);
+    }
+    break;
+  }
   case lldb::eEncodingIEEE754: {
     lldb::offset_t offset = 0;
 
@@ -1295,16 +1157,13 @@ bool Scalar::ExtractBitfield(uint32_t bit_size, uint32_t bit_offset) {
   return false;
 }
 
-bool lldb_private::operator==(const Scalar &lhs, const Scalar &rhs) {
+bool lldb_private::operator==(Scalar lhs, Scalar rhs) {
   // If either entry is void then we can just compare the types
   if (lhs.m_type == Scalar::e_void || rhs.m_type == Scalar::e_void)
     return lhs.m_type == rhs.m_type;
 
-  Scalar temp_value;
-  const Scalar *a;
-  const Scalar *b;
   llvm::APFloat::cmpResult result;
-  switch (PromoteToMaxType(lhs, rhs, temp_value, a, b)) {
+  switch (PromoteToMaxType(lhs, rhs)) {
   case Scalar::e_void:
     break;
   case Scalar::e_sint:
@@ -1319,11 +1178,11 @@ bool lldb_private::operator==(const Scalar &lhs, const Scalar &rhs) {
   case Scalar::e_uint256:
   case Scalar::e_sint512:
   case Scalar::e_uint512:
-    return a->m_integer == b->m_integer;
+    return lhs.m_integer == rhs.m_integer;
   case Scalar::e_float:
   case Scalar::e_double:
   case Scalar::e_long_double:
-    result = a->m_float.compare(b->m_float);
+    result = lhs.m_float.compare(rhs.m_float);
     if (result == llvm::APFloat::cmpEqual)
       return true;
   }
@@ -1334,15 +1193,12 @@ bool lldb_private::operator!=(const Scalar &lhs, const Scalar &rhs) {
   return !(lhs == rhs);
 }
 
-bool lldb_private::operator<(const Scalar &lhs, const Scalar &rhs) {
+bool lldb_private::operator<(Scalar lhs, Scalar rhs) {
   if (lhs.m_type == Scalar::e_void || rhs.m_type == Scalar::e_void)
     return false;
 
-  Scalar temp_value;
-  const Scalar *a;
-  const Scalar *b;
   llvm::APFloat::cmpResult result;
-  switch (PromoteToMaxType(lhs, rhs, temp_value, a, b)) {
+  switch (PromoteToMaxType(lhs, rhs)) {
   case Scalar::e_void:
     break;
   case Scalar::e_sint:
@@ -1352,17 +1208,17 @@ bool lldb_private::operator<(const Scalar &lhs, const Scalar &rhs) {
   case Scalar::e_sint256:
   case Scalar::e_sint512:
   case Scalar::e_uint512:
-    return a->m_integer.slt(b->m_integer);
+    return lhs.m_integer.slt(rhs.m_integer);
   case Scalar::e_uint:
   case Scalar::e_ulong:
   case Scalar::e_ulonglong:
   case Scalar::e_uint128:
   case Scalar::e_uint256:
-    return a->m_integer.ult(b->m_integer);
+    return lhs.m_integer.ult(rhs.m_integer);
   case Scalar::e_float:
   case Scalar::e_double:
   case Scalar::e_long_double:
-    result = a->m_float.compare(b->m_float);
+    result = lhs.m_float.compare(rhs.m_float);
     if (result == llvm::APFloat::cmpLessThan)
       return true;
   }

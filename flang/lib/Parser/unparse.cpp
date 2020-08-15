@@ -1761,7 +1761,9 @@ public:
               Word("!DIR$ IGNORE_TKR"); // emitted even if tkr list is empty
               Walk(" ", tkr, ", ");
             },
-            [&](const std::list<Name> &names) { Walk("!DIR$ ", names, " "); },
+            [&](const std::list<CompilerDirective::NameValue> &names) {
+              Walk("!DIR$ ", names, " ");
+            },
         },
         x.u);
     Put('\n');
@@ -1776,6 +1778,10 @@ public:
       Put(") ");
     }
     Walk(std::get<Name>(x.t));
+  }
+  void Unparse(const CompilerDirective::NameValue &x) {
+    Walk(std::get<Name>(x.t));
+    Walk("=", std::get<std::optional<std::uint64_t>>(x.t));
   }
 
   // OpenACC Directives & Clauses
@@ -1829,7 +1835,7 @@ public:
   void Before(const AccClause::Finalize &) { Word("FINALIZE"); }
   void Before(const AccClause::IfPresent &) { Word("IF_PRESENT"); }
   void Before(const AccClause::Independent &) { Word("INDEPENDENT"); }
-  void Before(const AccClause::NoHost &) { Word("NOHOST"); }
+  void Before(const AccClause::Nohost &) { Word("NOHOST"); }
   void Before(const AccClause::Read &) { Word("READ"); }
   void Before(const AccClause::Seq &) { Word("SEQ"); }
   void Before(const AccClause::Write &) { Word("WRITE"); }
@@ -1900,7 +1906,7 @@ public:
     Walk(x.v);
     Put(")");
   }
-  void Unparse(const AccClause::DevicePtr &x) {
+  void Unparse(const AccClause::Deviceptr &x) {
     Word("DEVICEPTR");
     Put("(");
     Walk(x.v);
@@ -1912,7 +1918,7 @@ public:
     Walk(x.v);
     Put(")");
   }
-  void Unparse(const AccClause::FirstPrivate &x) {
+  void Unparse(const AccClause::Firstprivate &x) {
     Word("FIRSTPRIVATE");
     Put("(");
     Walk(x.v);
@@ -2098,10 +2104,9 @@ public:
     Walk(std::get<AccBeginCombinedDirective>(x.t));
     Put("\n");
     EndOpenACC();
-    Walk(std::get<Block>(x.t), "");
+    Walk(std::get<std::optional<DoConstruct>>(x.t));
     BeginOpenACC();
-    Word("!$ACC END ");
-    Walk(std::get<std::optional<AccEndCombinedDirective>>(x.t));
+    Walk("!$ACC END ", std::get<std::optional<DoConstruct>>(x.t));
     Put("\n");
     EndOpenACC();
   }
@@ -2199,6 +2204,12 @@ public:
     Walk(std::get<OmpReductionOperator>(x.t));
     Put(":");
     Walk(std::get<std::list<Designator>>(x.t), ",");
+    Put(")");
+  }
+  void Unparse(const OmpAllocateClause &x) {
+    Word("ALLOCATE(");
+    Walk(std::get<std::optional<OmpAllocateClause::Allocator>>(x.t), ":");
+    Walk(std::get<OmpObjectList>(x.t));
     Put(")");
   }
   void Unparse(const OmpDependSinkVecLength &x) {

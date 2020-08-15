@@ -207,6 +207,8 @@ public:
 
   void finishLayout(MCAssembler const &Asm, MCAsmLayout &Layout) const override;
 
+  unsigned getMaximumNopSize() const override;
+
   bool writeNopData(raw_ostream &OS, uint64_t Count) const override;
 };
 } // end anonymous namespace
@@ -1065,6 +1067,21 @@ void X86AsmBackend::finishLayout(MCAssembler const &Asm,
     Layout.getFragmentOffset(&*Section.getFragmentList().rbegin());
     Asm.computeFragmentSize(Layout, *Section.getFragmentList().rbegin());
   }
+}
+
+unsigned X86AsmBackend::getMaximumNopSize() const {
+  if (!STI.hasFeature(X86::FeatureNOPL) && !STI.hasFeature(X86::Mode64Bit))
+    return 1;
+  if (STI.getFeatureBits()[X86::FeatureFast7ByteNOP])
+    return 7;
+  if (STI.getFeatureBits()[X86::FeatureFast15ByteNOP])
+    return 15;
+  if (STI.getFeatureBits()[X86::FeatureFast11ByteNOP])
+    return 11;
+  // FIXME: handle 32-bit mode
+  // 15-bytes is the longest single NOP instruction, but 10-bytes is
+  // commonly the longest that can be efficiently decoded.
+  return 10;
 }
 
 /// Write a sequence of optimal nops to the output, covering \p Count

@@ -479,6 +479,7 @@ public:
     case llvm::Triple::mips64el:
     case llvm::Triple::ppc:
     case llvm::Triple::ppc64:
+    case llvm::Triple::ppc64le:
     case llvm::Triple::sparcv9:
       this->MCountName = "_mcount";
       break;
@@ -722,6 +723,8 @@ public:
   // AIX sets FLT_EVAL_METHOD to be 1.
   unsigned getFloatEvalMethod() const override { return 1; }
   bool hasInt128Type() const override { return false; }
+
+  bool defaultsToAIXPowerAlignment() const override { return true; }
 };
 
 void addWindowsDefines(const llvm::Triple &Triple, const LangOptions &Opts,
