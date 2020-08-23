@@ -1882,6 +1882,35 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
   }
   uint64_t SEHStackAllocAmt = NumBytes;
 
+  // AfterPop is the position to insert .cfi_restore.
+  MachineBasicBlock::iterator AfterPop = MBBI;
+  if (HasFP) {
+    if (X86FI->getSaveArgSize()) {
+      // LEAVE is effectively mov rbp,rsp; pop rbp
+      BuildMI(MBB, MBBI, DL, TII.get(X86::LEAVE64))
+        .setMIFlag(MachineInstr::FrameDestroy);
+    } else {
+      // Pop EBP.
+      BuildMI(MBB, MBBI, DL, TII.get(Is64Bit ? X86::POP64r : X86::POP32r),
+            MachineFramePtr)
+        .setMIFlag(MachineInstr::FrameDestroy);
+    }
+    if (NeedsDwarfCFI) {
+      unsigned DwarfStackPtr =
+          TRI->getDwarfRegNum(Is64Bit ? X86::RSP : X86::ESP, true);
+      BuildCFI(MBB, MBBI, DL,
+               MCCFIInstruction::cfiDefCfa(nullptr, DwarfStackPtr, SlotSize));
+      if (!MBB.succ_empty() && !MBB.isReturnBlock()) {
+        unsigned DwarfFramePtr = TRI->getDwarfRegNum(MachineFramePtr, true);
+        BuildCFI(MBB, AfterPop, DL,
+                 MCCFIInstruction::createRestore(nullptr, DwarfFramePtr));
+        --MBBI;
+        --AfterPop;
+      }
+      --MBBI;
+    }
+  }
+
   MachineBasicBlock::iterator FirstCSPop = MBBI;
   // Skip the callee-saved pop instructions.
   while (MBBI != MBB.begin()) {
@@ -1890,7 +1919,8 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
 
     if (Opc != X86::DBG_VALUE && !PI->isTerminator()) {
       if ((Opc != X86::POP32r || !PI->getFlag(MachineInstr::FrameDestroy)) &&
-          (Opc != X86::POP64r || !PI->getFlag(MachineInstr::FrameDestroy)))
+          (Opc != X86::POP64r || !PI->getFlag(MachineInstr::FrameDestroy)) &&
+          (Opc != X86::LEAVE64 || !PI->getFlag(MachineInstr::FrameDestroy)))
         break;
       FirstCSPop = PI;
     }
@@ -1949,35 +1979,6 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
                MCCFIInstruction::cfiDefCfaOffset(nullptr, CSSize + SlotSize));
     }
     --MBBI;
-  }
-
-  // AfterPop is the position to insert .cfi_restore.
-  MachineBasicBlock::iterator AfterPop = MBBI;
-  if (HasFP) {
-    if (X86FI->getSaveArgSize()) {
-      // LEAVE is effectively mov rbp,rsp; pop rbp
-      BuildMI(MBB, MBBI, DL, TII.get(X86::LEAVE64))
-        .setMIFlag(MachineInstr::FrameDestroy);
-    } else {
-      // Pop EBP.
-      BuildMI(MBB, MBBI, DL, TII.get(Is64Bit ? X86::POP64r : X86::POP32r),
-            MachineFramePtr)
-        .setMIFlag(MachineInstr::FrameDestroy);
-    }
-    if (NeedsDwarfCFI) {
-      unsigned DwarfStackPtr =
-          TRI->getDwarfRegNum(Is64Bit ? X86::RSP : X86::ESP, true);
-      BuildCFI(MBB, MBBI, DL,
-               MCCFIInstruction::cfiDefCfa(nullptr, DwarfStackPtr, SlotSize));
-      if (!MBB.succ_empty() && !MBB.isReturnBlock()) {
-        unsigned DwarfFramePtr = TRI->getDwarfRegNum(MachineFramePtr, true);
-        BuildCFI(MBB, AfterPop, DL,
-                 MCCFIInstruction::createRestore(nullptr, DwarfFramePtr));
-        --MBBI;
-        --AfterPop;
-      }
-      --MBBI;
-    }
   }
 
   // Windows unwinder will not invoke function's exception handler if IP is
