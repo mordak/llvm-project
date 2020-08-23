@@ -313,7 +313,7 @@ unsigned Process::StandardErrColumns() {
   return getColumns();
 }
 
-#ifdef HAVE_TERMINFO
+#ifdef LLVM_ENABLE_TERMINFO
 // We manually declare these extern functions because finding the correct
 // headers from various terminfo, curses, or other sources is harder than
 // writing their specs down.
@@ -323,7 +323,7 @@ extern "C" int del_curterm(struct term *termp);
 extern "C" int tigetnum(char *capname);
 #endif
 
-#ifdef HAVE_TERMINFO
+#ifdef LLVM_ENABLE_TERMINFO
 static ManagedStatic<std::mutex> TermColorMutex;
 #endif
 
@@ -332,7 +332,7 @@ static bool terminalHasColors(int fd) {
   return false;
 #endif
 
-#ifdef HAVE_TERMINFO
+#ifdef LLVM_ENABLE_TERMINFO
   // First, acquire a global lock because these C routines are thread hostile.
   std::lock_guard<std::mutex> G(*TermColorMutex);
 
