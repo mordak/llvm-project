@@ -44,6 +44,16 @@ Non-comprehensive list of changes in this release
    functionality, or simply have a lot to talk about), see the `NOTE` below
    for adding a new subsection.
 
+* The LLVM project has started the migration towards Python 3, and the build
+  system now prefers Python 3 whenever available.  If the Python 3 interpreter
+  (or libraries) are not found, the build system will, for the time being, fall
+  back to Python 2.  It is recommended that downstream projects migrate to
+  Python 3 as Python 2 has been end-of-life'd by the Python Software
+  Foundation.
+
+* The llgo frontend has been removed for now, but may be resurrected in the
+  future.
+
 * ...
 
 
@@ -103,64 +113,31 @@ Changes to the AArch64 Backend
 * Clearly error out on unsupported relocations when targeting COFF, instead
   of silently accepting some (without being able to do what was requested).
 
-* Clang adds support for the following macros that enable the
-  C-intrinsics from the `Arm C language extensions for SVE
+* Implemented codegen support for the SVE C-language intrinsics
+  documented in `Arm C Language Extensions (ACLE) for SVE
   <https://developer.arm.com/documentation/100987/>`_ (version
-  ``00bet5``, see section 2.1 for the list of intrinsics associated to
-  each macro):
+  ``00bet5``). For more information, see the ``clang`` 11 release
+  notes.
 
+* Added support for Armv8.6-A:
 
-      =================================  =================
-      Preprocessor macro                 Target feature
-      =================================  =================
-      ``__ARM_FEATURE_SVE``              ``+sve``
-      ``__ARM_FEATURE_SVE_BF16``         ``+sve+bf16``
-      ``__ARM_FEATURE_SVE_MATMUL_FP32``  ``+sve+f32mm``
-      ``__ARM_FEATURE_SVE_MATMUL_FP64``  ``+sve+f64mm``
-      ``__ARM_FEATURE_SVE_MATMUL_INT8``  ``+sve+i8mm``
-      ``__ARM_FEATURE_SVE2``             ``+sve2``
-      ``__ARM_FEATURE_SVE2_AES``         ``+sve2-aes``
-      ``__ARM_FEATURE_SVE2_BITPERM``     ``+sve2-bitperm``
-      ``__ARM_FEATURE_SVE2_SHA3``        ``+sve2-sha3``
-      ``__ARM_FEATURE_SVE2_SM4``         ``+sve2-sm4``
-      =================================  =================
+  Assembly support for the following extensions:
+  - Enhanced Counter Virtualization (ARMv8.6-ECV).
+  - Fine Grained Traps (ARMv8.6-FGT).
+  - Activity Monitors virtualization (ARMv8.6-AMU).
+  - Data gathering hint (ARMv8.0-DGH).
 
-  The macros enable users to write C/C++ `Vector Length Agnostic
-  (VLA)` loops, that can be executed on any CPU that implements the
-  underlying instructions supported by the C intrinsics, independently
-  of the hardware vector register size.
+  Assembly and intrinsics support for the Armv8.6-A Matrix Multiply extension
+  for Neon and SVE vectors.
 
-  For example, the ``__ARM_FEATURE_SVE`` macro is enabled when
-  targeting AArch64 code generation by setting ``-march=armv8-a+sve``
-  on the command line.
+  Support for the ARMv8.2-BF16 BFloat16 extension. This includes a new C-level
+  storage-only `__bf16` type, a `BFloat` IR type, a `bf16` MVT, and assembly
+  and intrinsics support.
 
-  .. code-block:: c
-     :caption: Example of VLA addition of two arrays with SVE ACLE.
-
-     // Compile with:
-     // `clang++ -march=armv8a+sve ...` (for c++)
-     // `clang -stc=c11 -march=armv8a+sve ...` (for c)
-     #include <arm_sve.h>
-
-     void VLA_add_arrays(double *x, double *y, double *out, unsigned N) {
-       for (unsigned i = 0; i < N; i += svcntd()) {
-         svbool_t Pg = svwhilelt_b64(i, N);
-         svfloat64_t vx = svld1(Pg, &x[i]);
-         svfloat64_t vy = svld1(Pg, &y[i]);
-         svfloat64_t vout = svadd_x(Pg, vx, vy);
-         svst1(Pg, &out[i], vout);
-       }
-     }
-
-  Please note that support for lazy binding of SVE function calls is
-  incomplete. When you interface user code with SVE functions that are
-  provided through shared libraries, avoid using lazy binding. If you
-  use lazy binding, the results could be corrupted.
+* Added support for Cortex-A34, Cortex-A77, Cortex-A78 and Cortex-X1 cores.
 
 Changes to the ARM Backend
 --------------------------
-
-During this release ...
 
 * Implemented C-language intrinsics for the full Arm v8.1-M MVE instruction
   set. ``<arm_mve.h>`` now supports the complete API defined in the Arm C
@@ -177,6 +154,19 @@ During this release ...
   default may wish to specify ``-fno-omit-frame-pointer`` to get the old
   behavior. This improves compatibility with GCC.
 
+* Added support for Armv8.6-A:
+
+  Assembly and intrinsics support for the Armv8.6-A Matrix Multiply extension
+  for Neon vectors.
+
+  Support for the ARMv8.2-AA32BF16 BFloat16 extension. This includes a new
+  C-level storage-only `__bf16` type, a `BFloat` IR type, a `bf16` MVT, and
+  assembly and intrinsics support.
+
+* Added support for CMSE.
+
+* Added support for Cortex-M55, Cortex-A77, Cortex-A78 and Cortex-X1 cores.
+
 Changes to the MIPS Target
 --------------------------
 
@@ -187,6 +177,56 @@ Changes to the PowerPC Target
 -----------------------------
 
 During this release ...
+
+Changes to the RISC-V Target
+----------------------------
+
+New features:
+* After consultation through an RFC, the RISC-V backend now accepts patches for
+  proposed instruction set extensions that have not yet been ratified.  For these
+  experimental extensions, there is no expectation of ongoing support - the
+  compiler support will continue to change until the specification is finalised.
+  In line with this policy, MC layer and code generation support was added for
+  version 0.92 of the proposed Bit Manipulation Extension and MC layer support
+  was added for version 0.8 of the proposed RISC-V Vector instruction set
+  extension. As these extensions are not yet ratified, compiler support will
+  continue to change to match the specifications until they are finalised.
+* ELF attribute sections are now created, encoding information such as the ISA
+  string.
+* Support for saving/restoring callee-saved registers via libcalls (a code
+  size optimisation).
+* llvm-objdump will now print branch targets as part of disassembly.
+
+Improvements:
+* If an immediate can be generated using a pair of `addi` instructions, that
+  pair will be selected rather than materialising the immediate into a
+  separate register with an `lui` and `addi` pair.
+* Multiplication by a constant was optimised.
+* `addi` instructions are now folded into the offset of a load/store instruction
+  even if the load/store itself has a non-zero offset, when it is safe to do
+  so.
+* Additional target hooks were implemented to minimise generation of
+  unnecessary control flow instruction.
+* The RISC-V backend's load/store peephole optimisation pass now supports
+  constant pools, improving code generation for floating point constants.
+* Debug scratch register names `dscratch0` and `dscratch1` are now recognised in
+  addition to the legacy `dscratch` register name.
+* Codegen for checking isnan was improved, removing a redundant `and`.
+* The `dret` instruction is now supported by the MC layer.
+* `.option pic` and `.option nopic` are now supported in assembly and `.reloc`
+  was extended to support arbitrary relocation types.
+* Scheduling info metadata was improved.
+* The `jump` pseudo instruction is now supported.
+
+Bug fixes:
+* A failure to insert indirect branches in position independent code
+  was fixed.
+* The calculated expanded size of atomic pseudo operations was fixed, avoiding
+  "fixup value out of range" errors during branch relaxation for some inputs.
+* The `mcountinhibit` CSR is now recognised.
+* The correct libcall is now emitted for converting a float/double to a 32-bit
+  signed or unsigned integer on RV64 targets lacking the F or D extensions.
+
 
 Changes to the X86 Target
 -------------------------
@@ -205,6 +245,16 @@ During this release ...
   avx512bw otherwise they would split into multiple YMM registers. This means
   vXi16/vXi8 vectors are consistently treated the same as
   vXi32/vXi64/vXf64/vXf32 vectors of the same total width.
+* Support was added for Intel AMX instructions.
+* Support was added for TSXLDTRK instructions.
+* A pass was added for mitigating the Load Value Injection vulnerability.
+* The Speculative Execution Side Effect Suppression pass was added which can
+  be used to as a last resort mitigation for speculative execution related
+  CPU vulnerabilities.
+* Improved recognition of boolean vector reductions with better MOVMSKB/PTEST
+  handling
+* Exteded recognition of rotation patterns to handle funnel shift as well,
+  allowing us to remove the existing x86-specific SHLD/SHRD combine.
 
 Changes to the AMDGPU Target
 -----------------------------
