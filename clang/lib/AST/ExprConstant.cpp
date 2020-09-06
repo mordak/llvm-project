@@ -6627,9 +6627,15 @@ class APValueToBufferConverter {
   }
 
   bool visitInt(const APSInt &Val, QualType Ty, CharUnits Offset) {
-    CharUnits Width = Info.Ctx.getTypeSizeInChars(Ty);
-    SmallVector<unsigned char, 8> Bytes(Width.getQuantity());
-    llvm::StoreIntToMemory(Val, &*Bytes.begin(), Width.getQuantity());
+    APSInt AdjustedVal = Val;
+    unsigned Width = AdjustedVal.getBitWidth();
+    if (Ty->isBooleanType()) {
+      Width = Info.Ctx.getTypeSize(Ty);
+      AdjustedVal = AdjustedVal.extend(Width);
+    }
+
+    SmallVector<unsigned char, 8> Bytes(Width / 8);
+    llvm::StoreIntToMemory(AdjustedVal, &*Bytes.begin(), Width / 8);
     Buffer.writeObject(Offset, Bytes);
     return true;
   }
@@ -6670,6 +6676,13 @@ class BufferToAPValueConverter {
     return None;
   }
 
+  llvm::NoneType unrepresentableValue(QualType Ty, const APSInt &Val) {
+    Info.FFDiag(BCE->getBeginLoc(),
+                diag::note_constexpr_bit_cast_unrepresentable_value)
+        << Ty << Val.toString(/*Radix=*/10);
+    return None;
+  }
+
   Optional<APValue> visit(const BuiltinType *T, CharUnits Offset,
                           const EnumType *EnumSugar = nullptr) {
     if (T->isNullPtrType()) {
@@ -6680,6 +6693,20 @@ class BufferToAPValueConverter {
     }
 
     CharUnits SizeOf = Info.Ctx.getTypeSizeInChars(T);
+
+    // Work around floating point types that contain unused padding bytes. This
+    // is really just `long double` on x86, which is the only fundamental type
+    // with padding bytes.
+    if (T->isRealFloatingType()) {
+      const llvm::fltSemantics &Semantics =
+          Info.Ctx.getFloatTypeSemantics(QualType(T, 0));
+      unsigned NumBits = llvm::APFloatBase::getSizeInBits(Semantics);
+      assert(NumBits % 8 == 0);
+      CharUnits NumBytes = CharUnits::fromQuantity(NumBits / 8);
+      if (NumBytes != SizeOf)
+        SizeOf = NumBytes;
+    }
+
     SmallVector<uint8_t, 8> Bytes;
     if (!Buffer.readObject(Offset, SizeOf, Bytes)) {
       // If this is std::byte or unsigned char, then its okay to store an
@@ -6704,6 +6731,15 @@ class BufferToAPValueConverter {
 
     if (T->isIntegralOrEnumerationType()) {
       Val.setIsSigned(T->isSignedIntegerOrEnumerationType());
+
+      unsigned IntWidth = Info.Ctx.getIntWidth(QualType(T, 0));
+      if (IntWidth != Val.getBitWidth()) {
+        APSInt Truncated = Val.trunc(IntWidth);
+        if (Truncated.extend(Val.getBitWidth()) != Val)
+          return unrepresentableValue(QualType(T, 0), Val);
+        Val = Truncated;
+      }
+
       return APValue(Val);
     }
 
@@ -11361,7 +11397,12 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
   case Builtin::BI__builtin_rotateleft8:
   case Builtin::BI__builtin_rotateleft16:
   case Builtin::BI__builtin_rotateleft32:
-  case Builtin::BI__builtin_rotateleft64: {
+  case Builtin::BI__builtin_rotateleft64:
+  case Builtin::BI_rotl8: // Microsoft variants of rotate right
+  case Builtin::BI_rotl16:
+  case Builtin::BI_rotl:
+  case Builtin::BI_lrotl:
+  case Builtin::BI_rotl64: {
     APSInt Val, Amt;
     if (!EvaluateInteger(E->getArg(0), Val, Info) ||
         !EvaluateInteger(E->getArg(1), Amt, Info))
@@ -11373,7 +11414,12 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
   case Builtin::BI__builtin_rotateright8:
   case Builtin::BI__builtin_rotateright16:
   case Builtin::BI__builtin_rotateright32:
-  case Builtin::BI__builtin_rotateright64: {
+  case Builtin::BI__builtin_rotateright64:
+  case Builtin::BI_rotr8: // Microsoft variants of rotate right
+  case Builtin::BI_rotr16:
+  case Builtin::BI_rotr:
+  case Builtin::BI_lrotr:
+  case Builtin::BI_rotr64: {
     APSInt Val, Amt;
     if (!EvaluateInteger(E->getArg(0), Val, Info) ||
         !EvaluateInteger(E->getArg(1), Amt, Info))

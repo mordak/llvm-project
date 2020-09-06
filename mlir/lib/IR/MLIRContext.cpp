@@ -264,6 +264,13 @@ public:
   /// Enable support for multi-threading within MLIR.
   bool threadingIsEnabled = true;
 
+  /// Track if we are currently executing in a threaded execution environment
+  /// (like the pass-manager): this is only a debugging feature to help reducing
+  /// the chances of data races one some context APIs.
+#ifndef NDEBUG
+  std::atomic<int> multiThreadedExecutionContext{0};
+#endif
+
   /// If the operation should be attached to diagnostics printed via the
   /// Operation::emit methods.
   bool printOpOnDiagnostic = true;
@@ -487,6 +494,14 @@ MLIRContext::getOrLoadDialect(StringRef dialectNamespace, TypeID dialectID,
   if (!dialect) {
     LLVM_DEBUG(llvm::dbgs()
                << "Load new dialect in Context" << dialectNamespace);
+#ifndef NDEBUG
+    if (impl.multiThreadedExecutionContext != 0)
+      llvm::report_fatal_error(
+          "Loading a dialect (" + dialectNamespace +
+          ") while in a multi-threaded execution context (maybe "
+          "the PassManager): this can indicate a "
+          "missing `dependentDialects` in a pass for example.");
+#endif
     dialect = ctor();
     assert(dialect && "dialect ctor failed");
     return dialect.get();
@@ -501,6 +516,8 @@ MLIRContext::getOrLoadDialect(StringRef dialectNamespace, TypeID dialectID,
 }
 
 void MLIRContext::loadAllGloballyRegisteredDialects() {
+  if (!isGlobalDialectRegistryEnabled())
+    return;
   getGlobalDialectRegistry().loadAll(this);
 }
 
@@ -525,6 +542,17 @@ void MLIRContext::disableMultithreading(bool disable) {
   impl->affineUniquer.disableMultithreading(disable);
   impl->attributeUniquer.disableMultithreading(disable);
   impl->typeUniquer.disableMultithreading(disable);
+}
+
+void MLIRContext::enterMultiThreadedExecution() {
+#ifndef NDEBUG
+  ++impl->multiThreadedExecutionContext;
+#endif
+}
+void MLIRContext::exitMultiThreadedExecution() {
+#ifndef NDEBUG
+  --impl->multiThreadedExecutionContext;
+#endif
 }
 
 /// Return true if we should attach the operation to diagnostics emitted via
@@ -583,6 +611,9 @@ void Dialect::addOperation(AbstractOperation opInfo) {
          "op name doesn't start with dialect namespace");
   assert(&opInfo.dialect == this && "Dialect object mismatch");
   auto &impl = context->getImpl();
+  assert(impl.multiThreadedExecutionContext == 0 &&
+         "Registering a new operation kind while in a multi-threaded execution "
+         "context");
   StringRef opName = opInfo.name;
   if (!impl.registeredOperations.insert({opName, std::move(opInfo)}).second) {
     llvm::errs() << "error: operation named '" << opInfo.name
@@ -593,6 +624,9 @@ void Dialect::addOperation(AbstractOperation opInfo) {
 
 void Dialect::addType(TypeID typeID, AbstractType &&typeInfo) {
   auto &impl = context->getImpl();
+  assert(impl.multiThreadedExecutionContext == 0 &&
+         "Registering a new type kind while in a multi-threaded execution "
+         "context");
   auto *newInfo =
       new (impl.abstractDialectSymbolAllocator.Allocate<AbstractType>())
           AbstractType(std::move(typeInfo));
@@ -602,6 +636,9 @@ void Dialect::addType(TypeID typeID, AbstractType &&typeInfo) {
 
 void Dialect::addAttribute(TypeID typeID, AbstractAttribute &&attrInfo) {
   auto &impl = context->getImpl();
+  assert(impl.multiThreadedExecutionContext == 0 &&
+         "Registering a new attribute kind while in a multi-threaded execution "
+         "context");
   auto *newInfo =
       new (impl.abstractDialectSymbolAllocator.Allocate<AbstractAttribute>())
           AbstractAttribute(std::move(attrInfo));
@@ -630,6 +667,25 @@ const AbstractOperation *AbstractOperation::lookup(StringRef opName,
     return &it->second;
   return nullptr;
 }
+
+AbstractOperation::AbstractOperation(
+    StringRef name, Dialect &dialect, OperationProperties opProperties,
+    TypeID typeID,
+    ParseResult (&parseAssembly)(OpAsmParser &parser, OperationState &result),
+    void (&printAssembly)(Operation *op, OpAsmPrinter &p),
+    LogicalResult (&verifyInvariants)(Operation *op),
+    LogicalResult (&foldHook)(Operation *op, ArrayRef<Attribute> operands,
+                              SmallVectorImpl<OpFoldResult> &results),
+    void (&getCanonicalizationPatterns)(OwningRewritePatternList &results,
+                                        MLIRContext *context),
+    detail::InterfaceMap &&interfaceMap, bool (&hasTrait)(TypeID traitID))
+    : name(Identifier::get(name, dialect.getContext())), dialect(dialect),
+      typeID(typeID), parseAssembly(parseAssembly),
+      printAssembly(printAssembly), verifyInvariants(verifyInvariants),
+      foldHook(foldHook),
+      getCanonicalizationPatterns(getCanonicalizationPatterns),
+      opProperties(opProperties), interfaceMap(std::move(interfaceMap)),
+      hasRawTrait(hasTrait) {}
 
 /// Get the dialect that registered the type with the provided typeid.
 const AbstractType &AbstractType::lookup(TypeID typeID, MLIRContext *context) {
