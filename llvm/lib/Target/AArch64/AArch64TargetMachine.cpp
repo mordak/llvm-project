@@ -456,6 +456,7 @@ void AArch64PassConfig::addIRPasses() {
                                             .forwardSwitchCondToPhi(true)
                                             .convertSwitchToLookupTable(true)
                                             .needCanonicalLoops(false)
+                                            .hoistCommonInsts(true)
                                             .sinkCommonInsts(true)));
 
   // Run LoopDataPrefetch
@@ -544,7 +545,7 @@ bool AArch64PassConfig::addInstSelector() {
 }
 
 bool AArch64PassConfig::addIRTranslator() {
-  addPass(new IRTranslator());
+  addPass(new IRTranslator(getOptLevel()));
   return false;
 }
 
