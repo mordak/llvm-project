@@ -276,6 +276,10 @@ bool X86TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
       HasCLDEMOTE = true;
     } else if (Feature == "+rdpid") {
       HasRDPID = true;
+    } else if (Feature == "+kl") {
+      HasKL = true;
+    } else if (Feature == "+widekl") {
+      HasWIDEKL = true;
     } else if (Feature == "+retpoline-external-thunk") {
       HasRetpolineExternalThunk = true;
     } else if (Feature == "+sahf") {
@@ -504,6 +508,9 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
   case CK_K8:
   case CK_K8SSE3:
   case CK_x86_64:
+  case CK_x86_64_v2:
+  case CK_x86_64_v3:
+  case CK_x86_64_v4:
     defineCPUMacros(Builder, "k8");
     break;
   case CK_AMDFAM10:
@@ -557,6 +564,11 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
 
   if (HasVPCLMULQDQ)
     Builder.defineMacro("__VPCLMULQDQ__");
+
+  // Note, in 32-bit mode, GCC does not define the macro if -mno-sahf. In LLVM,
+  // the feature flag only applies to 64-bit mode.
+  if (HasLAHFSAHF || getTriple().getArch() == llvm::Triple::x86)
+    Builder.defineMacro("__LAHF_SAHF__");
 
   if (HasLZCNT)
     Builder.defineMacro("__LZCNT__");
@@ -680,6 +692,10 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__PREFETCHWT1__");
   if (HasCLZERO)
     Builder.defineMacro("__CLZERO__");
+  if (HasKL)
+    Builder.defineMacro("__KL__");
+  if (HasWIDEKL)
+    Builder.defineMacro("__WIDEKL__");
   if (HasRDPID)
     Builder.defineMacro("__RDPID__");
   if (HasCLDEMOTE)
@@ -835,6 +851,8 @@ bool X86TargetInfo::isValidFeatureName(StringRef Name) const {
       .Case("fxsr", true)
       .Case("gfni", true)
       .Case("invpcid", true)
+      .Case("kl", true)
+      .Case("widekl", true)
       .Case("lwp", true)
       .Case("lzcnt", true)
       .Case("mmx", true)
@@ -921,6 +939,8 @@ bool X86TargetInfo::hasFeature(StringRef Feature) const {
       .Case("fxsr", HasFXSR)
       .Case("gfni", HasGFNI)
       .Case("invpcid", HasINVPCID)
+      .Case("kl", HasKL)
+      .Case("widekl", HasWIDEKL)
       .Case("lwp", HasLWP)
       .Case("lzcnt", HasLZCNT)
       .Case("mm3dnow", MMX3DNowLevel >= AMD3DNow)
@@ -1298,6 +1318,9 @@ Optional<unsigned> X86TargetInfo::getCPUCacheLineSize() const {
     case CK_ZNVER2:
     // Deprecated
     case CK_x86_64:
+    case CK_x86_64_v2:
+    case CK_x86_64_v3:
+    case CK_x86_64_v4:
     case CK_Yonah:
     case CK_Penryn:
     case CK_Core2:
@@ -1442,7 +1465,7 @@ void X86TargetInfo::fillValidCPUList(SmallVectorImpl<StringRef> &Values) const {
 }
 
 void X86TargetInfo::fillValidTuneCPUList(SmallVectorImpl<StringRef> &Values) const {
-  llvm::X86::fillValidCPUArchList(Values);
+  llvm::X86::fillValidTuneCPUList(Values);
 }
 
 ArrayRef<const char *> X86TargetInfo::getGCCRegNames() const {
