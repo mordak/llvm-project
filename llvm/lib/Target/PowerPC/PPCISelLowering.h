@@ -265,11 +265,11 @@ namespace llvm {
     /// is VCMPGTSH.
     VCMP,
 
-    /// RESVEC, OUTFLAG = VCMPo(LHS, RHS, OPC) - Represents one of the
-    /// altivec VCMP*o instructions.  For lack of better number, we use the
+    /// RESVEC, OUTFLAG = VCMP_rec(LHS, RHS, OPC) - Represents one of the
+    /// altivec VCMP*_rec instructions.  For lack of better number, we use the
     /// opcode number encoding for the OPC field to identify the compare.  For
     /// example, 838 is VCMPGTSH.
-    VCMPo,
+    VCMP_rec,
 
     /// CHAIN = COND_BRANCH CHAIN, CRRC, OPC, DESTBB [, INFLAG] - This
     /// corresponds to the COND_BRANCH pseudo instruction.  CRRC is the
@@ -770,6 +770,8 @@ namespace llvm {
     bool SelectAddressRegImm(SDValue N, SDValue &Disp, SDValue &Base,
                              SelectionDAG &DAG,
                              MaybeAlign EncodingAlignment) const;
+    bool SelectAddressRegImm34(SDValue N, SDValue &Disp, SDValue &Base,
+                               SelectionDAG &DAG) const;
 
     /// SelectAddressRegRegOnly - Given the specified addressed, force it to be
     /// represented as an indexed [r+r] operation.
@@ -785,12 +787,6 @@ namespace llvm {
     /// LowerOperation - Provide custom lowering hooks for some operations.
     ///
     SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
-
-    /// LowerOperationWrapper - Place custom new result values for node in
-    /// Results.
-    void LowerOperationWrapper(SDNode *N,
-                               SmallVectorImpl<SDValue> &Results,
-                               SelectionDAG &DAG) const override;
 
     /// ReplaceNodeResults - Replace the results of node with an illegal result
     /// type with new values built out of custom code.
@@ -1018,11 +1014,6 @@ namespace llvm {
     /// exception typeid on entry to a landing pad.
     Register
     getExceptionSelectorRegister(const Constant *PersonalityFn) const override;
-
-    /// isMulhCheaperThanMulShift - Return true if a mulh[s|u] node for a
-    /// specific type is cheaper than a multiply followed by a shift.
-    /// This is true for words and doublewords on 64-bit PowerPC.
-    bool isMulhCheaperThanMulShift(EVT Type) const override;
 
     /// Override to support customized stack guard loading.
     bool useLoadStackGuardNode() const override;
@@ -1330,6 +1321,8 @@ namespace llvm {
 
   bool isIntS16Immediate(SDNode *N, int16_t &Imm);
   bool isIntS16Immediate(SDValue Op, int16_t &Imm);
+  bool isIntS34Immediate(SDNode *N, int64_t &Imm);
+  bool isIntS34Immediate(SDValue Op, int64_t &Imm);
 
   bool convertToNonDenormSingle(APInt &ArgAPInt);
   bool convertToNonDenormSingle(APFloat &ArgAPFloat);

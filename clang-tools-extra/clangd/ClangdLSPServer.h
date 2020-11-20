@@ -24,6 +24,7 @@
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/JSON.h"
 #include <chrono>
+#include <cstddef>
 #include <memory>
 
 namespace clang {
@@ -92,6 +93,7 @@ private:
   void onDocumentDidChange(const DidChangeTextDocumentParams &);
   void onDocumentDidClose(const DidCloseTextDocumentParams &);
   void onDocumentDidSave(const DidSaveTextDocumentParams &);
+  void onAST(const ASTParams &, Callback<llvm::Optional<ASTNode>>);
   void onDocumentOnTypeFormatting(const DocumentOnTypeFormattingParams &,
                                   Callback<std::vector<TextEdit>>);
   void onDocumentRangeFormatting(const DocumentRangeFormattingParams &,
@@ -141,6 +143,9 @@ private:
   void onSemanticTokens(const SemanticTokensParams &, Callback<SemanticTokens>);
   void onSemanticTokensDelta(const SemanticTokensDeltaParams &,
                              Callback<SemanticTokensOrDelta>);
+  /// This is a clangd extension. Provides a json tree representing memory usage
+  /// hierarchy.
+  void onMemoryUsage(const NoParams &, Callback<MemoryTree>);
 
   std::vector<Fix> getFixes(StringRef File, const clangd::Diagnostic &D);
 

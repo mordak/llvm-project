@@ -15,6 +15,7 @@
 
 #include "X86ReturnProtectorLowering.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/Support/TypeSize.h"
 
 namespace llvm {
 
@@ -109,16 +110,17 @@ public:
   bool canSimplifyCallFramePseudos(const MachineFunction &MF) const override;
   bool needsFrameIndexResolution(const MachineFunction &MF) const override;
 
-  int getFrameIndexReference(const MachineFunction &MF, int FI,
-                             Register &FrameReg) const override;
+  StackOffset getFrameIndexReference(const MachineFunction &MF, int FI,
+                                     Register &FrameReg) const override;
 
   int getWin64EHFrameIndexRef(const MachineFunction &MF, int FI,
                               Register &SPReg) const;
-  int getFrameIndexReferenceSP(const MachineFunction &MF, int FI,
-                               Register &SPReg, int Adjustment) const;
-  int getFrameIndexReferencePreferSP(const MachineFunction &MF, int FI,
-                                     Register &FrameReg,
-                                     bool IgnoreSPUpdates) const override;
+  StackOffset getFrameIndexReferenceSP(const MachineFunction &MF, int FI,
+                                       Register &SPReg, int Adjustment) const;
+  StackOffset
+  getFrameIndexReferencePreferSP(const MachineFunction &MF, int FI,
+                                 Register &FrameReg,
+                                 bool IgnoreSPUpdates) const override;
 
   MachineBasicBlock::iterator
   eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,

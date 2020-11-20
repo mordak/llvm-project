@@ -1,7 +1,6 @@
 // Test that dynamically allocated TLS space is included in the root set.
 
-// This is known to be broken with glibc-2.27+
-// but it should pass with Bionic
+// This is known to be broken with glibc-2.27+ but it should pass with Bionic
 // https://bugs.llvm.org/show_bug.cgi?id=37804
 // XFAIL: glibc-2.27
 
@@ -28,8 +27,15 @@ int main(int argc, char *argv[]) {
   assert(handle != 0);
   typedef void **(* store_t)(void *p);
   store_t StoreToTLS = (store_t)dlsym(handle, "StoreToTLS");
-  assert(dlerror() == 0);
 
+  // Sometimes dlerror() occurs when we broke the interceptors.
+  // Add the message here to make the error more obvious.
+  const char *dlerror_msg = dlerror();
+  assert(dlerror_msg == nullptr);
+  if (dlerror_msg != nullptr) {
+    fprintf(stderr, "DLERROR: %s\n", dlerror_msg);
+    fflush(stderr);
+  }
   void *p = malloc(1337);
   // If we don't  know about dynamic TLS, we will return a false leak above.
   void **p_in_tls = StoreToTLS(p);

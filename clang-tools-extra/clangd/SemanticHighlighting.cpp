@@ -222,7 +222,7 @@ public:
       TokRef = TokRef.drop_front(Conflicting.size());
     }
     const auto &SM = AST.getSourceManager();
-    StringRef MainCode = SM.getBuffer(SM.getMainFileID())->getBuffer();
+    StringRef MainCode = SM.getBufferOrFake(SM.getMainFileID()).getBuffer();
 
     // Merge token stream with "inactive line" markers.
     std::vector<HighlightingToken> WithInactiveLines;
@@ -561,7 +561,8 @@ llvm::StringRef toSemanticTokenType(HighlightingKind Kind) {
     // FIXME: better function/member with static modifier?
     return "function";
   case HighlightingKind::Field:
-    return "member";
+    // Not "member": https://github.com/clangd/vscode-clangd/issues/105
+    return "property";
   case HighlightingKind::Class:
     return "class";
   case HighlightingKind::Enum:

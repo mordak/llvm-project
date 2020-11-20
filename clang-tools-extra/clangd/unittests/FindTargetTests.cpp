@@ -148,6 +148,17 @@ TEST_F(TargetDeclTest, Exprs) {
   EXPECT_DECLS("LabelStmt", "label:");
 }
 
+TEST_F(TargetDeclTest, RecoveryForC) {
+  Flags = {"-xc", "-Xclang", "-frecovery-ast"};
+  Code = R"cpp(
+    // error-ok: testing behavior on broken code
+    // int f();
+    int f(int);
+    int x = [[f]]();
+  )cpp";
+  EXPECT_DECLS("DeclRefExpr", "int f(int)");
+}
+
 TEST_F(TargetDeclTest, Recovery) {
   Code = R"cpp(
     // error-ok: testing behavior on broken code
@@ -819,6 +830,24 @@ TEST_F(TargetDeclTest, ObjC) {
   )cpp";
   EXPECT_DECLS("ObjCPropertyRefExpr",
                "@property(atomic, retain, readwrite) I *x");
+
+  Code = R"cpp(
+    @interface MYObject
+    @end
+    @interface Interface
+    @property(retain) [[MYObject]] *x;
+    @end
+  )cpp";
+  EXPECT_DECLS("ObjCInterfaceTypeLoc", "@interface MYObject");
+
+  Code = R"cpp(
+    @interface MYObject2
+    @end
+    @interface Interface
+    @property(retain, nonnull) [[MYObject2]] *x;
+    @end
+  )cpp";
+  EXPECT_DECLS("ObjCInterfaceTypeLoc", "@interface MYObject2");
 
   Code = R"cpp(
     @protocol Foo

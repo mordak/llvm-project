@@ -199,9 +199,9 @@ public:
                         function_ref>::value> * = nullptr,
       // Functor must be callable and return a suitable type.
       std::enable_if_t<std::is_void<Ret>::value ||
-                       std::is_convertible<
-                           std::result_of_t<Callable(Params...)>, Ret>::value>
-          * = nullptr)
+                       std::is_convertible<decltype(std::declval<Callable>()(
+                                               std::declval<Params>()...)),
+                                           Ret>::value> * = nullptr)
       : callback(callback_fn<typename std::remove_reference<Callable>::type>),
         callable(reinterpret_cast<intptr_t>(&callable)) {}
 
@@ -1674,6 +1674,14 @@ void erase_if(Container &C, UnaryPredicate P) {
 template <typename Container, typename ValueType>
 void erase_value(Container &C, ValueType V) {
   C.erase(std::remove(C.begin(), C.end(), V), C.end());
+}
+
+/// Wrapper function to append a range to a container.
+///
+/// C.insert(C.end(), R.begin(), R.end());
+template <typename Container, typename Range>
+inline void append_range(Container &C, Range &&R) {
+  C.insert(C.end(), R.begin(), R.end());
 }
 
 /// Given a sequence container Cont, replace the range [ContIt, ContEnd) with

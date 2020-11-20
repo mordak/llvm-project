@@ -390,10 +390,7 @@ def OpenACC_YieldOp : OpenACC_Op<"yield", [Terminator,
 
   let arguments = (ins Variadic<AnyType>:$operands);
 
-  let builders = [
-    OpBuilder<"OpBuilder &builder, OperationState &result",
-              [{ /* nothing to do */ }]>
-  ];
+  let builders = [OpBuilderDAG<(ins), [{ /* nothing to do */ }]>];
 
   let verifier = ?;
 
@@ -485,13 +482,18 @@ def OpenACC_UpdateOp : OpenACC_Op<"update", [AttrSizedOperandSegments]> {
                        Variadic<IntOrIndex>:$waitOperands,
                        UnitAttr:$async,
                        UnitAttr:$wait,
+                       Variadic<IntOrIndex>:$deviceTypeOperands,
+                       Optional<I1>:$ifCond,
                        Variadic<AnyType>:$hostOperands,
                        Variadic<AnyType>:$deviceOperands,
                        UnitAttr:$ifPresent);
 
   let assemblyFormat = [{
+    ( `if` `(` $ifCond^ `)` )?
     ( `async` `(` $asyncOperand^ `:` type($asyncOperand) `)` )?
     ( `wait_devnum` `(` $waitDevnum^ `:` type($waitDevnum) `)` )?
+    ( `device_type` `(` $deviceTypeOperands^ `:`
+        type($deviceTypeOperands) `)` )?
     ( `wait` `(` $waitOperands^ `:` type($waitOperands) `)` )?
     ( `host` `(` $hostOperands^ `:` type($hostOperands) `)` )?
     ( `device` `(` $deviceOperands^ `:` type($deviceOperands) `)` )?

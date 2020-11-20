@@ -1163,6 +1163,8 @@ public:
     case CK_FloatingToIntegral:
     case CK_FloatingToBoolean:
     case CK_FloatingCast:
+    case CK_FloatingToFixedPoint:
+    case CK_FixedPointToFloating:
     case CK_FixedPointCast:
     case CK_FixedPointToBoolean:
     case CK_FixedPointToIntegral:
@@ -1620,8 +1622,8 @@ llvm::Constant *ConstantEmitter::tryEmitPrivateForVarInit(const VarDecl &D) {
         if (CD->isTrivial() && CD->isDefaultConstructor())
           return CGM.EmitNullConstant(D.getType());
       }
-    InConstantContext = true;
   }
+  InConstantContext = D.hasConstantInitialization();
 
   QualType destType = D.getType();
 
@@ -1877,6 +1879,10 @@ ConstantLValue
 ConstantLValueEmitter::tryEmitBase(const APValue::LValueBase &base) {
   // Handle values.
   if (const ValueDecl *D = base.dyn_cast<const ValueDecl*>()) {
+    // The constant always points to the canonical declaration. We want to look
+    // at properties of the most recent declaration at the point of emission.
+    D = cast<ValueDecl>(D->getMostRecentDecl());
+
     if (D->hasAttr<WeakRefAttr>())
       return CGM.GetWeakRefReference(D).getPointer();
 
@@ -1898,6 +1904,9 @@ ConstantLValueEmitter::tryEmitBase(const APValue::LValueBase &base) {
 
     if (auto *GD = dyn_cast<MSGuidDecl>(D))
       return CGM.GetAddrOfMSGuidDecl(GD);
+
+    if (auto *TPO = dyn_cast<TemplateParamObjectDecl>(D))
+      return CGM.GetAddrOfTemplateParamObject(TPO);
 
     return nullptr;
   }

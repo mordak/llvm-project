@@ -128,11 +128,13 @@ public:
     /// enabled.
     ClangTidyOptionsBuilder GetClangTidyOptions;
 
-    /// If true, turn on the `-frecovery-ast` clang flag.
-    bool BuildRecoveryAST = true;
+    /// If true, force -frecovery-ast flag.
+    /// If false, respect the value in clang.
+    bool BuildRecoveryAST = false;
 
-    /// If true, turn on the `-frecovery-ast-type` clang flag.
-    bool PreserveRecoveryASTType = true;
+    /// If true, force -frecovery-ast-type flag.
+    /// If false, respect the value in clang.
+    bool PreserveRecoveryASTType = false;
 
     /// Clangd's workspace root. Relevant for "workspace" operations not bound
     /// to a particular file.
@@ -316,6 +318,9 @@ public:
 
   void semanticHighlights(PathRef File,
                           Callback<std::vector<HighlightingToken>>);
+
+  /// Describe the AST subtree for a piece of code.
+  void getAST(PathRef File, Range R, Callback<llvm::Optional<ASTNode>> CB);
 
   /// Runs an arbitrary action that has access to the AST of the specified file.
   /// The action will execute on one of ClangdServer's internal threads.
