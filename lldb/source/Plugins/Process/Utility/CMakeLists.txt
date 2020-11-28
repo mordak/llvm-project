@@ -13,6 +13,7 @@ add_lldb_library(lldbPluginProcessUtility
   NativeRegisterContextWatchpoint_x86.cpp
   NetBSDSignals.cpp
   OpenBSDSignals.cpp
+  RegisterContext_x86.cpp
   RegisterContextDarwin_arm.cpp
   RegisterContextDarwin_arm64.cpp
   RegisterContextDarwin_i386.cpp

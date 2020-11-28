@@ -1,4 +1,5 @@
-; RUN: opt -print-memderefs -analyze -S <%s | FileCheck %s
+; RUN: opt -print-memderefs -analyze -S < %s -enable-new-pm=0 | FileCheck %s
+; RUN: opt -passes=print-memderefs -S < %s -disable-output 2>&1 | FileCheck %s
 
 ; Uses the print-deref (+ analyze to print) pass to run
 ; isDereferenceablePointer() on many load instruction operands
@@ -20,7 +21,7 @@ declare i32* @foo()
 @globalptr.align16 = external global i8, align 16
 
 ; CHECK-LABEL: 'test'
-define void @test(%struct.A* sret %result,
+define void @test(%struct.A* sret(%struct.A) %result,
                   i32 addrspace(1)* dereferenceable(8) %dparam,
                   i8 addrspace(1)* dereferenceable(32) align 1 %dparam.align1,
                   i8 addrspace(1)* dereferenceable(32) align 16 %dparam.align16,

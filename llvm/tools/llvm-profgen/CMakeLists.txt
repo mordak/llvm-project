@@ -1,10 +1,8 @@
-include_directories(
-  ${LLVM_MAIN_SRC_DIR}/lib/Target/X86
-  ${LLVM_BINARY_DIR}/lib/Target/X86
-  )
+
 set(LLVM_LINK_COMPONENTS
   AllTargetsDescs
   AllTargetsDisassemblers
+  AllTargetsInfos
   Core
   MC
   MCDisassembler
