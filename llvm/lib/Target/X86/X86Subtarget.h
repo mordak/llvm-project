@@ -472,6 +472,8 @@ class X86Subtarget final : public X86GenSubtargetInfo {
   /// entry to the function and which must be maintained by every function.
   Align stackAlignment = Align(4);
 
+  Align TileConfigAlignment = Align(4);
+
   /// Whether function prologues should save register arguments on the stack.
   bool SaveArgs = false;
 
@@ -559,6 +561,9 @@ public:
   }
 
   bool getSaveArgs() const { return SaveArgs; }
+
+  unsigned getTileConfigSize() const { return 64; }
+  Align getTileConfigAlignment() const { return TileConfigAlignment; }
 
   /// Returns the minimum alignment known to hold of the
   /// stack frame on entry to the function and which must be maintained by every

@@ -470,6 +470,7 @@ template <> struct hash<bool>;
 template <> struct hash<char>;
 template <> struct hash<signed char>;
 template <> struct hash<unsigned char>;
+template <> struct hash<char8_t>; // since C++20
 template <> struct hash<char16_t>;
 template <> struct hash<char32_t>;
 template <> struct hash<wchar_t>;
@@ -1592,7 +1593,7 @@ public:
   const _Target& __target() const { return __f_; }
 
   _LIBCPP_INLINE_VISIBILITY
-  explicit __default_alloc_func(_Target&& __f) : __f_(std::move(__f)) {}
+  explicit __default_alloc_func(_Target&& __f) : __f_(_VSTD::move(__f)) {}
 
   _LIBCPP_INLINE_VISIBILITY
   explicit __default_alloc_func(const _Target& __f) : __f_(__f) {}
@@ -1799,7 +1800,7 @@ template <class _Rp, class... _ArgTypes> class __value_func<_Rp(_ArgTypes...)>
     template <class _Fp,
         class = typename enable_if<!is_same<typename decay<_Fp>::type, __value_func>::value>::type>
     _LIBCPP_INLINE_VISIBILITY explicit __value_func(_Fp&& __f)
-        : __value_func(std::forward<_Fp>(__f), allocator<_Fp>()) {}
+        : __value_func(_VSTD::forward<_Fp>(__f), allocator<_Fp>()) {}
 
     _LIBCPP_INLINE_VISIBILITY
     __value_func(const __value_func& __f)
@@ -2517,7 +2518,7 @@ template<class _Rp, class ..._ArgTypes>
 function<_Rp(_ArgTypes...)>&
 function<_Rp(_ArgTypes...)>::operator=(function&& __f) _NOEXCEPT
 {
-    __f_ = std::move(__f.__f_);
+    __f_ = _VSTD::move(__f.__f_);
     return *this;
 }
 

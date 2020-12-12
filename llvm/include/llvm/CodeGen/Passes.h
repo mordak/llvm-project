@@ -76,10 +76,6 @@ namespace llvm {
   /// matching during instruction selection.
   FunctionPass *createCodeGenPreparePass();
 
-  /// createScalarizeMaskedMemIntrinPass - Replace masked load, store, gather
-  /// and scatter intrinsics with scalar code when target doesn't support them.
-  FunctionPass *createScalarizeMaskedMemIntrinPass();
-
   /// AtomicExpandID -- Lowers atomic operations in terms of either cmpxchg
   /// load-linked/store-conditional loops.
   extern char &AtomicExpandID;
@@ -394,10 +390,6 @@ namespace llvm {
   /// createJumpInstrTables - This pass creates jump-instruction tables.
   ModulePass *createJumpInstrTablesPass();
 
-  /// createForwardControlFlowIntegrityPass - This pass adds control-flow
-  /// integrity.
-  ModulePass *createForwardControlFlowIntegrityPass();
-
   /// InterleavedAccess Pass - This pass identifies and matches interleaved
   /// memory accesses to target specific intrinsics.
   ///
@@ -478,6 +470,9 @@ namespace llvm {
   /// Create Hardware Loop pass. \see HardwareLoops.cpp
   FunctionPass *createHardwareLoopsPass();
 
+  /// This pass inserts pseudo probe annotation for callsite profiling.
+  FunctionPass *createPseudoProbeInserter();
+
   /// Create IR Type Promotion pass. \see TypePromotion.cpp
   FunctionPass *createTypePromotionPass();
 
@@ -493,6 +488,10 @@ namespace llvm {
   /// The pass fixups statepoint machine instruction to replace usage of
   /// caller saved registers with stack slots.
   extern char &FixupStatepointCallerSavedID;
+
+  /// The pass transform load/store <256 x i32> to AMX load/store intrinsics
+  /// or split the data to two <128 x i32>.
+  FunctionPass *createX86LowerAMXTypePass();
 } // End llvm namespace
 
 #endif

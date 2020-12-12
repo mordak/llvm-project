@@ -555,6 +555,7 @@ static bool initTargetOptions(DiagnosticsEngine &Diags,
   Options.ForceDwarfFrameSection = CodeGenOpts.ForceDwarfFrameSection;
   Options.EmitCallSiteInfo = CodeGenOpts.EmitCallSiteInfo;
   Options.EnableAIXExtendedAltivecABI = CodeGenOpts.EnableAIXExtendedAltivecABI;
+  Options.PseudoProbeForProfiling = CodeGenOpts.PseudoProbeForProfiling;
   Options.ValueTrackingVariableLocations =
       CodeGenOpts.ValueTrackingVariableLocations;
   Options.XRayOmitFunctionIndex = CodeGenOpts.XRayOmitFunctionIndex;
@@ -906,7 +907,7 @@ bool EmitAssemblyHelper::AddEmitPasses(legacy::PassManager &CodeGenPasses,
 
 void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
                                       std::unique_ptr<raw_pwrite_stream> OS) {
-  TimeRegion Region(FrontendTimesIsEnabled ? &CodeGenerationTime : nullptr);
+  TimeRegion Region(CodeGenOpts.TimePasses ? &CodeGenerationTime : nullptr);
 
   setCommandLineOpts(CodeGenOpts);
 
@@ -1063,7 +1064,7 @@ static PassBuilder::OptimizationLevel mapToLevel(const CodeGenOptions &Opts) {
 /// `EmitAssembly` at some point in the future when the default switches.
 void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
     BackendAction Action, std::unique_ptr<raw_pwrite_stream> OS) {
-  TimeRegion Region(FrontendTimesIsEnabled ? &CodeGenerationTime : nullptr);
+  TimeRegion Region(CodeGenOpts.TimePasses ? &CodeGenerationTime : nullptr);
   setCommandLineOpts(CodeGenOpts);
 
   bool RequiresCodeGen = (Action != Backend_EmitNothing &&
@@ -1094,10 +1095,15 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
                         CSAction, CodeGenOpts.DebugInfoForProfiling);
   } else if (!CodeGenOpts.SampleProfileFile.empty())
     // -fprofile-sample-use
+    PGOOpt = PGOOptions(
+        CodeGenOpts.SampleProfileFile, "", CodeGenOpts.ProfileRemappingFile,
+        PGOOptions::SampleUse, PGOOptions::NoCSAction,
+        CodeGenOpts.DebugInfoForProfiling, CodeGenOpts.PseudoProbeForProfiling);
+  else if (CodeGenOpts.PseudoProbeForProfiling)
+    // -fpseudo-probe-for-profiling
     PGOOpt =
-        PGOOptions(CodeGenOpts.SampleProfileFile, "",
-                   CodeGenOpts.ProfileRemappingFile, PGOOptions::SampleUse,
-                   PGOOptions::NoCSAction, CodeGenOpts.DebugInfoForProfiling);
+        PGOOptions("", "", "", PGOOptions::NoAction, PGOOptions::NoCSAction,
+                   CodeGenOpts.DebugInfoForProfiling, true);
   else if (CodeGenOpts.DebugInfoForProfiling)
     // -fdebug-info-for-profiling
     PGOOpt = PGOOptions("", "", "", PGOOptions::NoAction,
@@ -1133,6 +1139,7 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
   PTO.LoopInterleaving = CodeGenOpts.UnrollLoops;
   PTO.LoopVectorization = CodeGenOpts.VectorizeLoop;
   PTO.SLPVectorization = CodeGenOpts.VectorizeSLP;
+  PTO.MergeFunctions = CodeGenOpts.MergeFunctions;
   // Only enable CGProfilePass when using integrated assembler, since
   // non-integrated assemblers don't recognize .cgprofile section.
   PTO.CallGraphProfile = !CodeGenOpts.DisableIntegratedAS;
@@ -1476,7 +1483,7 @@ static void runThinLTOBackend(
   }
 
   Conf.ProfileRemapping = std::move(ProfileRemapping);
-  Conf.UseNewPM = CGOpts.ExperimentalNewPassManager;
+  Conf.UseNewPM = !CGOpts.LegacyPassManager;
   Conf.DebugPassManager = CGOpts.DebugPassManager;
   Conf.RemarksWithHotness = CGOpts.DiagnosticsWithHotness;
   Conf.RemarksFilename = CGOpts.OptRecordFile;
@@ -1566,7 +1573,7 @@ void clang::EmitBackendOutput(DiagnosticsEngine &Diags,
 
   EmitAssemblyHelper AsmHelper(Diags, HeaderOpts, CGOpts, TOpts, LOpts, M);
 
-  if (CGOpts.ExperimentalNewPassManager)
+  if (!CGOpts.LegacyPassManager)
     AsmHelper.EmitAssemblyWithNewPassManager(Action, std::move(OS));
   else
     AsmHelper.EmitAssembly(Action, std::move(OS));

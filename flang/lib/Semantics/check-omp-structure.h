@@ -104,8 +104,12 @@ public:
 
   void Enter(const parser::OpenMPDeclareSimdConstruct &);
   void Leave(const parser::OpenMPDeclareSimdConstruct &);
+  void Enter(const parser::OpenMPDeclarativeAllocate &);
+  void Leave(const parser::OpenMPDeclarativeAllocate &);
   void Enter(const parser::OpenMPDeclareTargetConstruct &);
   void Leave(const parser::OpenMPDeclareTargetConstruct &);
+  void Enter(const parser::OpenMPExecutableAllocate &);
+  void Leave(const parser::OpenMPExecutableAllocate &);
 
   void Enter(const parser::OpenMPSimpleStandaloneConstruct &);
   void Leave(const parser::OpenMPSimpleStandaloneConstruct &);
@@ -121,6 +125,7 @@ public:
   void Leave(const parser::OmpClauseList &);
   void Enter(const parser::OmpClause &);
   void Enter(const parser::OmpNowait &);
+  void Enter(const parser::OmpClause::Allocator &);
   void Enter(const parser::OmpClause::Inbranch &);
   void Enter(const parser::OmpClause::Mergeable &);
   void Enter(const parser::OmpClause::Nogroup &);
@@ -185,8 +190,11 @@ private:
   void CheckDependList(const parser::DataRef &);
   void CheckDependArraySection(
       const common::Indirection<parser::ArrayElement> &, const parser::Name &);
-
   void CheckIsVarPartOfAnotherVar(const parser::OmpObjectList &objList);
+  void CheckIntentInPointer(
+      const parser::OmpObjectList &, const llvm::omp::Clause);
+  void GetSymbolsInObjectList(
+      const parser::OmpObjectList &, std::vector<const Symbol *> &);
 };
 } // namespace Fortran::semantics
 #endif // FORTRAN_SEMANTICS_CHECK_OMP_STRUCTURE_H_

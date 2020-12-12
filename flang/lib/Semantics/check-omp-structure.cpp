@@ -179,6 +179,15 @@ void OmpStructureChecker::Leave(const parser::OpenMPDeclareSimdConstruct &) {
   dirContext_.pop_back();
 }
 
+void OmpStructureChecker::Enter(const parser::OpenMPDeclarativeAllocate &x) {
+  const auto &dir{std::get<parser::Verbatim>(x.t)};
+  PushContextAndClauseSets(dir.source, llvm::omp::Directive::OMPD_allocate);
+}
+
+void OmpStructureChecker::Leave(const parser::OpenMPDeclarativeAllocate &) {
+  dirContext_.pop_back();
+}
+
 void OmpStructureChecker::Enter(const parser::OpenMPDeclareTargetConstruct &x) {
   const auto &dir{std::get<parser::Verbatim>(x.t)};
   PushContext(dir.source, llvm::omp::Directive::OMPD_declare_target);
@@ -189,6 +198,15 @@ void OmpStructureChecker::Enter(const parser::OpenMPDeclareTargetConstruct &x) {
 }
 
 void OmpStructureChecker::Leave(const parser::OpenMPDeclareTargetConstruct &) {
+  dirContext_.pop_back();
+}
+
+void OmpStructureChecker::Enter(const parser::OpenMPExecutableAllocate &x) {
+  const auto &dir{std::get<parser::Verbatim>(x.t)};
+  PushContextAndClauseSets(dir.source, llvm::omp::Directive::OMPD_allocate);
+}
+
+void OmpStructureChecker::Leave(const parser::OpenMPExecutableAllocate &) {
   dirContext_.pop_back();
 }
 
@@ -382,6 +400,7 @@ CHECK_SIMPLE_CLAUSE(SeqCst, OMPC_seq_cst)
 CHECK_SIMPLE_CLAUSE(Release, OMPC_release)
 CHECK_SIMPLE_CLAUSE(Relaxed, OMPC_relaxed)
 
+CHECK_REQ_SCALAR_INT_CLAUSE(Allocator, OMPC_allocator)
 CHECK_REQ_SCALAR_INT_CLAUSE(Grainsize, OMPC_grainsize)
 CHECK_REQ_SCALAR_INT_CLAUSE(NumTasks, OMPC_num_tasks)
 CHECK_REQ_SCALAR_INT_CLAUSE(NumTeams, OMPC_num_teams)
@@ -417,6 +436,7 @@ void OmpStructureChecker::Enter(const parser::OmpClause::Shared &x) {
 void OmpStructureChecker::Enter(const parser::OmpClause::Private &x) {
   CheckAllowed(llvm::omp::Clause::OMPC_private);
   CheckIsVarPartOfAnotherVar(x.v);
+  CheckIntentInPointer(x.v, llvm::omp::Clause::OMPC_private);
 }
 
 void OmpStructureChecker::CheckIsVarPartOfAnotherVar(
@@ -687,6 +707,40 @@ void OmpStructureChecker::CheckDependArraySection(
               "'%s' in DEPEND clause is a zero size array section"_err_en_US,
               name.ToString());
           break;
+        }
+      }
+    }
+  }
+}
+
+void OmpStructureChecker::CheckIntentInPointer(
+    const parser::OmpObjectList &objectList, const llvm::omp::Clause clause) {
+  std::vector<const Symbol *> symbols;
+  GetSymbolsInObjectList(objectList, symbols);
+  for (const auto *symbol : symbols) {
+    if (IsPointer(*symbol) && IsIntentIn(*symbol)) {
+      context_.Say(GetContext().clauseSource,
+          "Pointer '%s' with the INTENT(IN) attribute may not appear "
+          "in a %s clause"_err_en_US,
+          symbol->name(),
+          parser::ToUpperCaseLetters(getClauseName(clause).str()));
+    }
+  }
+}
+
+void OmpStructureChecker::GetSymbolsInObjectList(
+    const parser::OmpObjectList &objectList,
+    std::vector<const Symbol *> &symbols) {
+  for (const auto &ompObject : objectList.v) {
+    if (const auto *name{parser::Unwrap<parser::Name>(ompObject)}) {
+      if (const auto *symbol{name->symbol}) {
+        if (const auto *commonBlockDetails{
+                symbol->detailsIf<CommonBlockDetails>()}) {
+          for (const auto &object : commonBlockDetails->objects()) {
+            symbols.emplace_back(&object->GetUltimate());
+          }
+        } else {
+          symbols.emplace_back(&symbol->GetUltimate());
         }
       }
     }

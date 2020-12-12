@@ -62,6 +62,7 @@ add_llvm_target(PowerPCCodeGen
   LINK_COMPONENTS
   Analysis
   AsmPrinter
+  BinaryFormat
   CodeGen
   Core
   MC

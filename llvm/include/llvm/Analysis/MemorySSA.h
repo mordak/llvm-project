@@ -841,7 +841,6 @@ private:
 
   CachingWalker<AliasAnalysis> *getWalkerImpl();
   void buildMemorySSA(BatchAAResults &BAA);
-  void optimizeUses();
 
   void prepareForMoveTo(MemoryAccess *, BasicBlock *);
   void verifyUseInDefs(MemoryAccess *, MemoryAccess *) const;
@@ -849,15 +848,12 @@ private:
   using AccessMap = DenseMap<const BasicBlock *, std::unique_ptr<AccessList>>;
   using DefsMap = DenseMap<const BasicBlock *, std::unique_ptr<DefsList>>;
 
-  void
-  determineInsertionPoint(const SmallPtrSetImpl<BasicBlock *> &DefiningBlocks);
   void markUnreachableAsLiveOnEntry(BasicBlock *BB);
   bool dominatesUse(const MemoryAccess *, const MemoryAccess *) const;
   MemoryPhi *createMemoryPhi(BasicBlock *BB);
   template <typename AliasAnalysisType>
   MemoryUseOrDef *createNewAccess(Instruction *, AliasAnalysisType *,
                                   const MemoryUseOrDef *Template = nullptr);
-  MemoryAccess *findDominatingDef(BasicBlock *, enum InsertionPlace);
   void placePHINodes(const SmallPtrSetImpl<BasicBlock *> &);
   MemoryAccess *renameBlock(BasicBlock *, MemoryAccess *, bool);
   void renameSuccessorPhis(BasicBlock *, MemoryAccess *, bool);
