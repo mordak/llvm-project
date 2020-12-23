@@ -292,7 +292,7 @@ template <> StoreInst *isCandidate<StoreInst>(Instruction *In) {
   return getIfUnordered(dyn_cast<StoreInst>(In));
 }
 
-#if !defined(_MSC_VER) || _MSC_VER >= 1920
+#if !defined(_MSC_VER) || _MSC_VER >= 1924
 // VS2017 has trouble compiling this:
 // error C2976: 'std::map': too few template arguments
 template <typename Pred, typename... Ts>
@@ -416,8 +416,7 @@ auto AlignVectors::getMask(Value *Val) const -> Value * {
     int ElemCount = VecTy->getElementCount().getFixedValue();
     return HVC.getFullValue(HVC.getBoolTy(ElemCount));
   }
-  // For scalars, return a vector <1 x i1>.
-  return HVC.getFullValue(HVC.getBoolTy(1));
+  return HVC.getFullValue(HVC.getBoolTy());
 }
 
 auto AlignVectors::getPassThrough(Value *Val) const -> Value * {
@@ -675,6 +674,10 @@ auto AlignVectors::move(const MoveGroup &Move) const -> bool {
 }
 
 auto AlignVectors::realignGroup(const MoveGroup &Move) const -> bool {
+  // TODO: Needs support for masked loads/stores of "scalar" vectors.
+  if (!Move.IsHvx)
+    return false;
+
   // Return the element with the maximum alignment from Range,
   // where GetValue obtains the value to compare from an element.
   auto getMaxOf = [](auto Range, auto GetValue) {
@@ -811,14 +814,26 @@ auto AlignVectors::realignGroup(const MoveGroup &Move) const -> bool {
     // Stores.
     ByteSpan ASpanV, ASpanM;
 
-    for (int i = -1; i != NumSectors; ++i) {
+    // Return a vector value corresponding to the input value Val:
+    // either <1 x Val> for scalar Val, or Val itself for vector Val.
+    auto MakeVec = [](IRBuilder<> &Builder, Value *Val) -> Value * {
+      Type *Ty = Val->getType();
+      if (Ty->isVectorTy())
+        return Val;
+      auto *VecTy = VectorType::get(Ty, 1, /*Scalable*/ false);
+      return Builder.CreateBitCast(Val, VecTy);
+    };
+
+    // Create an extra "undef" sector at the beginning and at the end.
+    // They will be used as the left/right filler in the vlalign step.
+    for (int i = -1; i != NumSectors + 1; ++i) {
       ByteSpan Section = VSpan.section(i * ScLen, ScLen).normalize();
       Value *AccumV = UndefValue::get(SecTy);
       Value *AccumM = HVC.getNullValue(SecTy);
       for (ByteSpan::Block &S : Section) {
         Value *Pay = getPayload(S.Seg.Val);
-        Value *Mask = HVC.rescale(Builder, getMask(S.Seg.Val), Pay->getType(),
-                                  HVC.getByteTy());
+        Value *Mask = HVC.rescale(Builder, MakeVec(Builder, getMask(S.Seg.Val)),
+                                  Pay->getType(), HVC.getByteTy());
         AccumM = HVC.insertb(Builder, AccumM, HVC.vbytes(Builder, Mask),
                              S.Seg.Start, S.Seg.Size, S.Pos);
         AccumV = HVC.insertb(Builder, AccumV, HVC.vbytes(Builder, Pay),
@@ -829,14 +844,14 @@ auto AlignVectors::realignGroup(const MoveGroup &Move) const -> bool {
     }
 
     // vlalign
-    for (int j = 1; j != NumSectors + 1; ++j) {
+    for (int j = 1; j != NumSectors + 2; ++j) {
       ASpanV[j - 1].Seg.Val = HVC.vlalignb(Builder, ASpanV[j - 1].Seg.Val,
                                            ASpanV[j].Seg.Val, AlignVal);
       ASpanM[j - 1].Seg.Val = HVC.vlalignb(Builder, ASpanM[j - 1].Seg.Val,
                                            ASpanM[j].Seg.Val, AlignVal);
     }
 
-    for (int i = 0; i != NumSectors; ++i) {
+    for (int i = 0; i != NumSectors + 1; ++i) {
       Value *Ptr = createAdjustedPointer(Builder, AlignAddr, SecTy, i * ScLen);
       Value *Val = ASpanV[i].Seg.Val;
       Value *Mask = ASpanM[i].Seg.Val; // bytes
