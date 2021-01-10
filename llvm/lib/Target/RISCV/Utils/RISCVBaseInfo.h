@@ -47,8 +47,8 @@ enum {
 
   InstFormatMask = 31,
 
-  ConstraintOffset = 5,
-  ConstraintMask = 0b111
+  ConstraintShift = 5,
+  ConstraintMask = 0b111 << ConstraintShift,
 };
 
 // Match with the definitions in RISCVInstrFormatsV.td
@@ -371,8 +371,8 @@ namespace RISCVVPseudosTable {
 static const uint8_t InvalidIndex = 0x80;
 
 struct PseudoInfo {
-  unsigned int Pseudo;
-  unsigned int BaseInstr;
+  uint16_t Pseudo;
+  uint16_t BaseInstr;
   uint8_t VLIndex;
   uint8_t SEWIndex;
   uint8_t MergeOpIndex;

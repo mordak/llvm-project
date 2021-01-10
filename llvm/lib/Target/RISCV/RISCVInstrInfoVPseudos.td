@@ -1097,6 +1097,15 @@ multiclass VPseudoUnaryV_F_NoDummyMask {
   }
 }
 
+multiclass VPseudoUnaryV_V {
+  foreach m = MxList.m in {
+    let VLMul = m.value in {
+      def "_V_" # m.MX : VPseudoUnaryNoMask<m.vrclass, m.vrclass>;
+      def "_V_" # m.MX # "_MASK" : VPseudoUnaryMask<m.vrclass, m.vrclass>;
+    }
+  }
+}
+
 multiclass PseudoUnaryV_VF2 {
   defvar constraints = "@earlyclobber $rd";
   foreach m = MxList.m[1-6] in
@@ -1688,6 +1697,18 @@ multiclass VPatUnaryV_VF<string intrinsic, string instruction, string suffix,
    }
 }
 
+multiclass VPatUnaryV_V<string intrinsic, string instruction,
+                        list<VTypeInfo> vtilist> {
+  foreach vti = vtilist in {
+    def : VPatUnaryNoMask<intrinsic, instruction, "V",
+                          vti.Vector, vti.Vector,
+                          vti.SEW, vti.LMul, vti.RegClass>;
+    def : VPatUnaryMask<intrinsic, instruction, "V",
+                        vti.Vector, vti.Vector, vti.Mask,
+                        vti.SEW, vti.LMul, vti.RegClass, vti.RegClass>;
+  }
+}
+
 multiclass VPatNullaryV<string intrinsic, string instruction>
 {
   foreach vti = AllIntegerVectors in {
@@ -1711,7 +1732,6 @@ multiclass VPatNullaryM<string intrinsic, string inst> {
                         (!cast<Instruction>(inst#"_M_"#mti.BX)
                         (NoX0 GPR:$vl), mti.SEW)>;
 }
-
 
 multiclass VPatBinary<string intrinsic,
                       string inst,
@@ -2369,7 +2389,7 @@ multiclass VPatConversionVF_WF <string intrinsic, string instruction> {
 }
 
 //===----------------------------------------------------------------------===//
-// Pseudo instructions and patterns.
+// Pseudo instructions
 //===----------------------------------------------------------------------===//
 
 let Predicates = [HasStdExtV] in {
@@ -2438,10 +2458,6 @@ let hasSideEffects = 1, Defs = [VL] in
 foreach eew = EEWList in {
   defm PseudoVLE # eew # FF : VPseudoUSLoad;
 }
-
-//===----------------------------------------------------------------------===//
-// Pseudo Instructions
-//===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
 // 12. Vector Integer Arithmetic Instructions
@@ -2567,14 +2583,13 @@ defm PseudoVWMACCSU    : VPseudoTernaryW_VV_VX;
 defm PseudoVWMACCUS    : VPseudoTernaryW_VX</*IsFloat*/false>;
 
 //===----------------------------------------------------------------------===//
-// 12.15. Vector Integer Merge Instructions
+// 12.16. Vector Integer Merge Instructions
 //===----------------------------------------------------------------------===//
 defm PseudoVMERGE      : VPseudoBinaryV_VM_XM_IM;
 
 //===----------------------------------------------------------------------===//
 // 12.17. Vector Integer Move Instructions
 //===----------------------------------------------------------------------===//
-
 defm PseudoVMV_V       : VPseudoUnaryV_V_X_I_NoDummyMask;
 
 //===----------------------------------------------------------------------===//
@@ -2671,7 +2686,12 @@ defm PseudoVFWMSAC     : VPseudoTernaryW_VV_VX</*IsFloat*/true>;
 defm PseudoVFWNMSAC    : VPseudoTernaryW_VV_VX</*IsFloat*/true>;
 
 //===----------------------------------------------------------------------===//
-// 14.9. Vector Floating-Point Min/Max Instructions
+// 14.8. Vector Floating-Point Square-Root Instruction
+//===----------------------------------------------------------------------===//
+defm PseudoVFSQRT      : VPseudoUnaryV_V;
+
+//===----------------------------------------------------------------------===//
+// 14.11. Vector Floating-Point Min/Max Instructions
 //===----------------------------------------------------------------------===//
 defm PseudoVFMIN       : VPseudoBinaryV_VV_VX</*IsFloat=*/1>;
 defm PseudoVFMAX       : VPseudoBinaryV_VV_VX</*IsFloat=*/1>;
@@ -2694,15 +2714,15 @@ defm PseudoVMFGT       : VPseudoBinaryM_VX</*IsFloat=*/1>;
 defm PseudoVMFGE       : VPseudoBinaryM_VX</*IsFloat=*/1>;
 
 //===----------------------------------------------------------------------===//
-// 14.14. Vector Floating-Point Move Instruction
-//===----------------------------------------------------------------------===//
-defm PseudoVFMV_V      : VPseudoUnaryV_F_NoDummyMask;
-
-//===----------------------------------------------------------------------===//
 // 14.15. Vector Floating-Point Merge Instruction
 //===----------------------------------------------------------------------===//
 defm PseudoVFMERGE     : VPseudoBinaryV_XM</*CarryOut =*/0,/*CarryIn =*/true,
                                            /*Constraint =*/"", /*IsFloat=*/true>;
+
+//===----------------------------------------------------------------------===//
+// 14.16. Vector Floating-Point Move Instruction
+//===----------------------------------------------------------------------===//
+defm PseudoVFMV_V      : VPseudoUnaryV_F_NoDummyMask;
 
 //===----------------------------------------------------------------------===//
 // 14.17. Single-Width Floating-Point/Integer Type-Convert Instructions
@@ -3198,7 +3218,7 @@ defm "" : VPatTernaryW_VV_VX<"int_riscv_vwmaccsu", "PseudoVWMACCSU", AllWidenabl
 defm "" : VPatTernaryW_VX<"int_riscv_vwmaccus", "PseudoVWMACCUS", AllWidenableIntVectors>;
 
 //===----------------------------------------------------------------------===//
-// 12.15. Vector Integer Merge Instructions
+// 12.16. Vector Integer Merge Instructions
 //===----------------------------------------------------------------------===//
 defm "" : VPatBinaryV_VM_XM_IM<"int_riscv_vmerge", "PseudoVMERGE">;
 
@@ -3307,7 +3327,12 @@ defm "" : VPatTernaryW_VV_VX<"int_riscv_vfwmsac", "PseudoVFWMSAC", AllWidenableF
 defm "" : VPatTernaryW_VV_VX<"int_riscv_vfwnmsac", "PseudoVFWNMSAC", AllWidenableFloatVectors>;
 
 //===----------------------------------------------------------------------===//
-// 14.9. Vector Floating-Point Min/Max Instructions
+// 14.8. Vector Floating-Point Square-Root Instruction
+//===----------------------------------------------------------------------===//
+defm "" : VPatUnaryV_V<"int_riscv_vfsqrt", "PseudoVFSQRT", AllFloatVectors>;
+
+//===----------------------------------------------------------------------===//
+// 14.11. Vector Floating-Point Min/Max Instructions
 //===----------------------------------------------------------------------===//
 defm "" : VPatBinaryV_VV_VX<"int_riscv_vfmin", "PseudoVFMIN", AllFloatVectors>;
 defm "" : VPatBinaryV_VV_VX<"int_riscv_vfmax", "PseudoVFMAX", AllFloatVectors>;
@@ -3330,7 +3355,16 @@ defm "" : VPatBinaryM_VX<"int_riscv_vmfgt", "PseudoVMFGT", AllFloatVectors>;
 defm "" : VPatBinaryM_VX<"int_riscv_vmfge", "PseudoVMFGE", AllFloatVectors>;
 
 //===----------------------------------------------------------------------===//
-// 14.14. Vector Floating-Point Move Instruction
+// 14.15. Vector Floating-Point Merge Instruction
+//===----------------------------------------------------------------------===//
+// We can use vmerge.vvm to support vector-vector vfmerge.
+defm "" : VPatBinaryV_VM<"int_riscv_vfmerge", "PseudoVMERGE",
+                         /*CarryOut = */0, /*vtilist=*/AllFloatVectors>;
+defm "" : VPatBinaryV_XM<"int_riscv_vfmerge", "PseudoVFMERGE",
+                         /*CarryOut = */0, /*vtilist=*/AllFloatVectors>;
+
+//===----------------------------------------------------------------------===//
+// 14.16. Vector Floating-Point Move Instruction
 //===----------------------------------------------------------------------===//
 foreach fvti = AllFloatVectors in {
   // If we're splatting fpimm0, use vmv.v.x vd, x0.
@@ -3345,15 +3379,6 @@ foreach fvti = AllFloatVectors in {
              ToFPR32<fvti.Scalar, fvti.ScalarRegClass, "rs2">.ret,
              (NoX0 GPR:$vl), fvti.SEW)>;
 }
-
-//===----------------------------------------------------------------------===//
-// 14.15. Vector Floating-Point Merge Instruction
-//===----------------------------------------------------------------------===//
-// We can use vmerge.vvm to support vector-vector vfmerge.
-defm "" : VPatBinaryV_VM<"int_riscv_vfmerge", "PseudoVMERGE",
-                         /*CarryOut = */0, /*vtilist=*/AllFloatVectors>;
-defm "" : VPatBinaryV_XM<"int_riscv_vfmerge", "PseudoVFMERGE",
-                         /*CarryOut = */0, /*vtilist=*/AllFloatVectors>;
 
 //===----------------------------------------------------------------------===//
 // 14.17. Single-Width Floating-Point/Integer Type-Convert Instructions

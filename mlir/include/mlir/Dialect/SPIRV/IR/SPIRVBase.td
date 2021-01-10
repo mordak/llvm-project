@@ -3115,6 +3115,10 @@ def InModuleScope : PredOpTrait<
   "op must appear in a module-like op's block",
   CPred<"isDirectInModuleLikeOp($_op.getParentOp())">>;
 
+def UnsignedOp : NativeOpTrait<"spirv::UnsignedOp">;
+
+def UsableInSpecConstantOp : NativeOpTrait<"spirv::UsableInSpecConstantOp">;
+
 //===----------------------------------------------------------------------===//
 // SPIR-V opcode specification
 //===----------------------------------------------------------------------===//
