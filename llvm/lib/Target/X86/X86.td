@@ -1074,7 +1074,8 @@ def ProcessorFeatures {
   list<SubtargetFeature> ZN2Tuning = ZNTuning;
   list<SubtargetFeature> ZN2Features =
     !listconcat(ZNFeatures, ZN2AdditionalFeatures);
-  list<SubtargetFeature> ZN3AdditionalFeatures = [FeatureINVPCID,
+  list<SubtargetFeature> ZN3AdditionalFeatures = [FeatureFSRM,
+                                                  FeatureINVPCID,
                                                   FeaturePKU,
                                                   FeatureVAES,
                                                   FeatureVPCLMULQDQ];

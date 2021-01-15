@@ -2612,6 +2612,10 @@ static bool mergeDeclAttribute(Sema &S, NamedDecl *D,
     NewAttr = S.mergeImportModuleAttr(D, *IMA);
   else if (const auto *INA = dyn_cast<WebAssemblyImportNameAttr>(Attr))
     NewAttr = S.mergeImportNameAttr(D, *INA);
+  else if (const auto *TCBA = dyn_cast<EnforceTCBAttr>(Attr))
+    NewAttr = S.mergeEnforceTCBAttr(D, *TCBA);
+  else if (const auto *TCBLA = dyn_cast<EnforceTCBLeafAttr>(Attr))
+    NewAttr = S.mergeEnforceTCBLeafAttr(D, *TCBLA);
   else if (Attr->shouldInheritEvenIfAlreadyPresent() || !DeclHasAttr(D, Attr))
     NewAttr = cast<InheritableAttr>(Attr->clone(S.Context));
 
@@ -5340,8 +5344,8 @@ Sema::GetNameFromUnqualifiedId(const UnqualifiedId &Name) {
   case UnqualifiedIdKind::IK_OperatorFunctionId:
     NameInfo.setName(Context.DeclarationNames.getCXXOperatorName(
                                            Name.OperatorFunctionId.Operator));
-    NameInfo.getInfo().CXXOperatorName.BeginOpNameLoc
-      = Name.OperatorFunctionId.SymbolLocations[0];
+    NameInfo.getInfo().CXXOperatorName.BeginOpNameLoc =
+        Name.OperatorFunctionId.SymbolLocations[0].getRawEncoding();
     NameInfo.getInfo().CXXOperatorName.EndOpNameLoc
       = Name.EndLocation.getRawEncoding();
     return NameInfo;

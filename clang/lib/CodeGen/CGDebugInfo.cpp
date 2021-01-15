@@ -2109,8 +2109,7 @@ StringRef CGDebugInfo::getDynamicInitializerName(const VarDecl *VD,
 }
 
 void CGDebugInfo::CollectVTableInfo(const CXXRecordDecl *RD, llvm::DIFile *Unit,
-                                    SmallVectorImpl<llvm::Metadata *> &EltTys,
-                                    llvm::DICompositeType *RecordTy) {
+                                    SmallVectorImpl<llvm::Metadata *> &EltTys) {
   // If this class is not dynamic then there is not any vtable info to collect.
   if (!RD->isDynamicClass())
     return;
@@ -2404,7 +2403,7 @@ llvm::DIType *CGDebugInfo::CreateTypeDefinition(const RecordType *Ty) {
   // its members.  Finally, we create a descriptor for the complete type (which
   // may refer to the forward decl if the struct is recursive) and replace all
   // uses of the forward declaration with the final definition.
-  llvm::DICompositeType *FwdDecl = getOrCreateLimitedType(Ty, DefUnit);
+  llvm::DICompositeType *FwdDecl = getOrCreateLimitedType(Ty);
 
   const RecordDecl *D = RD->getDefinition();
   if (!D || !D->isCompleteDefinition())
@@ -2428,7 +2427,7 @@ llvm::DIType *CGDebugInfo::CreateTypeDefinition(const RecordType *Ty) {
   const auto *CXXDecl = dyn_cast<CXXRecordDecl>(RD);
   if (CXXDecl) {
     CollectCXXBases(CXXDecl, DefUnit, EltTys, FwdDecl);
-    CollectVTableInfo(CXXDecl, DefUnit, EltTys, FwdDecl);
+    CollectVTableInfo(CXXDecl, DefUnit, EltTys);
   }
 
   // Collect data fields (including static variables and any initializers).
@@ -3132,10 +3131,7 @@ static QualType UnwrapTypeForDebugInfo(QualType T, const ASTContext &C) {
 }
 
 llvm::DIType *CGDebugInfo::getTypeOrNull(QualType Ty) {
-
-  // Unwrap the type as needed for debug information.
-  Ty = UnwrapTypeForDebugInfo(Ty, CGM.getContext());
-
+  assert(Ty == UnwrapTypeForDebugInfo(Ty, CGM.getContext()));
   auto It = TypeCache.find(Ty.getAsOpaquePtr());
   if (It != TypeCache.end()) {
     // Verify that the debug info still exists.
@@ -3148,8 +3144,6 @@ llvm::DIType *CGDebugInfo::getTypeOrNull(QualType Ty) {
 
 void CGDebugInfo::completeTemplateDefinition(
     const ClassTemplateSpecializationDecl &SD) {
-  if (DebugKind <= codegenoptions::DebugLineTablesOnly)
-    return;
   completeUnusedClass(SD);
 }
 
@@ -3311,8 +3305,8 @@ llvm::DIType *CGDebugInfo::CreateTypeNode(QualType Ty, llvm::DIFile *Unit) {
   llvm_unreachable("type should have been unwrapped!");
 }
 
-llvm::DICompositeType *CGDebugInfo::getOrCreateLimitedType(const RecordType *Ty,
-                                                           llvm::DIFile *Unit) {
+llvm::DICompositeType *
+CGDebugInfo::getOrCreateLimitedType(const RecordType *Ty) {
   QualType QTy(Ty, 0);
 
   auto *T = cast_or_null<llvm::DICompositeType>(getTypeOrNull(QTy));
@@ -3799,11 +3793,9 @@ llvm::DISubroutineType *CGDebugInfo::getOrCreateFunctionType(const Decl *D,
   return cast<llvm::DISubroutineType>(getOrCreateType(FnType, F));
 }
 
-void CGDebugInfo::EmitFunctionStart(GlobalDecl GD, SourceLocation Loc,
+void CGDebugInfo::emitFunctionStart(GlobalDecl GD, SourceLocation Loc,
                                     SourceLocation ScopeLoc, QualType FnType,
-                                    llvm::Function *Fn, bool CurFuncIsThunk,
-                                    CGBuilderTy &Builder) {
-
+                                    llvm::Function *Fn, bool CurFuncIsThunk) {
   StringRef Name;
   StringRef LinkageName;
 

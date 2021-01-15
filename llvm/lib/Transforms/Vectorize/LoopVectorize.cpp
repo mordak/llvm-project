@@ -130,6 +130,7 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/InstructionCost.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
@@ -632,10 +633,11 @@ protected:
   /// Clear NSW/NUW flags from reduction instructions if necessary.
   void clearReductionWrapFlags(RecurrenceDescriptor &RdxDesc);
 
-  /// The Loop exit block may have single value PHI nodes with some
-  /// incoming value. While vectorizing we only handled real values
-  /// that were defined inside the loop and we should have one value for
-  /// each predecessor of its parent basic block. See PR14725.
+  /// Fixup the LCSSA phi nodes in the unique exit block.  This simply
+  /// means we need to add the appropriate incoming value from the middle
+  /// block as exiting edges from the scalar epilogue loop (if present) are
+  /// already in place, and we exit the vector loop exclusively to the middle
+  /// block.
   void fixLCSSAPHIs();
 
   /// Iteratively sink the scalarized operands of a predicated instruction into
@@ -1635,7 +1637,7 @@ private:
   /// is
   /// false, then all operations will be scalarized (i.e. no vectorization has
   /// actually taken place).
-  using VectorizationCostTy = std::pair<unsigned, bool>;
+  using VectorizationCostTy = std::pair<InstructionCost, bool>;
 
   /// Returns the expected execution cost. The unit of the cost does
   /// not matter because we use the 'cost' units to compare different
@@ -1649,7 +1651,8 @@ private:
 
   /// The cost-computation logic from getInstructionCost which provides
   /// the vector type as an output parameter.
-  unsigned getInstructionCost(Instruction *I, ElementCount VF, Type *&VectorTy);
+  InstructionCost getInstructionCost(Instruction *I, ElementCount VF,
+                                     Type *&VectorTy);
 
   /// Calculate vectorization cost of memory instruction \p I.
   unsigned getMemoryInstructionCost(Instruction *I, ElementCount VF);
@@ -1693,7 +1696,7 @@ private:
   /// A type representing the costs for instructions if they were to be
   /// scalarized rather than vectorized. The entries are Instruction-Cost
   /// pairs.
-  using ScalarCostsTy = DenseMap<Instruction *, unsigned>;
+  using ScalarCostsTy = DenseMap<Instruction *, InstructionCost>;
 
   /// A set containing all BasicBlocks that are known to present after
   /// vectorization as a predicated block.
@@ -4147,11 +4150,14 @@ void InnerLoopVectorizer::fixFirstOrderRecurrence(PHINode *Phi) {
   // vector recurrence we extracted in the middle block. Since the loop is in
   // LCSSA form, we just need to find all the phi nodes for the original scalar
   // recurrence in the exit block, and then add an edge for the middle block.
-  for (PHINode &LCSSAPhi : LoopExitBlock->phis()) {
-    if (LCSSAPhi.getIncomingValue(0) == Phi) {
+  // Note that LCSSA does not imply single entry when the original scalar loop
+  // had multiple exiting edges (as we always run the last iteration in the
+  // scalar epilogue); in that case, the exiting path through middle will be
+  // dynamically dead and the value picked for the phi doesn't matter.
+  for (PHINode &LCSSAPhi : LoopExitBlock->phis())
+    if (any_of(LCSSAPhi.incoming_values(),
+               [Phi](Value *V) { return V == Phi; }))
       LCSSAPhi.addIncoming(ExtractForPhiUsedOutsideLoop, LoopMiddleBlock);
-    }
-  }
 }
 
 void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
@@ -4309,21 +4315,17 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
 
   // Now, we need to fix the users of the reduction variable
   // inside and outside of the scalar remainder loop.
-  // We know that the loop is in LCSSA form. We need to update the
-  // PHI nodes in the exit blocks.
-  for (PHINode &LCSSAPhi : LoopExitBlock->phis()) {
-    // All PHINodes need to have a single entry edge, or two if
-    // we already fixed them.
-    assert(LCSSAPhi.getNumIncomingValues() < 3 && "Invalid LCSSA PHI");
 
-    // We found a reduction value exit-PHI. Update it with the
-    // incoming bypass edge.
-    if (LCSSAPhi.getIncomingValue(0) == LoopExitInst)
+  // We know that the loop is in LCSSA form. We need to update the PHI nodes
+  // in the exit blocks.  See comment on analogous loop in
+  // fixFirstOrderRecurrence for a more complete explaination of the logic.
+  for (PHINode &LCSSAPhi : LoopExitBlock->phis())
+    if (any_of(LCSSAPhi.incoming_values(),
+               [LoopExitInst](Value *V) { return V == LoopExitInst; }))
       LCSSAPhi.addIncoming(ReducedPartRdx, LoopMiddleBlock);
-  } // end of the LCSSA phi scan.
 
-    // Fix the scalar loop reduction variable with the incoming reduction sum
-    // from the vector body and from the backedge value.
+  // Fix the scalar loop reduction variable with the incoming reduction sum
+  // from the vector body and from the backedge value.
   int IncomingEdgeBlockIdx =
     Phi->getBasicBlockIndex(OrigLoop->getLoopLatch());
   assert(IncomingEdgeBlockIdx >= 0 && "Invalid block index");
@@ -4365,24 +4367,27 @@ void InnerLoopVectorizer::clearReductionWrapFlags(
 
 void InnerLoopVectorizer::fixLCSSAPHIs() {
   for (PHINode &LCSSAPhi : LoopExitBlock->phis()) {
-    if (LCSSAPhi.getNumIncomingValues() == 1) {
-      auto *IncomingValue = LCSSAPhi.getIncomingValue(0);
-      // Non-instruction incoming values will have only one value.
-      unsigned LastLane = 0;
-      if (isa<Instruction>(IncomingValue))
-        LastLane = Cost->isUniformAfterVectorization(
-                       cast<Instruction>(IncomingValue), VF)
-                       ? 0
-                       : VF.getKnownMinValue() - 1;
-      assert((!VF.isScalable() || LastLane == 0) &&
-             "scalable vectors dont support non-uniform scalars yet");
-      // Can be a loop invariant incoming value or the last scalar value to be
-      // extracted from the vectorized loop.
-      Builder.SetInsertPoint(LoopMiddleBlock->getTerminator());
-      Value *lastIncomingValue =
-          getOrCreateScalarValue(IncomingValue, { UF - 1, LastLane });
-      LCSSAPhi.addIncoming(lastIncomingValue, LoopMiddleBlock);
-    }
+    if (LCSSAPhi.getBasicBlockIndex(LoopMiddleBlock) != -1)
+      // Some phis were already hand updated by the reduction and recurrence
+      // code above, leave them alone.
+      continue;
+
+    auto *IncomingValue = LCSSAPhi.getIncomingValue(0);
+    // Non-instruction incoming values will have only one value.
+    unsigned LastLane = 0;
+    if (isa<Instruction>(IncomingValue))
+      LastLane = Cost->isUniformAfterVectorization(
+                     cast<Instruction>(IncomingValue), VF)
+                     ? 0
+                     : VF.getKnownMinValue() - 1;
+    assert((!VF.isScalable() || LastLane == 0) &&
+           "scalable vectors dont support non-uniform scalars yet");
+    // Can be a loop invariant incoming value or the last scalar value to be
+    // extracted from the vectorized loop.
+    Builder.SetInsertPoint(LoopMiddleBlock->getTerminator());
+    Value *lastIncomingValue =
+      getOrCreateScalarValue(IncomingValue, { UF - 1, LastLane });
+    LCSSAPhi.addIncoming(lastIncomingValue, LoopMiddleBlock);
   }
 }
 
@@ -5759,10 +5764,13 @@ LoopVectorizationCostModel::selectVectorizationFactor(ElementCount MaxVF) {
   // vectors when the loop has a hint to enable vectorization for a given VF.
   assert(!MaxVF.isScalable() && "scalable vectors not yet supported");
 
-  float Cost = expectedCost(ElementCount::getFixed(1)).first;
-  const float ScalarCost = Cost;
+  InstructionCost ExpectedCost = expectedCost(ElementCount::getFixed(1)).first;
+  LLVM_DEBUG(dbgs() << "LV: Scalar loop costs: " << ExpectedCost << ".\n");
+  assert(ExpectedCost.isValid() && "Unexpected invalid cost for scalar loop");
+
   unsigned Width = 1;
-  LLVM_DEBUG(dbgs() << "LV: Scalar loop costs: " << (int)ScalarCost << ".\n");
+  const float ScalarCost = *ExpectedCost.getValue();
+  float Cost = ScalarCost;
 
   bool ForceVectorization = Hints->getForce() == LoopVectorizeHints::FK_Enabled;
   if (ForceVectorization && MaxVF.isVector()) {
@@ -5777,7 +5785,8 @@ LoopVectorizationCostModel::selectVectorizationFactor(ElementCount MaxVF) {
     // we need to divide the cost of the vector loops by the width of
     // the vector elements.
     VectorizationCostTy C = expectedCost(ElementCount::getFixed(i));
-    float VectorCost = C.first / (float)i;
+    assert(C.first.isValid() && "Unexpected invalid cost for vector loop");
+    float VectorCost = *C.first.getValue() / (float)i;
     LLVM_DEBUG(dbgs() << "LV: Vector loop of width " << i
                       << " costs: " << (int)VectorCost << ".\n");
     if (!C.second && !ForceVectorization) {
@@ -6119,8 +6128,10 @@ unsigned LoopVectorizationCostModel::selectInterleaveCount(ElementCount VF,
 
   // If we did not calculate the cost for VF (because the user selected the VF)
   // then we calculate the cost of VF here.
-  if (LoopCost == 0)
-    LoopCost = expectedCost(VF).first;
+  if (LoopCost == 0) {
+    assert(expectedCost(VF).first.isValid() && "Expected a valid cost");
+    LoopCost = *expectedCost(VF).first.getValue();
+  }
 
   assert(LoopCost && "Non-zero loop cost expected");
 
@@ -6442,14 +6453,13 @@ void LoopVectorizationCostModel::collectInstsToScalarize(ElementCount VF) {
 }
 
 int LoopVectorizationCostModel::computePredInstDiscount(
-    Instruction *PredInst, DenseMap<Instruction *, unsigned> &ScalarCosts,
-    ElementCount VF) {
+    Instruction *PredInst, ScalarCostsTy &ScalarCosts, ElementCount VF) {
   assert(!isUniformAfterVectorization(PredInst, VF) &&
          "Instruction marked uniform-after-vectorization will be predicated");
 
   // Initialize the discount to zero, meaning that the scalar version and the
   // vector version cost the same.
-  int Discount = 0;
+  InstructionCost Discount = 0;
 
   // Holds instructions to analyze. The instructions we visit are mapped in
   // ScalarCosts. Those instructions are the ones that would be scalarized if
@@ -6504,14 +6514,14 @@ int LoopVectorizationCostModel::computePredInstDiscount(
 
     // Compute the cost of the vector instruction. Note that this cost already
     // includes the scalarization overhead of the predicated instruction.
-    unsigned VectorCost = getInstructionCost(I, VF).first;
+    InstructionCost VectorCost = getInstructionCost(I, VF).first;
 
     // Compute the cost of the scalarized instruction. This cost is the cost of
     // the instruction as if it wasn't if-converted and instead remained in the
     // predicated block. We will scale this cost by block probability after
     // computing the scalarization overhead.
     assert(!VF.isScalable() && "scalable vectors not yet supported.");
-    unsigned ScalarCost =
+    InstructionCost ScalarCost =
         VF.getKnownMinValue() *
         getInstructionCost(I, ElementCount::getFixed(1)).first;
 
@@ -6554,7 +6564,7 @@ int LoopVectorizationCostModel::computePredInstDiscount(
     ScalarCosts[I] = ScalarCost;
   }
 
-  return Discount;
+  return *Discount.getValue();
 }
 
 LoopVectorizationCostModel::VectorizationCostTy
@@ -6576,7 +6586,7 @@ LoopVectorizationCostModel::expectedCost(ElementCount VF) {
 
       // Check if we should override the cost.
       if (ForceTargetInstructionCost.getNumOccurrences() > 0)
-        C.first = ForceTargetInstructionCost;
+        C.first = InstructionCost(ForceTargetInstructionCost);
 
       BlockCost.first += C.first;
       BlockCost.second |= C.second;
@@ -6828,7 +6838,7 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I,
   }
 
   Type *VectorTy;
-  unsigned C = getInstructionCost(I, VF, VectorTy);
+  InstructionCost C = getInstructionCost(I, VF, VectorTy);
 
   bool TypeNotScalarized =
       VF.isVector() && VectorTy->isVectorTy() &&
@@ -7022,9 +7032,9 @@ void LoopVectorizationCostModel::setCostBasedWideningDecision(ElementCount VF) {
   }
 }
 
-unsigned LoopVectorizationCostModel::getInstructionCost(Instruction *I,
-                                                        ElementCount VF,
-                                                        Type *&VectorTy) {
+InstructionCost
+LoopVectorizationCostModel::getInstructionCost(Instruction *I, ElementCount VF,
+                                               Type *&VectorTy) {
   Type *RetTy = I->getType();
   if (canTruncateToMinimalBitwidth(I, VF))
     RetTy = IntegerType::get(RetTy->getContext(), MinBWs[I]);
@@ -7299,12 +7309,8 @@ unsigned LoopVectorizationCostModel::getInstructionCost(Instruction *I,
       return std::min(CallCost, getVectorIntrinsicCost(CI, VF));
     return CallCost;
   }
-  case Instruction::ExtractValue: {
-    InstructionCost ExtractCost =
-        TTI.getInstructionCost(I, TTI::TCK_RecipThroughput);
-    assert(ExtractCost.isValid() && "Invalid cost for ExtractValue");
-    return *(ExtractCost.getValue());
-  }
+  case Instruction::ExtractValue:
+    return TTI.getInstructionCost(I, TTI::TCK_RecipThroughput);
   default:
     // The cost of executing VF copies of the scalar instruction. This opcode
     // is unknown. Assume that it is the same as 'mul'.

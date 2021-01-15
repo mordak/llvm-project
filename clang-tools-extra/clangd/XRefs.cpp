@@ -298,6 +298,17 @@ std::vector<LocatedSymbol> findImplementors(llvm::DenseSet<SymbolID> IDs,
                                             llvm::StringRef MainFilePath) {
   if (IDs.empty())
     return {};
+  static constexpr trace::Metric FindImplementorsMetric(
+      "find_implementors", trace::Metric::Counter, "case");
+  switch (Predicate) {
+  case RelationKind::BaseOf:
+    FindImplementorsMetric.record(1, "find-base");
+    break;
+  case RelationKind::OverriddenBy:
+    FindImplementorsMetric.record(1, "find-override");
+    break;
+  }
+
   RelationsRequest Req;
   Req.Predicate = Predicate;
   Req.Subjects = std::move(IDs);
@@ -1300,7 +1311,7 @@ ReferencesResult findReferences(ParsedAST &AST, Position Pos, uint32_t Limit,
       if (Refs != IDToRefs.end()) {
         for (const auto &Ref : Refs->second) {
           Location Result;
-          Result.range = Ref;
+          Result.range = Ref.Rng;
           Result.uri = URIMainFile;
           Results.References.push_back(std::move(Result));
         }
