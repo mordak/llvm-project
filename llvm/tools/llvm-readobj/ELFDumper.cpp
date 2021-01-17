@@ -733,7 +733,7 @@ void ELFDumper<ELFT>::printSymbolsHelper(bool IsDynamic) const {
           toString(SymsOrErr.takeError()));
     Entries = DotSymtabSec->getEntityCount();
   }
-  if (Syms.begin() == Syms.end())
+  if (Syms.empty())
     return;
 
   // The st_other field has 2 logical parts. The first two bits hold the symbol
@@ -2536,6 +2536,8 @@ template <class ELFT> void ELFDumper<ELFT>::printUnwindInfo() {
   Ctx.printUnwindInformation();
 }
 
+// The namespace is needed to fix the compilation with GCC older than 7.0+.
+namespace {
 template <> void ELFDumper<ELF32LE>::printUnwindInfo() {
   if (Obj.getHeader().e_machine == EM_ARM) {
     ARM::EHABI::PrinterContext<ELF32LE> Ctx(W, Obj, ObjF.getFileName(),
@@ -2545,6 +2547,7 @@ template <> void ELFDumper<ELF32LE>::printUnwindInfo() {
   DwarfCFIEH::PrinterContext<ELF32LE> Ctx(W, ObjF);
   Ctx.printUnwindInformation();
 }
+} // namespace
 
 template <class ELFT> void ELFDumper<ELFT>::printNeededLibraries() {
   ListScope D(W, "NeededLibraries");

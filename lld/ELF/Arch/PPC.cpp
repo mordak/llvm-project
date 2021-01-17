@@ -346,6 +346,7 @@ void PPC::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     write32(loc, (read32(loc) & ~mask) | (val & mask));
     break;
   }
+  case R_PPC_ADDR24:
   case R_PPC_REL24:
   case R_PPC_ADDR24:
   case R_PPC_LOCAL24PC:

@@ -34,6 +34,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/IntrinsicsAArch64.h"
@@ -177,8 +178,10 @@ private:
                                    MachineIRBuilder &MIRBuilder) const;
 
   /// Emit a floating point comparison between \p LHS and \p RHS.
+  /// \p Pred if given is the intended predicate to use.
   MachineInstr *emitFPCompare(Register LHS, Register RHS,
-                              MachineIRBuilder &MIRBuilder) const;
+                              MachineIRBuilder &MIRBuilder,
+                              Optional<CmpInst::Predicate> = None) const;
 
   MachineInstr *emitInstr(unsigned Opcode,
                           std::initializer_list<llvm::DstOp> DstOps,
@@ -1483,11 +1486,11 @@ bool AArch64InstructionSelector::selectCompareBranchFedByFCmp(
   assert(I.getOpcode() == TargetOpcode::G_BRCOND);
   // Unfortunately, the mapping of LLVM FP CC's onto AArch64 CC's isn't
   // totally clean.  Some of them require two branches to implement.
-  emitFPCompare(FCmp.getOperand(2).getReg(), FCmp.getOperand(3).getReg(), MIB);
+  auto Pred = (CmpInst::Predicate)FCmp.getOperand(1).getPredicate();
+  emitFPCompare(FCmp.getOperand(2).getReg(), FCmp.getOperand(3).getReg(), MIB,
+                Pred);
   AArch64CC::CondCode CC1, CC2;
-  changeFCMPPredToAArch64CC(
-      static_cast<CmpInst::Predicate>(FCmp.getOperand(1).getPredicate()), CC1,
-      CC2);
+  changeFCMPPredToAArch64CC(static_cast<CmpInst::Predicate>(Pred), CC1, CC2);
   MachineBasicBlock *DestMBB = I.getOperand(1).getMBB();
   MIB.buildInstr(AArch64::Bcc, {}, {}).addImm(CC1).addMBB(DestMBB);
   if (CC2 != AArch64CC::AL)
@@ -1873,7 +1876,6 @@ void AArch64InstructionSelector::materializeLargeCMVal(
                               AArch64II::MO_G1 | AArch64II::MO_NC, 16, 0);
   DstReg = BuildMovK(DstReg, AArch64II::MO_G2 | AArch64II::MO_NC, 32, 0);
   BuildMovK(DstReg, AArch64II::MO_G3, 48, I.getOperand(0).getReg());
-  return;
 }
 
 bool AArch64InstructionSelector::preISelLower(MachineInstr &I) {
@@ -1940,6 +1942,27 @@ bool AArch64InstructionSelector::preISelLower(MachineInstr &I) {
     MRI.setRegBank(NewSrc.getReg(0), RBI.getRegBank(AArch64::GPRRegBankID));
     I.getOperand(1).setReg(NewSrc.getReg(0));
     return true;
+  }
+  case TargetOpcode::G_UITOFP:
+  case TargetOpcode::G_SITOFP: {
+    // If both source and destination regbanks are FPR, then convert the opcode
+    // to G_SITOF so that the importer can select it to an fpr variant.
+    // Otherwise, it ends up matching an fpr/gpr variant and adding a cross-bank
+    // copy.
+    Register SrcReg = I.getOperand(1).getReg();
+    LLT SrcTy = MRI.getType(SrcReg);
+    LLT DstTy = MRI.getType(I.getOperand(0).getReg());
+    if (SrcTy.isVector() || SrcTy.getSizeInBits() != DstTy.getSizeInBits())
+      return false;
+
+    if (RBI.getRegBank(SrcReg, MRI, TRI)->getID() == AArch64::FPRRegBankID) {
+      if (I.getOpcode() == TargetOpcode::G_SITOFP)
+        I.setDesc(TII.get(AArch64::G_SITOF));
+      else
+        I.setDesc(TII.get(AArch64::G_UITOF));
+      return true;
+    }
+    return false;
   }
   default:
     return false;
@@ -3070,7 +3093,7 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
     CmpInst::Predicate Pred =
         static_cast<CmpInst::Predicate>(I.getOperand(1).getPredicate());
     if (!emitFPCompare(I.getOperand(2).getReg(), I.getOperand(3).getReg(),
-                       MIRBuilder) ||
+                       MIRBuilder, Pred) ||
         !emitCSetForFCmp(I.getOperand(0).getReg(), Pred, MIRBuilder))
       return false;
     I.eraseFromParent();
@@ -4191,7 +4214,8 @@ MachineInstr *AArch64InstructionSelector::emitCSetForFCmp(
 
 MachineInstr *
 AArch64InstructionSelector::emitFPCompare(Register LHS, Register RHS,
-                                          MachineIRBuilder &MIRBuilder) const {
+                                          MachineIRBuilder &MIRBuilder,
+                                          Optional<CmpInst::Predicate> Pred) const {
   MachineRegisterInfo &MRI = *MIRBuilder.getMRI();
   LLT Ty = MRI.getType(LHS);
   if (Ty.isVector())
@@ -4204,6 +4228,19 @@ AArch64InstructionSelector::emitFPCompare(Register LHS, Register RHS,
   // to explicitly materialize a constant.
   const ConstantFP *FPImm = getConstantFPVRegVal(RHS, MRI);
   bool ShouldUseImm = FPImm && (FPImm->isZero() && !FPImm->isNegative());
+
+  auto IsEqualityPred = [](CmpInst::Predicate P) {
+    return P == CmpInst::FCMP_OEQ || P == CmpInst::FCMP_ONE ||
+           P == CmpInst::FCMP_UEQ || P == CmpInst::FCMP_UNE;
+  };
+  if (!ShouldUseImm && Pred && IsEqualityPred(*Pred)) {
+    // Try commutating the operands.
+    const ConstantFP *LHSImm = getConstantFPVRegVal(LHS, MRI);
+    if (LHSImm && (LHSImm->isZero() && !LHSImm->isNegative())) {
+      ShouldUseImm = true;
+      std::swap(LHS, RHS);
+    }
+  }
   unsigned CmpOpcTbl[2][2] = {{AArch64::FCMPSrr, AArch64::FCMPDrr},
                               {AArch64::FCMPSri, AArch64::FCMPDri}};
   unsigned CmpOpc = CmpOpcTbl[ShouldUseImm][OpSize == 64];
