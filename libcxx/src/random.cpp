@@ -13,6 +13,7 @@
 #define _CRT_RAND_S
 #endif // defined(_LIBCPP_USING_WIN32_RANDOM)
 
+#include "limits"
 #include "random"
 #include "system_error"
 
@@ -29,6 +30,10 @@
 #elif defined(_LIBCPP_USING_DEV_RANDOM)
 #include <fcntl.h>
 #include <unistd.h>
+#if __has_include(<sys/ioctl.h>) && __has_include(<linux/random.h>)
+#include <sys/ioctl.h>
+#include <linux/random.h>
+#endif
 #elif defined(_LIBCPP_USING_NACL_RANDOM)
 #include <nacl/nacl_random.h>
 #endif
@@ -176,7 +181,21 @@ random_device::entropy() const _NOEXCEPT
 #ifdef __OpenBSD__
     return std::numeric_limits<unsigned int>::digits;
 #else
+#if defined(_LIBCPP_USING_DEV_RANDOM) && defined(RNDGETENTCNT)
+  int ent;
+  if (::ioctl(__f_, RNDGETENTCNT, &ent) < 0)
     return 0;
+
+  if (ent < 0)
+    return 0;
+
+  if (ent > std::numeric_limits<result_type>::digits)
+    return std::numeric_limits<result_type>::digits;
+
+  return ent;
+#else
+  return 0;
+#endif
 #endif
 }
 

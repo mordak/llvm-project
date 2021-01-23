@@ -1074,19 +1074,19 @@ def PseudoLA_TLS_GD : Pseudo<(outs GPR:$dst), (ins bare_symbol:$src), [],
 
 // There are single-instruction versions of these in Zbb, so disable these
 // Pseudos if that extension is present.
-let Predicates = [NotHasStdExtZbb], hasSideEffects = 0, mayLoad = 0,
+let hasSideEffects = 0, mayLoad = 0,
     mayStore = 0, isCodeGenOnly = 0, isAsmParserOnly = 1 in {
 def PseudoSEXT_B : Pseudo<(outs GPR:$rd), (ins GPR:$rs), [], "sext.b", "$rd, $rs">;
 def PseudoSEXT_H : Pseudo<(outs GPR:$rd), (ins GPR:$rs), [], "sext.h", "$rd, $rs">;
 // rv64's sext.w is defined above, using InstAlias<"sext.w ...
 // zext.b is defined above, using InstAlias<"zext.b ...
 def PseudoZEXT_H : Pseudo<(outs GPR:$rd), (ins GPR:$rs), [], "zext.h", "$rd, $rs">;
-} // Predicates = [NotHasStdExtZbb], ...
+} // hasSideEffects = 0, ...
 
-let Predicates = [NotHasStdExtZbb, IsRV64], hasSideEffects = 0, mayLoad = 0, mayStore = 0,
+let Predicates = [IsRV64], hasSideEffects = 0, mayLoad = 0, mayStore = 0,
   isCodeGenOnly = 0, isAsmParserOnly = 1 in {
 def PseudoZEXT_W : Pseudo<(outs GPR:$rd), (ins GPR:$rs), [], "zext.w", "$rd, $rs">;
-} // Predicates = [NotHasStdExtZbb, IsRV64], ...
+} // Predicates = [IsRV64], ...
 
 /// Loads
 
@@ -1158,7 +1158,7 @@ def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
 
 /// RV64 patterns
 
-let Predicates = [IsRV64, NotHasStdExtZbbOrZbp] in
+let Predicates = [IsRV64, NotHasStdExtZba] in
 def : Pat<(and GPR:$rs1, 0xffffffff), (SRLI (SLLI GPR:$rs1, 32), 32)>;
 
 let Predicates = [IsRV64] in {
