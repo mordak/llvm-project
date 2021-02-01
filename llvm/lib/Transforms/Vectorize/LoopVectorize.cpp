@@ -3224,9 +3224,10 @@ void InnerLoopVectorizer::emitMemRuntimeChecks(Loop *L, BasicBlock *Bypass) {
 
   Instruction *FirstCheckInst;
   Instruction *MemRuntimeCheck;
-  std::tie(FirstCheckInst, MemRuntimeCheck) =
-      addRuntimeChecks(MemCheckBlock->getTerminator(), OrigLoop,
-                       RtPtrChecking.getChecks(), RtPtrChecking.getSE());
+  SCEVExpander Exp(*PSE.getSE(), MemCheckBlock->getModule()->getDataLayout(),
+                   "induction");
+  std::tie(FirstCheckInst, MemRuntimeCheck) = addRuntimeChecks(
+      MemCheckBlock->getTerminator(), OrigLoop, RtPtrChecking.getChecks(), Exp);
   assert(MemRuntimeCheck && "no RT checks generated although RtPtrChecking "
                             "claimed checks are required");
   CondBranch->setCondition(MemRuntimeCheck);
@@ -5504,11 +5505,9 @@ LoopVectorizationCostModel::computeMaxVF(ElementCount UserVF, unsigned UserIC) {
     return None;
   }
 
-  ElementCount MaxVF = computeFeasibleMaxVF(TC, UserVF);
-
   switch (ScalarEpilogueStatus) {
   case CM_ScalarEpilogueAllowed:
-    return MaxVF;
+    return computeFeasibleMaxVF(TC, UserVF);
   case CM_ScalarEpilogueNotAllowedUsePredicate:
     LLVM_FALLTHROUGH;
   case CM_ScalarEpilogueNotNeededUsePredicate:
@@ -5546,7 +5545,7 @@ LoopVectorizationCostModel::computeMaxVF(ElementCount UserVF, unsigned UserIC) {
       LLVM_DEBUG(dbgs() << "LV: Cannot fold tail by masking: vectorize with a "
                            "scalar epilogue instead.\n");
       ScalarEpilogueStatus = CM_ScalarEpilogueAllowed;
-      return MaxVF;
+      return computeFeasibleMaxVF(TC, UserVF);
     }
     return None;
   }
@@ -5563,6 +5562,7 @@ LoopVectorizationCostModel::computeMaxVF(ElementCount UserVF, unsigned UserIC) {
     InterleaveInfo.invalidateGroupsRequiringScalarEpilogue();
   }
 
+  ElementCount MaxVF = computeFeasibleMaxVF(TC, UserVF);
   assert(!MaxVF.isScalable() &&
          "Scalable vectors do not yet support tail folding");
   assert((UserVF.isNonZero() || isPowerOf2_32(MaxVF.getFixedValue())) &&
@@ -8907,7 +8907,7 @@ void LoopVectorizationPlanner::adjustRecipesForInLoopReductions(
                          ? RecipeBuilder.createBlockInMask(R->getParent(), Plan)
                          : nullptr;
       VPReductionRecipe *RedRecipe = new VPReductionRecipe(
-          &RdxDesc, R, ChainOp, VecOp, CondOp, Legal->hasFunNoNaNAttr(), TTI);
+          &RdxDesc, R, ChainOp, VecOp, CondOp, TTI);
       WidenRecipe->getVPValue()->replaceAllUsesWith(RedRecipe);
       Plan->removeVPValueFor(R);
       Plan->addVPValue(R, RedRecipe);
