@@ -98,6 +98,10 @@ New Compiler Flags
     -Wl,--gc-sections on ELF platforms to the linking command, and possibly
     adding -fdata-sections -ffunction-sections to the command generating
     the shared object).
+- New option ``-fbinutils-version=`` specifies the targeted binutils version.
+  For example, ``-fbinutils-version=2.35`` means compatibility with GNU as/ld
+  before 2.35 is not needed: new features can be used and there is no need to
+  work around old GNU as/ld bugs.
 
 Deprecated Compiler Flags
 -------------------------
@@ -289,9 +293,11 @@ clang-format
 
 - Option ``IndentRequires`` has been added to indent the ``requires`` keyword
   in templates.
+
 - Option ``BreakBeforeConceptDeclarations`` has been added to aid the formatting of concepts.
 
-- Option ``IndentPragmas`` has been added to allow #pragma to indented with the current scope level. This is especially useful when using #pragma to mark OpenMP sections of code.
+- Option ``IndentPragmas`` has been added to allow #pragma to indented with the current scope
+  level. This is especially useful when using #pragma to mark OpenMP sections of code.
 
 - Option ``SpaceBeforeCaseColon`` has been added to add a space before the
   colon in a case or default statement.
@@ -300,6 +306,9 @@ clang-format
   macros which are not parsed as a type in front of a statement. See
   the documentation for an example.
 
+- Options ``AlignConsecutiveAssignments``, ``AlignConsecutiveBitFields``,
+  ``AlignConsecutiveDeclarations`` and ``AlignConsecutiveMacros`` have been modified to allow
+  alignment across empty lines and/or comments.
 
 libclang
 --------
