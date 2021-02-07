@@ -7980,7 +7980,8 @@ static SDValue GeneratePerfectShuffle(unsigned PFEntry, SDValue LHS,
         VT.getVectorElementType() == MVT::f32)
       return DAG.getNode(ARMISD::VREV64, dl, VT, OpLHS);
     // vrev <4 x i16> -> VREV32
-    if (VT.getVectorElementType() == MVT::i16)
+    if (VT.getVectorElementType() == MVT::i16 ||
+        VT.getVectorElementType() == MVT::f16)
       return DAG.getNode(ARMISD::VREV32, dl, VT, OpLHS);
     // vrev <4 x i8> -> VREV16
     assert(VT.getVectorElementType() == MVT::i8);
@@ -14019,9 +14020,51 @@ static SDValue PerformSignExtendInregCombine(SDNode *N, SelectionDAG &DAG) {
   return SDValue();
 }
 
+// When lowering complex nodes that we recognize, like VQDMULH and MULH, we
+// can end up with shuffle(binop(shuffle, shuffle)), that can be simplified to
+// binop as the shuffles cancel out.
+static SDValue FlattenVectorShuffle(ShuffleVectorSDNode *N, SelectionDAG &DAG) {
+  EVT VT = N->getValueType(0);
+  if (!N->getOperand(1).isUndef() || N->getOperand(0).getValueType() != VT)
+    return SDValue();
+  SDValue Op = N->getOperand(0);
+
+  // Looking for binary operators that will have been folded from
+  // truncates/extends.
+  switch (Op.getOpcode()) {
+  case ARMISD::VQDMULH:
+  case ISD::MULHS:
+  case ISD::MULHU:
+    break;
+  default:
+    return SDValue();
+  }
+
+  ShuffleVectorSDNode *Op0 = dyn_cast<ShuffleVectorSDNode>(Op.getOperand(0));
+  ShuffleVectorSDNode *Op1 = dyn_cast<ShuffleVectorSDNode>(Op.getOperand(1));
+  if (!Op0 || !Op1 || !Op0->getOperand(1).isUndef() ||
+      !Op1->getOperand(1).isUndef() || Op0->getMask() != Op1->getMask() ||
+      Op0->getOperand(0).getValueType() != VT)
+    return SDValue();
+
+  // Check the mask turns into an identity shuffle.
+  ArrayRef<int> NMask = N->getMask();
+  ArrayRef<int> OpMask = Op0->getMask();
+  for (int i = 0, e = NMask.size(); i != e; i++) {
+    if (NMask[i] > 0 && OpMask[NMask[i]] > 0 && OpMask[NMask[i]] != i)
+      return SDValue();
+  }
+
+  return DAG.getNode(Op.getOpcode(), SDLoc(Op), Op.getValueType(),
+                     Op0->getOperand(0), Op1->getOperand(0));
+}
+
 /// PerformVECTOR_SHUFFLECombine - Target-specific dag combine xforms for
 /// ISD::VECTOR_SHUFFLE.
 static SDValue PerformVECTOR_SHUFFLECombine(SDNode *N, SelectionDAG &DAG) {
+  if (SDValue R = FlattenVectorShuffle(cast<ShuffleVectorSDNode>(N), DAG))
+    return R;
+
   // The LLVM shufflevector instruction does not require the shuffle mask
   // length to match the operand vector length, but ISD::VECTOR_SHUFFLE does
   // have that requirement.  When translating to ISD::VECTOR_SHUFFLE, if the
@@ -16551,7 +16594,7 @@ bool ARMTargetLowering::isDesirableToTransformToIntegerOp(unsigned Opc,
 }
 
 bool ARMTargetLowering::allowsMisalignedMemoryAccesses(EVT VT, unsigned,
-                                                       unsigned Alignment,
+                                                       Align Alignment,
                                                        MachineMemOperand::Flags,
                                                        bool *Fast) const {
   // Depends what it gets converted into if the type is weird.
@@ -16630,14 +16673,14 @@ EVT ARMTargetLowering::getOptimalMemOpType(
     bool Fast;
     if (Op.size() >= 16 &&
         (Op.isAligned(Align(16)) ||
-         (allowsMisalignedMemoryAccesses(MVT::v2f64, 0, 1,
+         (allowsMisalignedMemoryAccesses(MVT::v2f64, 0, Align(1),
                                          MachineMemOperand::MONone, &Fast) &&
           Fast))) {
       return MVT::v2f64;
     } else if (Op.size() >= 8 &&
                (Op.isAligned(Align(8)) ||
                 (allowsMisalignedMemoryAccesses(
-                     MVT::f64, 0, 1, MachineMemOperand::MONone, &Fast) &&
+                     MVT::f64, 0, Align(1), MachineMemOperand::MONone, &Fast) &&
                  Fast))) {
       return MVT::f64;
     }
@@ -18709,6 +18752,8 @@ ARMTargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const {
              : AtomicExpansionKind::None;
 }
 
+// Similar to shouldExpandAtomicRMWInIR, ldrex/strex can be used  up to 32
+// bits, and up to 64 bits on the non-M profiles.
 TargetLowering::AtomicExpansionKind
 ARMTargetLowering::shouldExpandAtomicCmpXchgInIR(AtomicCmpXchgInst *AI) const {
   // At -O0, fast-regalloc cannot cope with the live vregs necessary to
@@ -18716,9 +18761,11 @@ ARMTargetLowering::shouldExpandAtomicCmpXchgInIR(AtomicCmpXchgInst *AI) const {
   // on the stack and close enough to the spill slot, this can lead to a
   // situation where the monitor always gets cleared and the atomic operation
   // can never succeed. So at -O0 we need a late-expanded pseudo-inst instead.
+  unsigned Size = AI->getOperand(1)->getType()->getPrimitiveSizeInBits();
   bool HasAtomicCmpXchg =
       !Subtarget->isThumb() || Subtarget->hasV8MBaselineOps();
-  if (getTargetMachine().getOptLevel() != 0 && HasAtomicCmpXchg)
+  if (getTargetMachine().getOptLevel() != 0 && HasAtomicCmpXchg &&
+      Size <= (Subtarget->isMClass() ? 32U : 64U))
     return AtomicExpansionKind::LLSC;
   return AtomicExpansionKind::None;
 }

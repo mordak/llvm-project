@@ -8361,13 +8361,17 @@ SDValue DAGCombiner::visitSRA(SDNode *N) {
     unsigned LowBits = OpSizeInBits - (unsigned)N1C->getZExtValue();
     EVT ExtVT = EVT::getIntegerVT(*DAG.getContext(), LowBits);
     if (VT.isVector())
-      ExtVT = EVT::getVectorVT(*DAG.getContext(),
-                               ExtVT, VT.getVectorNumElements());
+      ExtVT = EVT::getVectorVT(*DAG.getContext(), ExtVT,
+                               VT.getVectorElementCount());
     if (!LegalOperations ||
         TLI.getOperationAction(ISD::SIGN_EXTEND_INREG, ExtVT) ==
         TargetLowering::Legal)
       return DAG.getNode(ISD::SIGN_EXTEND_INREG, SDLoc(N), VT,
                          N0.getOperand(0), DAG.getValueType(ExtVT));
+    // Even if we can't convert to sext_inreg, we might be able to remove
+    // this shift pair if the input is already sign extended.
+    if (DAG.ComputeNumSignBits(N0.getOperand(0)) > N1C->getZExtValue())
+      return N0.getOperand(0);
   }
 
   // fold (sra (sra x, c1), c2) -> (sra x, (add c1, c2))
@@ -8412,7 +8416,7 @@ SDValue DAGCombiner::visitSRA(SDNode *N) {
       EVT TruncVT = EVT::getIntegerVT(Ctx, OpSizeInBits - N1C->getZExtValue());
 
       if (VT.isVector())
-        TruncVT = EVT::getVectorVT(Ctx, TruncVT, VT.getVectorNumElements());
+        TruncVT = EVT::getVectorVT(Ctx, TruncVT, VT.getVectorElementCount());
 
       // Determine the residual right-shift amount.
       int ShiftAmt = N1C->getZExtValue() - N01C->getZExtValue();
@@ -8452,7 +8456,7 @@ SDValue DAGCombiner::visitSRA(SDNode *N) {
       unsigned ShiftAmt = N1C->getZExtValue();
       EVT TruncVT = EVT::getIntegerVT(Ctx, OpSizeInBits - ShiftAmt);
       if (VT.isVector())
-        TruncVT = EVT::getVectorVT(Ctx, TruncVT, VT.getVectorNumElements());
+        TruncVT = EVT::getVectorVT(Ctx, TruncVT, VT.getVectorElementCount());
 
       // TODO: The simple type check probably belongs in the default hook
       //       implementation and/or target-specific overrides (because

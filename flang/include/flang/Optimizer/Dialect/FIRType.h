@@ -5,6 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// Coding style: https://mlir.llvm.org/getting_started/DeveloperGuide/
+//
+//===----------------------------------------------------------------------===//
 
 #ifndef OPTIMIZER_DIALECT_FIRTYPE_H
 #define OPTIMIZER_DIALECT_FIRTYPE_H
@@ -32,18 +36,17 @@ namespace fir {
 
 class FIROpsDialect;
 
-using KindTy = int;
+using KindTy = unsigned;
 
 namespace detail {
 struct BoxTypeStorage;
 struct BoxCharTypeStorage;
 struct BoxProcTypeStorage;
 struct CharacterTypeStorage;
-struct CplxTypeStorage;
-struct DimsTypeStorage;
+struct ComplexTypeStorage;
 struct FieldTypeStorage;
 struct HeapTypeStorage;
-struct IntTypeStorage;
+struct IntegerTypeStorage;
 struct LenTypeStorage;
 struct LogicalTypeStorage;
 struct PointerTypeStorage;
@@ -52,6 +55,7 @@ struct RecordTypeStorage;
 struct ReferenceTypeStorage;
 struct SequenceTypeStorage;
 struct TypeDescTypeStorage;
+struct VectorTypeStorage;
 } // namespace detail
 
 // These isa_ routines follow the precedent of llvm::isa_or_null<>
@@ -68,7 +72,9 @@ bool isa_fir_or_std_type(mlir::Type t);
 /// Is `t` a FIR dialect type that implies a memory (de)reference?
 bool isa_ref_type(mlir::Type t);
 
-/// Is `t` a type that is always trivially pass-by-reference?
+/// Is `t` a type that is always trivially pass-by-reference? Specifically, this
+/// is testing if `t` is a ReferenceType or any box type. Compare this to
+/// conformsWithPassByRef(), which includes pointers and allocatables.
 bool isa_passbyref_type(mlir::Type t);
 
 /// Is `t` a boxed type?
@@ -105,11 +111,11 @@ public:
 /// Model of a Fortran COMPLEX intrinsic type, including the KIND type
 /// parameter. COMPLEX is a floating point type with a real and imaginary
 /// member.
-class CplxType : public mlir::Type::TypeBase<CplxType, mlir::Type,
-                                             detail::CplxTypeStorage> {
+class ComplexType : public mlir::Type::TypeBase<fir::ComplexType, mlir::Type,
+                                                detail::ComplexTypeStorage> {
 public:
   using Base::Base;
-  static CplxType get(mlir::MLIRContext *ctxt, KindTy kind);
+  static fir::ComplexType get(mlir::MLIRContext *ctxt, KindTy kind);
 
   /// Get the corresponding fir.real<k> type.
   mlir::Type getElementType() const;
@@ -119,19 +125,18 @@ public:
 
 /// Model of a Fortran INTEGER intrinsic type, including the KIND type
 /// parameter.
-class IntType
-    : public mlir::Type::TypeBase<IntType, mlir::Type, detail::IntTypeStorage> {
+class IntegerType : public mlir::Type::TypeBase<fir::IntegerType, mlir::Type,
+                                                detail::IntegerTypeStorage> {
 public:
   using Base::Base;
-  static IntType get(mlir::MLIRContext *ctxt, KindTy kind);
+  static fir::IntegerType get(mlir::MLIRContext *ctxt, KindTy kind);
   KindTy getFKind() const;
 };
 
 /// Model of a Fortran LOGICAL intrinsic type, including the KIND type
 /// parameter.
-class LogicalType
-    : public mlir::Type::TypeBase<LogicalType, mlir::Type,
-                                  detail::LogicalTypeStorage> {
+class LogicalType : public mlir::Type::TypeBase<LogicalType, mlir::Type,
+                                                detail::LogicalTypeStorage> {
 public:
   using Base::Base;
   static LogicalType get(mlir::MLIRContext *ctxt, KindTy kind);
@@ -190,20 +195,6 @@ public:
 
   static mlir::LogicalResult verifyConstructionInvariants(mlir::Location,
                                                           mlir::Type eleTy);
-};
-
-/// The type of a runtime vector that describes triples of array dimension
-/// information. A triple consists of a lower bound, upper bound, and
-/// stride. Each dimension of an array entity may have an associated triple that
-/// maps how elements of the array are accessed.
-class DimsType : public mlir::Type::TypeBase<DimsType, mlir::Type,
-                                             detail::DimsTypeStorage> {
-public:
-  using Base::Base;
-  static DimsType get(mlir::MLIRContext *ctx, unsigned rank);
-
-  /// returns -1 if the rank is unknown
-  unsigned getRank() const;
 };
 
 /// The type of a field name. Implementations may defer the layout of a Fortran
@@ -373,14 +364,6 @@ public:
                                                           llvm::StringRef name);
 };
 
-mlir::Type parseFirType(FIROpsDialect *, mlir::DialectAsmParser &parser);
-
-void printFirType(FIROpsDialect *, mlir::Type ty, mlir::DialectAsmPrinter &p);
-
-/// Guarantee `type` is a scalar integral type (standard Integer, standard
-/// Index, or FIR Int). Aborts execution if condition is false.
-void verifyIntegralType(mlir::Type type);
-
 /// Is `t` a FIR Real or MLIR Float type?
 inline bool isa_real(mlir::Type t) {
   return t.isa<fir::RealType>() || t.isa<mlir::FloatType>();
@@ -389,12 +372,39 @@ inline bool isa_real(mlir::Type t) {
 /// Is `t` an integral type?
 inline bool isa_integer(mlir::Type t) {
   return t.isa<mlir::IndexType>() || t.isa<mlir::IntegerType>() ||
-         t.isa<fir::IntType>();
+         t.isa<fir::IntegerType>();
 }
+
+/// Replacement for the builtin vector type.
+/// The FIR vector type is always rank one. It's size is always a constant.
+/// A vector's element type must be real or integer.
+class VectorType : public mlir::Type::TypeBase<fir::VectorType, mlir::Type,
+                                               detail::VectorTypeStorage> {
+public:
+  using Base::Base;
+
+  static fir::VectorType get(uint64_t len, mlir::Type eleTy);
+  mlir::Type getEleTy() const;
+  uint64_t getLen() const;
+
+  static mlir::LogicalResult
+  verifyConstructionInvariants(mlir::Location, uint64_t len, mlir::Type eleTy);
+  static bool isValidElementType(mlir::Type t) {
+    return isa_real(t) || isa_integer(t);
+  }
+};
+
+mlir::Type parseFirType(FIROpsDialect *, mlir::DialectAsmParser &parser);
+
+void printFirType(FIROpsDialect *, mlir::Type ty, mlir::DialectAsmPrinter &p);
+
+/// Guarantee `type` is a scalar integral type (standard Integer, standard
+/// Index, or FIR Int). Aborts execution if condition is false.
+void verifyIntegralType(mlir::Type type);
 
 /// Is `t` a FIR or MLIR Complex type?
 inline bool isa_complex(mlir::Type t) {
-  return t.isa<fir::CplxType>() || t.isa<mlir::ComplexType>();
+  return t.isa<fir::ComplexType>() || t.isa<mlir::ComplexType>();
 }
 
 } // namespace fir

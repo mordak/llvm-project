@@ -2417,9 +2417,9 @@ multiclass P10ReverseSetBool<dag pattern, dag result> {
             (SETBCR8 result)>;
 }
 
-multiclass IntSetP10RevSetBool<SDNode SetCC, ValueType Ty, ImmLeaf ZExtTy,
-                               ImmLeaf SExtTy, PatLeaf Cmpi, PatLeaf Cmpli,
-                               PatLeaf Cmp, PatLeaf Cmpl> {
+multiclass IntSetP10RevSetBool<SDNode SetCC, ValueType Ty, PatLeaf ZExtTy,
+                               ImmLeaf SExtTy, I Cmpi, I Cmpli,
+                               I Cmp, I Cmpl> {
   defm : P10ReverseSetBool<(i1 (SetCC Ty:$s1, Ty:$s2, SETUGE)),
                            (EXTRACT_SUBREG (Cmpl $s1, $s2), sub_lt)>;
   defm : P10ReverseSetBool<(i1 (SetCC Ty:$s1, Ty:$s2, SETGE)),
@@ -2445,7 +2445,7 @@ multiclass IntSetP10RevSetBool<SDNode SetCC, ValueType Ty, ImmLeaf ZExtTy,
                            (EXTRACT_SUBREG (Cmpli $s1, imm:$imm), sub_eq)>;
 }
 
-multiclass FSetP10RevSetBool<SDNode SetCC, ValueType Ty, PatLeaf FCmp> {
+multiclass FSetP10RevSetBool<SDNode SetCC, ValueType Ty, I FCmp> {
   defm : P10ReverseSetBool<(i1 (SetCC Ty:$s1, Ty:$s2, SETUGE)),
                            (EXTRACT_SUBREG (FCmp $s1, $s2), sub_lt)>;
   defm : P10ReverseSetBool<(i1 (SetCC Ty:$s1, Ty:$s2, SETGE)),
@@ -2643,6 +2643,8 @@ let AddedComplexity = 400, Predicates = [PrefixInstrs] in {
 }
 
 let Predicates = [PrefixInstrs] in {
+  def : Pat<(i32 imm34:$imm), (PLI (getImmAs64BitInt imm:$imm))>;
+  def : Pat<(i64 imm34:$imm), (PLI8 (getImmAs64BitInt imm:$imm))>;
   def : Pat<(v16i8 (int_ppc_vsx_xxpermx v16i8:$A, v16i8:$B, v16i8:$C, timm:$D)),
             (COPY_TO_REGCLASS (XXPERMX (COPY_TO_REGCLASS $A, VSRC),
                                        (COPY_TO_REGCLASS $B, VSRC),

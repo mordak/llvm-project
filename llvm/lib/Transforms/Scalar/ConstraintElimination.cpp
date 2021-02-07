@@ -29,6 +29,8 @@
 #include "llvm/Support/DebugCounter.h"
 #include "llvm/Transforms/Scalar.h"
 
+#include <string>
+
 using namespace llvm;
 using namespace PatternMatch;
 
@@ -51,7 +53,7 @@ static SmallVector<std::pair<int64_t, Value *>, 4> decompose(Value *V) {
     return {{CI->getSExtValue(), nullptr}};
   }
   auto *GEP = dyn_cast<GetElementPtrInst>(V);
-  if (GEP && GEP->getNumOperands() == 2) {
+  if (GEP && GEP->getNumOperands() == 2 && GEP->isInBounds()) {
     if (isa<ConstantInt>(GEP->getOperand(GEP->getNumOperands() - 1))) {
       return {{cast<ConstantInt>(GEP->getOperand(GEP->getNumOperands() - 1))
                    ->getSExtValue(),
@@ -92,10 +94,19 @@ static SmallVector<std::pair<int64_t, Value *>, 4> decompose(Value *V) {
   return {{0, nullptr}, {1, V}};
 }
 
+struct ConstraintTy {
+  SmallVector<int64_t, 8> Coefficients;
+
+  ConstraintTy(SmallVector<int64_t, 8> Coefficients)
+      : Coefficients(Coefficients) {}
+
+  unsigned size() const { return Coefficients.size(); }
+};
+
 /// Turn a condition \p CmpI into a constraint vector, using indices from \p
 /// Value2Index. If \p ShouldAdd is true, new indices are added for values not
 /// yet in \p Value2Index.
-static SmallVector<int64_t, 8>
+static SmallVector<ConstraintTy, 4>
 getConstraint(CmpInst::Predicate Pred, Value *Op0, Value *Op1,
               DenseMap<Value *, unsigned> &Value2Index, bool ShouldAdd) {
   int64_t Offset1 = 0;
@@ -117,12 +128,19 @@ getConstraint(CmpInst::Predicate Pred, Value *Op0, Value *Op1,
     return getConstraint(CmpInst::getSwappedPredicate(Pred), Op1, Op0,
                          Value2Index, ShouldAdd);
 
+  if (Pred == CmpInst::ICMP_EQ) {
+    auto A = getConstraint(CmpInst::ICMP_UGE, Op0, Op1, Value2Index, ShouldAdd);
+    auto B = getConstraint(CmpInst::ICMP_ULE, Op0, Op1, Value2Index, ShouldAdd);
+    append_range(A, B);
+    return A;
+  }
+
   // Only ULE and ULT predicates are supported at the moment.
   if (Pred != CmpInst::ICMP_ULE && Pred != CmpInst::ICMP_ULT)
     return {};
 
-  auto ADec = decompose(Op0);
-  auto BDec = decompose(Op1);
+  auto ADec = decompose(Op0->stripPointerCasts());
+  auto BDec = decompose(Op1->stripPointerCasts());
   // Skip if decomposing either of the values failed.
   if (ADec.empty() || BDec.empty())
     return {};
@@ -156,10 +174,10 @@ getConstraint(CmpInst::Predicate Pred, Value *Op0, Value *Op1,
     R[Value2Index[KV.second]] -= KV.first;
 
   R[0] = Offset1 + Offset2 + (Pred == CmpInst::ICMP_ULT ? -1 : 0);
-  return R;
+  return {R};
 }
 
-static SmallVector<int64_t, 8>
+static SmallVector<ConstraintTy, 4>
 getConstraint(CmpInst *Cmp, DenseMap<Value *, unsigned> &Value2Index,
               bool ShouldAdd) {
   return getConstraint(Cmp->getPredicate(), Cmp->getOperand(0),
@@ -198,6 +216,19 @@ struct StackEntry {
 };
 } // namespace
 
+#ifndef NDEBUG
+static void dumpWithNames(ConstraintTy &C,
+                          DenseMap<Value *, unsigned> &Value2Index) {
+  SmallVector<std::string> Names(Value2Index.size(), "");
+  for (auto &KV : Value2Index) {
+    Names[KV.second - 1] = std::string("%") + KV.first->getName().str();
+  }
+  ConstraintSystem CS;
+  CS.addVariableRowFill(C.Coefficients);
+  CS.dump(Names);
+}
+#endif
+
 static bool eliminateConstraints(Function &F, DominatorTree &DT) {
   bool Changed = false;
   DT.updateDFSNumbers();
@@ -216,6 +247,15 @@ static bool eliminateConstraints(Function &F, DominatorTree &DT) {
     if (!Br || !Br->isConditional())
       continue;
 
+    // Returns true if we can add a known condition from BB to its successor
+    // block Succ. Each predecessor of Succ can either be BB or be dominated by
+    // Succ (e.g. the case when adding a condition from a pre-header to a loop
+    // header).
+    auto CanAdd = [&BB, &DT](BasicBlock *Succ) {
+      return all_of(predecessors(Succ), [&BB, &DT, Succ](BasicBlock *Pred) {
+        return Pred == &BB || DT.dominates(Succ, Pred);
+      });
+    };
     // If the condition is an OR of 2 compares and the false successor only has
     // the current block as predecessor, queue both negated conditions for the
     // false successor.
@@ -223,7 +263,7 @@ static bool eliminateConstraints(Function &F, DominatorTree &DT) {
     if (match(Br->getCondition(), m_LogicalOr(m_Value(Op0), m_Value(Op1))) &&
         match(Op0, m_Cmp()) && match(Op1, m_Cmp())) {
       BasicBlock *FalseSuccessor = Br->getSuccessor(1);
-      if (FalseSuccessor->getSinglePredecessor()) {
+      if (CanAdd(FalseSuccessor)) {
         WorkList.emplace_back(DT.getNode(FalseSuccessor), cast<CmpInst>(Op0),
                               true);
         WorkList.emplace_back(DT.getNode(FalseSuccessor), cast<CmpInst>(Op1),
@@ -238,7 +278,7 @@ static bool eliminateConstraints(Function &F, DominatorTree &DT) {
     if (match(Br->getCondition(), m_LogicalAnd(m_Value(Op0), m_Value(Op1))) &&
         match(Op0, m_Cmp()) && match(Op1, m_Cmp())) {
       BasicBlock *TrueSuccessor = Br->getSuccessor(0);
-      if (TrueSuccessor->getSinglePredecessor()) {
+      if (CanAdd(TrueSuccessor)) {
         WorkList.emplace_back(DT.getNode(TrueSuccessor), cast<CmpInst>(Op0),
                               false);
         WorkList.emplace_back(DT.getNode(TrueSuccessor), cast<CmpInst>(Op1),
@@ -250,9 +290,9 @@ static bool eliminateConstraints(Function &F, DominatorTree &DT) {
     auto *CmpI = dyn_cast<CmpInst>(Br->getCondition());
     if (!CmpI)
       continue;
-    if (Br->getSuccessor(0)->getSinglePredecessor())
+    if (CanAdd(Br->getSuccessor(0)))
       WorkList.emplace_back(DT.getNode(Br->getSuccessor(0)), CmpI, false);
-    if (Br->getSuccessor(1)->getSinglePredecessor())
+    if (CanAdd(Br->getSuccessor(1)))
       WorkList.emplace_back(DT.getNode(Br->getSuccessor(1)), CmpI, true);
   }
 
@@ -301,9 +341,9 @@ static bool eliminateConstraints(Function &F, DominatorTree &DT) {
         if (!Cmp)
           continue;
         auto R = getConstraint(Cmp, Value2Index, false);
-        if (R.empty() || R.size() == 1)
+        if (R.size() != 1 || R[0].size() == 1)
           continue;
-        if (CS.isConditionImplied(R)) {
+        if (CS.isConditionImplied(R[0].Coefficients)) {
           if (!DebugCounter::shouldExecute(EliminatedCounter))
             continue;
 
@@ -318,7 +358,8 @@ static bool eliminateConstraints(Function &F, DominatorTree &DT) {
           NumCondsRemoved++;
           Changed = true;
         }
-        if (CS.isConditionImplied(ConstraintSystem::negate(R))) {
+        if (CS.isConditionImplied(
+                ConstraintSystem::negate(R[0].Coefficients))) {
           if (!DebugCounter::shouldExecute(EliminatedCounter))
             continue;
 
@@ -360,11 +401,19 @@ static bool eliminateConstraints(Function &F, DominatorTree &DT) {
       continue;
 
     LLVM_DEBUG(dbgs() << "Adding " << *CB.Condition << " " << CB.Not << "\n");
-
-    // If R has been added to the system, queue it for removal once it goes
-    // out-of-scope.
-    if (CS.addVariableRowFill(R))
-      DFSInStack.emplace_back(CB.NumIn, CB.NumOut, CB.Condition, CB.Not);
+    bool Added = false;
+    for (auto &C : R) {
+      auto Coeffs = C.Coefficients;
+      LLVM_DEBUG({
+        dbgs() << "  constraint: ";
+        dumpWithNames(C, Value2Index);
+      });
+      Added |= CS.addVariableRowFill(Coeffs);
+      // If R has been added to the system, queue it for removal once it goes
+      // out-of-scope.
+      if (Added)
+        DFSInStack.emplace_back(CB.NumIn, CB.NumOut, CB.Condition, CB.Not);
+    }
   }
 
   assert(CS.size() == DFSInStack.size() &&
