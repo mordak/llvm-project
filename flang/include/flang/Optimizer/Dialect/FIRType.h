@@ -17,6 +17,9 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/SmallVector.h"
 
+#define GET_TYPEDEF_CLASSES
+#include "flang/Optimizer/Dialect/FIROpsTypes.h.inc"
+
 namespace llvm {
 class raw_ostream;
 class StringRef;
@@ -54,6 +57,8 @@ struct RealTypeStorage;
 struct RecordTypeStorage;
 struct ReferenceTypeStorage;
 struct SequenceTypeStorage;
+struct ShapeShiftTypeStorage;
+struct SliceTypeStorage;
 struct TypeDescTypeStorage;
 struct VectorTypeStorage;
 } // namespace detail
@@ -97,15 +102,34 @@ mlir::Type dyn_cast_ptrEleTy(mlir::Type t);
 // Intrinsic types
 
 /// Model of the Fortran CHARACTER intrinsic type, including the KIND type
-/// parameter. The model does not include a LEN type parameter. A CharacterType
-/// is thus the type of a single character value.
+/// parameter. The model optionally includes a LEN type parameter. A
+/// CharacterType is thus the type of both a single character value and a
+/// character with a LEN parameter.
 class CharacterType
     : public mlir::Type::TypeBase<CharacterType, mlir::Type,
                                   detail::CharacterTypeStorage> {
 public:
   using Base::Base;
-  static CharacterType get(mlir::MLIRContext *ctxt, KindTy kind);
+  using LenType = std::int64_t;
+
+  static CharacterType get(mlir::MLIRContext *ctxt, KindTy kind, LenType len);
+  /// Return unknown length CHARACTER type.
+  static CharacterType getUnknownLen(mlir::MLIRContext *ctxt, KindTy kind) {
+    return get(ctxt, kind, unknownLen());
+  }
+  /// Return length 1 CHARACTER type.
+  static CharacterType getSingleton(mlir::MLIRContext *ctxt, KindTy kind) {
+    return get(ctxt, kind, singleton());
+  }
   KindTy getFKind() const;
+
+  /// CHARACTER is a singleton and has a LEN of 1.
+  static constexpr LenType singleton() { return 1; }
+  /// CHARACTER has an unknown LEN property.
+  static constexpr LenType unknownLen() { return -1; }
+
+  /// Access to a CHARACTER's LEN property. Defaults to 1.
+  LenType getLen() const;
 };
 
 /// Model of a Fortran COMPLEX intrinsic type, including the KIND type
@@ -195,6 +219,31 @@ public:
 
   static mlir::LogicalResult verifyConstructionInvariants(mlir::Location,
                                                           mlir::Type eleTy);
+};
+
+
+/// Type of a vector of runtime values that define the shape and the origin of a
+/// multidimensional array object. The vector is of pairs, origin offset and
+/// extent, of each array dimension. The rank of a ShapeShiftType must be at
+/// least 1.
+class ShapeShiftType
+    : public mlir::Type::TypeBase<ShapeShiftType, mlir::Type,
+                                  detail::ShapeShiftTypeStorage> {
+public:
+  using Base::Base;
+  static ShapeShiftType get(mlir::MLIRContext *ctx, unsigned rank);
+  unsigned getRank() const;
+};
+
+/// Type of a vector that represents an array slice operation on an array.
+/// Fortran slices are triples of lower bound, upper bound, and stride. The rank
+/// of a SliceType must be at least 1.
+class SliceType : public mlir::Type::TypeBase<SliceType, mlir::Type,
+                                              detail::SliceTypeStorage> {
+public:
+  using Base::Base;
+  static SliceType get(mlir::MLIRContext *ctx, unsigned rank);
+  unsigned getRank() const;
 };
 
 /// The type of a field name. Implementations may defer the layout of a Fortran
@@ -406,6 +455,17 @@ void verifyIntegralType(mlir::Type type);
 inline bool isa_complex(mlir::Type t) {
   return t.isa<fir::ComplexType>() || t.isa<mlir::ComplexType>();
 }
+
+inline bool isa_char_string(mlir::Type t) {
+  if (auto ct = t.dyn_cast_or_null<fir::CharacterType>())
+    return ct.getLen() != fir::CharacterType::singleton();
+  return false;
+}
+
+/// Is `t` a box type for which it is not possible to deduce the box size.
+/// It is not possible to deduce the size of a box that describes an entity
+/// of unknown rank or type.
+bool isa_unknown_size_box(mlir::Type t);
 
 } // namespace fir
 
