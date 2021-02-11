@@ -15,14 +15,12 @@
 #include <clocale>
 #include <cwctype>
 #include <ctype.h>
-#if !defined(__OpenBSD__)
 #if !defined(__NEWLIB__) || __NEWLIB__ < 2 || \
     __NEWLIB__ == 2 && __NEWLIB_MINOR__ < 5
-#include <support/xlocale/__nop_locale_mgmt.h>
-#include <support/xlocale/__posix_l_fallback.h>
+#include <__support/xlocale/__nop_locale_mgmt.h>
+#include <__support/xlocale/__posix_l_fallback.h>
+#include <__support/xlocale/__strtonum_fallback.h>
 #endif
-#endif
-#include <support/xlocale/__strtonum_fallback.h>
 
 #endif // _NEWLIB_VERSION
 
