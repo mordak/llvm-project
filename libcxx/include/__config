@@ -273,15 +273,6 @@
 #  endif  // _BYTE_ORDER == _LITTLE_ENDIAN
 #endif  // defined(__NetBSD__) || defined(__OpenBSD__)
 
-#ifdef __OpenBSD__
-# include <sys/_endian.h>
-#  if _BYTE_ORDER == _LITTLE_ENDIAN
-#   define _LIBCPP_LITTLE_ENDIAN
-# else  // _BYTE_ORDER == _LITTLE_ENDIAN
-#   define _LIBCPP_BIG_ENDIAN
-# endif  // _BYTE_ORDER == _LITTLE_ENDIAN
-#endif  // __OpenBSD__
-
 #if defined(_WIN32)
 #  define _LIBCPP_WIN32API
 #  define _LIBCPP_LITTLE_ENDIAN
@@ -375,10 +366,6 @@
 #    if __ANDROID_API__ >= 29
 #      define _LIBCPP_HAS_TIMESPEC_GET
 #    endif
-#  elif defined(__OpenBSD__)
-#    define _LIBCPP_HAS_ALIGNED_ALLOC
-#    define _LIBCPP_HAS_TIMESPEC_GET
-#    define _LIBCPP_HAS_C11_FEATURES
 #  elif defined(__Fuchsia__) || defined(__wasi__) || defined(__NetBSD__)
 #    define _LIBCPP_HAS_ALIGNED_ALLOC
 #    define _LIBCPP_HAS_QUICK_EXIT
@@ -1145,8 +1132,7 @@ extern "C" _LIBCPP_FUNC_VIS void __sanitizer_annotate_contiguous_container(
       defined(__CloudABI__) || \
       defined(__sun__) || \
       defined(__MVS__) || \
-      (defined(__MINGW32__) && __has_include(<pthread.h>)) || \
-      defined(__OpenBSD__)
+      (defined(__MINGW32__) && __has_include(<pthread.h>))
 #    define _LIBCPP_HAS_THREAD_API_PTHREAD
 #  elif defined(__Fuchsia__)
      // TODO(44575): Switch to C11 thread API when possible.
@@ -1241,7 +1227,6 @@ extern "C" _LIBCPP_FUNC_VIS void __sanitizer_annotate_contiguous_container(
 #endif
 
 #if defined(__BIONIC__) || defined(__CloudABI__) || defined(__NuttX__) ||      \
-    defined(__OpenBSD__) || \
     defined(__Fuchsia__) || defined(__wasi__) || defined(_LIBCPP_HAS_MUSL_LIBC) || \
     defined(__MVS__) || defined(__OpenBSD__)
 #define _LIBCPP_PROVIDES_DEFAULT_RUNE_TABLE
