@@ -24,9 +24,20 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/PassManagerImpl.h"
 
-using namespace llvm;
-
 namespace polly {
+using llvm::AllAnalysesOn;
+using llvm::AnalysisManager;
+using llvm::DominatorTreeAnalysis;
+using llvm::InnerAnalysisManagerProxy;
+using llvm::LoopAnalysis;
+using llvm::OuterAnalysisManagerProxy;
+using llvm::PassManager;
+using llvm::RegionInfoAnalysis;
+using llvm::ScalarEvolutionAnalysis;
+using llvm::SmallPriorityWorklist;
+using llvm::TargetIRAnalysis;
+using llvm::TargetTransformInfo;
+
 class Scop;
 class SPMUpdater;
 struct ScopStandardAnalysisResults;
@@ -236,7 +247,7 @@ public:
 
     while (!Worklist.empty()) {
       Region *R = Worklist.pop_back_val();
-      if (!SD.isMaxRegionInScop(*R))
+      if (!SD.isMaxRegionInScop(*R, /*Verifying=*/false))
         continue;
       Scop *scop = SI.getScop(R);
       if (!scop)

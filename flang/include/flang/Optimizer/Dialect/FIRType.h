@@ -42,12 +42,10 @@ class FIROpsDialect;
 using KindTy = unsigned;
 
 namespace detail {
-struct BoxTypeStorage;
 struct BoxCharTypeStorage;
 struct BoxProcTypeStorage;
 struct CharacterTypeStorage;
 struct ComplexTypeStorage;
-struct FieldTypeStorage;
 struct HeapTypeStorage;
 struct IntegerTypeStorage;
 struct LenTypeStorage;
@@ -57,7 +55,6 @@ struct RealTypeStorage;
 struct RecordTypeStorage;
 struct ReferenceTypeStorage;
 struct SequenceTypeStorage;
-struct ShapeShiftTypeStorage;
 struct SliceTypeStorage;
 struct TypeDescTypeStorage;
 struct VectorTypeStorage;
@@ -179,23 +176,6 @@ public:
 
 // FIR support types
 
-/// The type of a Fortran descriptor. Descriptors are tuples of information that
-/// describe an entity being passed from a calling context. This information
-/// might include (but is not limited to) whether the entity is an array, its
-/// size, or what type it has.
-class BoxType
-    : public mlir::Type::TypeBase<BoxType, mlir::Type, detail::BoxTypeStorage> {
-public:
-  using Base::Base;
-  static BoxType get(mlir::Type eleTy, mlir::AffineMapAttr map = {});
-  mlir::Type getEleTy() const;
-  mlir::AffineMapAttr getLayoutMap() const;
-
-  static mlir::LogicalResult
-  verifyConstructionInvariants(mlir::Location, mlir::Type eleTy,
-                               mlir::AffineMapAttr map);
-};
-
 /// The type of a pair that describes a CHARACTER variable. Specifically, a
 /// CHARACTER consists of a reference to a buffer (the string value) and a LEN
 /// type parameter (the runtime length of the buffer).
@@ -221,20 +201,6 @@ public:
                                                           mlir::Type eleTy);
 };
 
-
-/// Type of a vector of runtime values that define the shape and the origin of a
-/// multidimensional array object. The vector is of pairs, origin offset and
-/// extent, of each array dimension. The rank of a ShapeShiftType must be at
-/// least 1.
-class ShapeShiftType
-    : public mlir::Type::TypeBase<ShapeShiftType, mlir::Type,
-                                  detail::ShapeShiftTypeStorage> {
-public:
-  using Base::Base;
-  static ShapeShiftType get(mlir::MLIRContext *ctx, unsigned rank);
-  unsigned getRank() const;
-};
-
 /// Type of a vector that represents an array slice operation on an array.
 /// Fortran slices are triples of lower bound, upper bound, and stride. The rank
 /// of a SliceType must be at least 1.
@@ -244,16 +210,6 @@ public:
   using Base::Base;
   static SliceType get(mlir::MLIRContext *ctx, unsigned rank);
   unsigned getRank() const;
-};
-
-/// The type of a field name. Implementations may defer the layout of a Fortran
-/// derived type until runtime. This implies that the runtime must be able to
-/// determine the offset of fields within the entity.
-class FieldType : public mlir::Type::TypeBase<FieldType, mlir::Type,
-                                              detail::FieldTypeStorage> {
-public:
-  using Base::Base;
-  static FieldType get(mlir::MLIRContext *ctxt);
 };
 
 /// The type of a heap pointer. Fortran entities with the ALLOCATABLE attribute
