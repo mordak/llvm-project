@@ -3239,6 +3239,21 @@ bool AArch64InstructionSelector::selectReduction(
   Register VecReg = I.getOperand(1).getReg();
   LLT VecTy = MRI.getType(VecReg);
   if (I.getOpcode() == TargetOpcode::G_VECREDUCE_ADD) {
+    // For <2 x i32> ADDPv2i32 generates an FPR64 value, so we need to emit
+    // a subregister copy afterwards.
+    if (VecTy == LLT::vector(2, 32)) {
+      MachineIRBuilder MIB(I);
+      Register DstReg = I.getOperand(0).getReg();
+      auto AddP = MIB.buildInstr(AArch64::ADDPv2i32, {&AArch64::FPR64RegClass},
+                                 {VecReg, VecReg});
+      auto Copy = MIB.buildInstr(TargetOpcode::COPY, {DstReg}, {})
+                      .addReg(AddP.getReg(0), 0, AArch64::ssub)
+                      .getReg(0);
+      RBI.constrainGenericRegister(Copy, AArch64::FPR32RegClass, MRI);
+      I.eraseFromParent();
+      return constrainSelectedInstRegOperands(*AddP, TII, TRI, RBI);
+    }
+
     unsigned Opc = 0;
     if (VecTy == LLT::vector(16, 8))
       Opc = AArch64::ADDVv16i8v;
@@ -5628,10 +5643,8 @@ AArch64InstructionSelector::tryFoldAddLowIntoImm(MachineInstr &RootDef,
     return None;
 
   // TODO: add heuristics like isWorthFoldingADDlow() from SelectionDAG.
-  auto Offset = Adrp.getOperand(1).getOffset();
-  if (Offset % Size != 0)
-    return None;
-
+  // TODO: Need to check GV's offset % size if doing offset folding into globals.
+  assert(Adrp.getOperand(1).getOffset() == 0 && "Unexpected offset in global");
   auto GV = Adrp.getOperand(1).getGlobal();
   if (GV->isThreadLocal())
     return None;
@@ -5645,7 +5658,7 @@ AArch64InstructionSelector::tryFoldAddLowIntoImm(MachineInstr &RootDef,
   Register AdrpReg = Adrp.getOperand(0).getReg();
   return {{[=](MachineInstrBuilder &MIB) { MIB.addUse(AdrpReg); },
            [=](MachineInstrBuilder &MIB) {
-             MIB.addGlobalAddress(GV, Offset,
+             MIB.addGlobalAddress(GV, /* Offset */ 0,
                                   OpFlags | AArch64II::MO_PAGEOFF |
                                       AArch64II::MO_NC);
            }}};

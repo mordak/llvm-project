@@ -530,7 +530,7 @@ bool Thread::RestoreRegisterStateFromCheckpoint(
   return false;
 }
 
-bool Thread::RestoreThreadStateFromCheckpoint(
+void Thread::RestoreThreadStateFromCheckpoint(
     ThreadStateCheckpoint &saved_state) {
   if (saved_state.stop_info_sp)
     saved_state.stop_info_sp->MakeStopInfoValid();
@@ -539,7 +539,6 @@ bool Thread::RestoreThreadStateFromCheckpoint(
       saved_state.current_inlined_depth);
   GetPlans().RestoreCompletedPlanCheckpoint(
       saved_state.m_completed_plan_checkpoint);
-  return true;
 }
 
 StateType Thread::GetState() const {
@@ -1181,14 +1180,6 @@ Status Thread::QueueThreadPlan(ThreadPlanSP &thread_plan_sp,
   return status;
 }
 
-void Thread::EnableTracer(bool value, bool single_stepping) {
-  GetPlans().EnableTracer(value, single_stepping);
-}
-
-void Thread::SetTracer(lldb::ThreadPlanTracerSP &tracer_sp) {
-  GetPlans().SetTracer(tracer_sp);
-}
-
 bool Thread::DiscardUserThreadPlansUpToIndex(uint32_t plan_index) {
   // Count the user thread plans from the back end to get the number of the one
   // we want to discard:
@@ -1315,11 +1306,12 @@ ThreadPlanSP Thread::QueueThreadPlanForStepInRange(
 
 ThreadPlanSP Thread::QueueThreadPlanForStepOut(
     bool abort_other_plans, SymbolContext *addr_context, bool first_insn,
-    bool stop_other_threads, Vote stop_vote, Vote run_vote, uint32_t frame_idx,
-    Status &status, LazyBool step_out_avoids_code_without_debug_info) {
+    bool stop_other_threads, Vote report_stop_vote, Vote report_run_vote,
+    uint32_t frame_idx, Status &status,
+    LazyBool step_out_avoids_code_without_debug_info) {
   ThreadPlanSP thread_plan_sp(new ThreadPlanStepOut(
-      *this, addr_context, first_insn, stop_other_threads, stop_vote, run_vote,
-      frame_idx, step_out_avoids_code_without_debug_info));
+      *this, addr_context, first_insn, stop_other_threads, report_stop_vote,
+      report_run_vote, frame_idx, step_out_avoids_code_without_debug_info));
 
   status = QueueThreadPlan(thread_plan_sp, abort_other_plans);
   return thread_plan_sp;
@@ -1327,13 +1319,14 @@ ThreadPlanSP Thread::QueueThreadPlanForStepOut(
 
 ThreadPlanSP Thread::QueueThreadPlanForStepOutNoShouldStop(
     bool abort_other_plans, SymbolContext *addr_context, bool first_insn,
-    bool stop_other_threads, Vote stop_vote, Vote run_vote, uint32_t frame_idx,
-    Status &status, bool continue_to_next_branch) {
+    bool stop_other_threads, Vote report_stop_vote, Vote report_run_vote,
+    uint32_t frame_idx, Status &status, bool continue_to_next_branch) {
   const bool calculate_return_value =
       false; // No need to calculate the return value here.
   ThreadPlanSP thread_plan_sp(new ThreadPlanStepOut(
-      *this, addr_context, first_insn, stop_other_threads, stop_vote, run_vote,
-      frame_idx, eLazyBoolNo, continue_to_next_branch, calculate_return_value));
+      *this, addr_context, first_insn, stop_other_threads, report_stop_vote,
+      report_run_vote, frame_idx, eLazyBoolNo, continue_to_next_branch,
+      calculate_return_value));
 
   ThreadPlanStepOut *new_plan =
       static_cast<ThreadPlanStepOut *>(thread_plan_sp.get());

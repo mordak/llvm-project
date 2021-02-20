@@ -2546,8 +2546,7 @@ unsigned PPCFrameLowering::getBasePointerSaveOffset() const {
 bool PPCFrameLowering::enableShrinkWrapping(const MachineFunction &MF) const {
   if (MF.getInfo<PPCFunctionInfo>()->shrinkWrapDisabled())
     return false;
-  return (MF.getSubtarget<PPCSubtarget>().isSVR4ABI() &&
-          MF.getSubtarget<PPCSubtarget>().isPPC64());
+  return !MF.getSubtarget<PPCSubtarget>().is32BitELFABI();
 }
 
 const ReturnProtectorLowering *PPCFrameLowering::getReturnProtector() const {
