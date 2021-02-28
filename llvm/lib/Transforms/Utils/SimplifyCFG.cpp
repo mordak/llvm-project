@@ -420,8 +420,8 @@ static bool dominatesMergePoint(Value *V, BasicBlock *BB,
 
   // Okay, we can only really hoist these out if their operands do
   // not take us over the cost threshold.
-  for (User::op_iterator i = I->op_begin(), e = I->op_end(); i != e; ++i)
-    if (!dominatesMergePoint(*i, BB, AggressiveInsts, Cost, Budget, TTI,
+  for (Use &Op : I->operands())
+    if (!dominatesMergePoint(Op, BB, AggressiveInsts, Cost, Budget, TTI,
                              Depth + 1))
       return false;
   // Okay, it's safe to do this!  Remember this instruction.
@@ -4160,9 +4160,8 @@ bool SimplifyCFGOpt::simplifyCommonResume(ResumeInst *RI) {
     while (PhiLPInst->getBasicBlockIndex(TrivialBB) != -1)
       BB->removePredecessor(TrivialBB, true);
 
-    for (pred_iterator PI = pred_begin(TrivialBB), PE = pred_end(TrivialBB);
-         PI != PE;) {
-      BasicBlock *Pred = *PI++;
+    for (BasicBlock *Pred :
+         llvm::make_early_inc_range(predecessors(TrivialBB))) {
       removeUnwindEdge(Pred, DTU);
       ++NumInvokes;
     }
@@ -4202,8 +4201,7 @@ bool SimplifyCFGOpt::simplifySingleResume(ResumeInst *RI) {
     return false;
 
   // Turn all invokes that unwind here into calls and delete the basic block.
-  for (pred_iterator PI = pred_begin(BB), PE = pred_end(BB); PI != PE;) {
-    BasicBlock *Pred = *PI++;
+  for (BasicBlock *Pred : llvm::make_early_inc_range(predecessors(BB))) {
     removeUnwindEdge(Pred, DTU);
     ++NumInvokes;
   }
@@ -4325,9 +4323,8 @@ static bool removeEmptyCleanup(CleanupReturnInst *RI, DomTreeUpdater *DTU) {
 
   std::vector<DominatorTree::UpdateType> Updates;
 
-  for (pred_iterator PI = pred_begin(BB), PE = pred_end(BB); PI != PE;) {
-    // The iterator must be updated here because we are removing this pred.
-    BasicBlock *PredBB = *PI++;
+  // We use make_early_inc_range here because we may remove some predecessors.
+  for (BasicBlock *PredBB : llvm::make_early_inc_range(predecessors(BB))) {
     if (UnwindDest == nullptr) {
       if (DTU)
         DTU->applyUpdates(Updates);
@@ -6433,8 +6430,8 @@ static bool passingValueIsAlwaysUndefined(Value *V, Instruction *I, bool PtrValu
         for (const llvm::Use &Arg : CB->args())
           if (Arg == I) {
             unsigned ArgIdx = CB->getArgOperandNo(&Arg);
-            if (CB->paramHasAttr(ArgIdx, Attribute::NonNull) &&
-                CB->paramHasAttr(ArgIdx, Attribute::NoUndef)) {
+            if (CB->isPassingUndefUB(ArgIdx) &&
+                CB->paramHasAttr(ArgIdx, Attribute::NonNull)) {
               // Passing null to a nonnnull+noundef argument is undefined.
               return !PtrValueMayBeModified;
             }
@@ -6444,7 +6441,7 @@ static bool passingValueIsAlwaysUndefined(Value *V, Instruction *I, bool PtrValu
         for (const llvm::Use &Arg : CB->args())
           if (Arg == I) {
             unsigned ArgIdx = CB->getArgOperandNo(&Arg);
-            if (CB->paramHasAttr(ArgIdx, Attribute::NoUndef)) {
+            if (CB->isPassingUndefUB(ArgIdx)) {
               // Passing undef to a noundef argument is undefined.
               return true;
             }

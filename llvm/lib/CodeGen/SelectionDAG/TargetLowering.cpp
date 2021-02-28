@@ -2266,10 +2266,8 @@ bool TargetLowering::SimplifyDemandedBits(
   if (DemandedBits.isSubsetOf(Known.Zero | Known.One)) {
     // Avoid folding to a constant if any OpaqueConstant is involved.
     const SDNode *N = Op.getNode();
-    for (SDNodeIterator I = SDNodeIterator::begin(N),
-                        E = SDNodeIterator::end(N);
-         I != E; ++I) {
-      SDNode *Op = *I;
+    for (SDNode *Op :
+         llvm::make_range(SDNodeIterator::begin(N), SDNodeIterator::end(N))) {
       if (ConstantSDNode *C = dyn_cast<ConstantSDNode>(Op))
         if (C->isOpaque())
           return false;
@@ -4564,11 +4562,10 @@ TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *RI,
     if (!isLegalRC(*RI, *RC))
       continue;
 
-    for (TargetRegisterClass::iterator I = RC->begin(), E = RC->end();
-         I != E; ++I) {
-      if (RegName.equals_lower(RI->getRegAsmName(*I))) {
+    for (const MCPhysReg &PR : *RC) {
+      if (RegName.equals_lower(RI->getRegAsmName(PR))) {
         std::pair<unsigned, const TargetRegisterClass *> S =
-            std::make_pair(*I, RC);
+            std::make_pair(PR, RC);
 
         // If this register class has the requested value type, return it,
         // otherwise keep searching and return the first class found
@@ -7895,8 +7892,7 @@ SDValue TargetLowering::expandAddSubSat(SDNode *Node, SelectionDAG &DAG) const {
 
   unsigned BitWidth = LHS.getScalarValueSizeInBits();
   EVT BoolVT = getSetCCResultType(DAG.getDataLayout(), *DAG.getContext(), VT);
-  SDValue Result = DAG.getNode(OverflowOp, dl, DAG.getVTList(VT, BoolVT),
-                               LHS, RHS);
+  SDValue Result = DAG.getNode(OverflowOp, dl, DAG.getVTList(VT, BoolVT), LHS, RHS);
   SDValue SumDiff = Result.getValue(0);
   SDValue Overflow = Result.getValue(1);
   SDValue Zero = DAG.getConstant(0, dl, VT);
@@ -7910,7 +7906,9 @@ SDValue TargetLowering::expandAddSubSat(SDNode *Node, SelectionDAG &DAG) const {
     }
     // Overflow ? 0xffff.... : (LHS + RHS)
     return DAG.getSelect(dl, VT, Overflow, AllOnes, SumDiff);
-  } else if (Opcode == ISD::USUBSAT) {
+  }
+
+  if (Opcode == ISD::USUBSAT) {
     if (getBooleanContents(VT) == ZeroOrNegativeOneBooleanContent) {
       // (LHS - RHS) & ~OverflowMask
       SDValue OverflowMask = DAG.getSExtOrTrunc(Overflow, dl, VT);
@@ -7919,17 +7917,17 @@ SDValue TargetLowering::expandAddSubSat(SDNode *Node, SelectionDAG &DAG) const {
     }
     // Overflow ? 0 : (LHS - RHS)
     return DAG.getSelect(dl, VT, Overflow, Zero, SumDiff);
-  } else {
-    // SatMax -> Overflow && SumDiff < 0
-    // SatMin -> Overflow && SumDiff >= 0
-    APInt MinVal = APInt::getSignedMinValue(BitWidth);
-    APInt MaxVal = APInt::getSignedMaxValue(BitWidth);
-    SDValue SatMin = DAG.getConstant(MinVal, dl, VT);
-    SDValue SatMax = DAG.getConstant(MaxVal, dl, VT);
-    SDValue SumNeg = DAG.getSetCC(dl, BoolVT, SumDiff, Zero, ISD::SETLT);
-    Result = DAG.getSelect(dl, VT, SumNeg, SatMax, SatMin);
-    return DAG.getSelect(dl, VT, Overflow, Result, SumDiff);
   }
+
+  // SatMax -> Overflow && SumDiff < 0
+  // SatMin -> Overflow && SumDiff >= 0
+  APInt MinVal = APInt::getSignedMinValue(BitWidth);
+  APInt MaxVal = APInt::getSignedMaxValue(BitWidth);
+  SDValue SatMin = DAG.getConstant(MinVal, dl, VT);
+  SDValue SatMax = DAG.getConstant(MaxVal, dl, VT);
+  SDValue SumNeg = DAG.getSetCC(dl, BoolVT, SumDiff, Zero, ISD::SETLT);
+  Result = DAG.getSelect(dl, VT, SumNeg, SatMax, SatMin);
+  return DAG.getSelect(dl, VT, Overflow, Result, SumDiff);
 }
 
 SDValue TargetLowering::expandShlSat(SDNode *Node, SelectionDAG &DAG) const {

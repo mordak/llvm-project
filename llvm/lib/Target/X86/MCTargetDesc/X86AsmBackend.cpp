@@ -1073,6 +1073,8 @@ void X86AsmBackend::finishLayout(MCAssembler const &Asm,
 }
 
 unsigned X86AsmBackend::getMaximumNopSize() const {
+  if (STI.hasFeature(X86::Mode16Bit))
+    return 4;
   if (!STI.hasFeature(X86::FeatureNOPL) && !STI.hasFeature(X86::Mode64Bit))
     return 1;
   if (STI.getFeatureBits()[X86::FeatureFast7ByteNOP])

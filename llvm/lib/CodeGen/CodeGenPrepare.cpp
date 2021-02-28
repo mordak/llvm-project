@@ -1290,9 +1290,9 @@ bool CodeGenPrepare::replaceMathCmpWithIntrinsic(BinaryOperator *BO,
     const BasicBlock *Latch = L->getLoopLatch();
     if (PN->getIncomingValueForBlock(Latch) != BO)
       return false;
-    if (auto *Step = dyn_cast<Instruction>(BO->getOperand(1)))
-      if (L->contains(Step->getParent()))
-        return false;
+    if (!L->isLoopInvariant(BO->getOperand(1)))
+      // Avoid complexities w/loop varying steps.
+      return false;
     // IV increment may have other users than the IV. We do not want to make
     // dominance queries to analyze the legality of moving it towards the cmp,
     // so just check that there is no other users.
@@ -6970,9 +6970,9 @@ class VectorPromoteHelper {
     // The scalar chain of computation has to pay for the transition
     // scalar to vector.
     // The vector chain has to account for the combining cost.
-    uint64_t ScalarCost =
+    InstructionCost ScalarCost =
         TTI.getVectorInstrCost(Transition->getOpcode(), PromotedType, Index);
-    uint64_t VectorCost = StoreExtractCombineCost;
+    InstructionCost VectorCost = StoreExtractCombineCost;
     enum TargetTransformInfo::TargetCostKind CostKind =
       TargetTransformInfo::TCK_RecipThroughput;
     for (const auto &Inst : InstsToBePromoted) {

@@ -66,6 +66,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TarWriter.h"
+#include "llvm/TextAPI/MachO/Architecture.h"
 
 using namespace llvm;
 using namespace llvm::MachO;
@@ -90,7 +91,8 @@ std::unique_ptr<TarWriter> macho::tar;
 int InputFile::idCount = 0;
 
 // Open a given file path and return it as a memory-mapped file.
-Optional<MemoryBufferRef> macho::readFile(StringRef path) {
+// Perform no sanity checks--just open, map & return.
+Optional<MemoryBufferRef> macho::readRawFile(StringRef path) {
   // Open a file.
   auto mbOrErr = MemoryBuffer::getFile(path);
   if (auto ec = mbOrErr.getError()) {
@@ -101,6 +103,27 @@ Optional<MemoryBufferRef> macho::readFile(StringRef path) {
   std::unique_ptr<MemoryBuffer> &mb = *mbOrErr;
   MemoryBufferRef mbref = mb->getMemBufferRef();
   make<std::unique_ptr<MemoryBuffer>>(std::move(mb)); // take mb ownership
+  return mbref;
+}
+
+// Open a given file path and return it as a memory-mapped file.
+// Assume the file has one of a variety of linkable formats and
+// perform some basic sanity checks, notably minimum length.
+Optional<MemoryBufferRef> macho::readLinkableFile(StringRef path) {
+  Optional<MemoryBufferRef> maybeMbref = readRawFile(path);
+  if (!maybeMbref) {
+    return None;
+  }
+  MemoryBufferRef mbref = *maybeMbref;
+
+  // LD64 hard-codes 20 as minimum header size, which is presumably
+  // the smallest header among the the various linkable input formats
+  // LLD are less demanding. We insist on having only enough data for
+  // a magic number.
+  if (mbref.getBufferSize() < sizeof(uint32_t)) {
+    error("file is too small to contain a magic number: " + path);
+    return None;
+  }
 
   // If this is a regular non-fat file, return it.
   const char *buf = mbref.getBufferStart();
@@ -203,15 +226,15 @@ static InputSection *findContainingSubsection(SubsectionMap &map,
   return it->second;
 }
 
-static bool validateRelocationInfo(MemoryBufferRef mb, const section_64 &sec,
+static bool validateRelocationInfo(InputFile *file, const section_64 &sec,
                                    relocation_info rel) {
   const TargetInfo::RelocAttrs &relocAttrs = target->getRelocAttrs(rel.r_type);
   bool valid = true;
-  auto message = [relocAttrs, mb, sec, rel, &valid](const Twine &diagnostic) {
+  auto message = [relocAttrs, file, sec, rel, &valid](const Twine &diagnostic) {
     valid = false;
     return (relocAttrs.name + " relocation " + diagnostic + " at offset " +
             std::to_string(rel.r_address) + " of " + sec.segname + "," +
-            sec.sectname + " in " + mb.getBufferIdentifier())
+            sec.sectname + " in " + toString(file))
         .str();
   };
 
@@ -221,7 +244,7 @@ static bool validateRelocationInfo(MemoryBufferRef mb, const section_64 &sec,
     error(message(Twine("must ") + (rel.r_pcrel ? "not " : "") +
                   "be PC-relative"));
   if (isThreadLocalVariables(sec.flags) &&
-      !relocAttrs.hasAttr(RelocAttrBits::TLV | RelocAttrBits::BYTE8))
+      !relocAttrs.hasAttr(RelocAttrBits::UNSIGNED))
     error(message("not allowed in thread-local section, must be UNSIGNED"));
   if (rel.r_length < 2 || rel.r_length > 3 ||
       !relocAttrs.hasAttr(static_cast<RelocAttrBits>(1 << rel.r_length))) {
@@ -273,20 +296,24 @@ void ObjFile::parseRelocations(const section_64 &sec,
       relInfo = relInfos[++i];
     }
     assert(i < relInfos.size());
-    if (!validateRelocationInfo(mb, sec, relInfo))
+    if (!validateRelocationInfo(this, sec, relInfo))
       continue;
     if (relInfo.r_address & R_SCATTERED)
       fatal("TODO: Scattered relocations not supported");
-    uint64_t embeddedAddend = target->getEmbeddedAddend(mb, sec, relInfo);
-    assert(!(embeddedAddend && pairedAddend));
-    uint64_t totalAddend = pairedAddend + embeddedAddend;
 
     Reloc p;
     if (target->hasAttr(relInfo.r_type, RelocAttrBits::SUBTRAHEND)) {
       p.type = relInfo.r_type;
       p.referent = symbols[relInfo.r_symbolnum];
       relInfo = relInfos[++i];
+      // SUBTRACTOR relocations should always be followed by an UNSIGNED one
+      // indicating the minuend symbol.
+      assert(target->hasAttr(relInfo.r_type, RelocAttrBits::UNSIGNED) &&
+             relInfo.r_extern);
     }
+    uint64_t embeddedAddend = target->getEmbeddedAddend(mb, sec, relInfo);
+    assert(!(embeddedAddend && pairedAddend));
+    uint64_t totalAddend = pairedAddend + embeddedAddend;
     Reloc r;
     r.type = relInfo.r_type;
     r.pcrel = relInfo.r_pcrel;
@@ -316,8 +343,7 @@ void ObjFile::parseRelocations(const section_64 &sec,
     }
 
     InputSection *subsec = findContainingSubsection(subsecMap, &r.offset);
-    if (p.type != GENERIC_RELOC_INVALID &&
-        target->hasAttr(p.type, RelocAttrBits::SUBTRAHEND))
+    if (p.type != GENERIC_RELOC_INVALID)
       subsec->relocs.push_back(p);
     subsec->relocs.push_back(r);
   }
@@ -474,6 +500,15 @@ ObjFile::ObjFile(MemoryBufferRef mb, uint32_t modTime, StringRef archiveName)
   auto *buf = reinterpret_cast<const uint8_t *>(mb.getBufferStart());
   auto *hdr = reinterpret_cast<const mach_header_64 *>(mb.getBufferStart());
 
+  MachO::Architecture arch =
+      MachO::getArchitectureFromCpuType(hdr->cputype, hdr->cpusubtype);
+  if (arch != config->arch) {
+    error(toString(this) + " has architecture " + getArchitectureName(arch) +
+          " which is incompatible with target architecture " +
+          getArchitectureName(config->arch));
+    return;
+  }
+
   if (const load_command *cmd = findCommand(hdr, LC_LINKER_OPTION)) {
     auto *c = reinterpret_cast<const linker_option_command *>(cmd);
     StringRef data{reinterpret_cast<const char *>(c + 1),
@@ -531,7 +566,7 @@ void ObjFile::parseDebugInfo() {
 
 // The path can point to either a dylib or a .tbd file.
 static Optional<DylibFile *> loadDylib(StringRef path, DylibFile *umbrella) {
-  Optional<MemoryBufferRef> mbref = readFile(path);
+  Optional<MemoryBufferRef> mbref = readLinkableFile(path);
   if (!mbref) {
     error("could not read dylib file at " + path);
     return {};
@@ -605,8 +640,11 @@ void loadReexport(StringRef path, DylibFile *umbrella) {
     inputFiles.insert(*reexport);
 }
 
-DylibFile::DylibFile(MemoryBufferRef mb, DylibFile *umbrella)
-    : InputFile(DylibKind, mb), refState(RefState::Unreferenced) {
+DylibFile::DylibFile(MemoryBufferRef mb, DylibFile *umbrella,
+                     bool isBundleLoader)
+    : InputFile(DylibKind, mb), refState(RefState::Unreferenced),
+      isBundleLoader(isBundleLoader) {
+  assert(!isBundleLoader || !umbrella);
   if (umbrella == nullptr)
     umbrella = this;
 
@@ -619,7 +657,9 @@ DylibFile::DylibFile(MemoryBufferRef mb, DylibFile *umbrella)
     currentVersion = read32le(&c->dylib.current_version);
     compatibilityVersion = read32le(&c->dylib.compatibility_version);
     dylibName = reinterpret_cast<const char *>(cmd) + read32le(&c->dylib.name);
-  } else {
+  } else if (!isBundleLoader) {
+    // macho_executable and macho_bundle don't have LC_ID_DYLIB,
+    // so it's OK.
     error("dylib " + toString(this) + " missing LC_ID_DYLIB load command");
     return;
   }
@@ -658,10 +698,20 @@ DylibFile::DylibFile(MemoryBufferRef mb, DylibFile *umbrella)
   }
 }
 
-DylibFile::DylibFile(const InterfaceFile &interface, DylibFile *umbrella)
-    : InputFile(DylibKind, interface), refState(RefState::Unreferenced) {
+DylibFile::DylibFile(const InterfaceFile &interface, DylibFile *umbrella,
+                     bool isBundleLoader)
+    : InputFile(DylibKind, interface), refState(RefState::Unreferenced),
+      isBundleLoader(isBundleLoader) {
+  // FIXME: Add test for the missing TBD code path.
+
   if (umbrella == nullptr)
     umbrella = this;
+
+  if (!interface.getArchitectures().has(config->arch)) {
+    error(toString(this) + " is incompatible with " +
+          getArchitectureName(config->arch));
+    return;
+  }
 
   dylibName = saver.save(interface.getInstallName());
   compatibilityVersion = interface.getCompatibilityVersion().rawValue();
@@ -754,7 +804,41 @@ void ArchiveFile::fetch(const object::Archive::Symbol &sym) {
   }
 }
 
+static macho::Symbol *createBitcodeSymbol(const lto::InputFile::Symbol &objSym,
+                                          BitcodeFile &file) {
+  StringRef name = saver.save(objSym.getName());
+
+  // TODO: support weak references
+  if (objSym.isUndefined())
+    return symtab->addUndefined(name, &file, /*isWeakRef=*/false);
+
+  assert(!objSym.isCommon() && "TODO: support common symbols in LTO");
+
+  // TODO: Write a test demonstrating why computing isPrivateExtern before
+  // LTO compilation is important.
+  bool isPrivateExtern = false;
+  switch (objSym.getVisibility()) {
+  case GlobalValue::HiddenVisibility:
+    isPrivateExtern = true;
+    break;
+  case GlobalValue::ProtectedVisibility:
+    error(name + " has protected visibility, which is not supported by Mach-O");
+    break;
+  case GlobalValue::DefaultVisibility:
+    break;
+  }
+
+  return symtab->addDefined(name, &file, /*isec=*/nullptr, /*value=*/0,
+                            objSym.isWeak(), isPrivateExtern);
+}
+
 BitcodeFile::BitcodeFile(MemoryBufferRef mbref)
     : InputFile(BitcodeKind, mbref) {
   obj = check(lto::InputFile::create(mbref));
+
+  // Convert LTO Symbols to LLD Symbols in order to perform resolution. The
+  // "winning" symbol will then be marked as Prevailing at LTO compilation
+  // time.
+  for (const lto::InputFile::Symbol &objSym : obj->symbols())
+    symbols.push_back(createBitcodeSymbol(objSym, *this));
 }

@@ -287,10 +287,12 @@ static void addAddressSanitizerPasses(const PassManagerBuilder &Builder,
   bool UseAfterScope = CGOpts.SanitizeAddressUseAfterScope;
   bool UseOdrIndicator = CGOpts.SanitizeAddressUseOdrIndicator;
   bool UseGlobalsGC = asanUseGlobalsGC(T, CGOpts);
+  llvm::AsanDtorKind DestructorKind = CGOpts.getSanitizeAddressDtorKind();
   PM.add(createAddressSanitizerFunctionPass(/*CompileKernel*/ false, Recover,
                                             UseAfterScope));
   PM.add(createModuleAddressSanitizerLegacyPassPass(
-      /*CompileKernel*/ false, Recover, UseGlobalsGC, UseOdrIndicator));
+      /*CompileKernel*/ false, Recover, UseGlobalsGC, UseOdrIndicator,
+      DestructorKind));
 }
 
 static void addKernelAddressSanitizerPasses(const PassManagerBuilder &Builder,
@@ -362,8 +364,7 @@ static void addDataFlowSanitizerPass(const PassManagerBuilder &Builder,
   const PassManagerBuilderWrapper &BuilderWrapper =
       static_cast<const PassManagerBuilderWrapper&>(Builder);
   const LangOptions &LangOpts = BuilderWrapper.getLangOpts();
-  PM.add(
-      createDataFlowSanitizerLegacyPassPass(LangOpts.SanitizerBlacklistFiles));
+  PM.add(createDataFlowSanitizerLegacyPassPass(LangOpts.NoSanitizeFiles));
 }
 
 static TargetLibraryInfoImpl *createTLII(llvm::Triple &TargetTriple,
@@ -1112,9 +1113,12 @@ static void addSanitizers(const Triple &TargetTriple,
         bool UseAfterScope = CodeGenOpts.SanitizeAddressUseAfterScope;
         bool ModuleUseAfterScope = asanUseGlobalsGC(TargetTriple, CodeGenOpts);
         bool UseOdrIndicator = CodeGenOpts.SanitizeAddressUseOdrIndicator;
+        llvm::AsanDtorKind DestructorKind =
+            CodeGenOpts.getSanitizeAddressDtorKind();
         MPM.addPass(RequireAnalysisPass<ASanGlobalsMetadataAnalysis, Module>());
         MPM.addPass(ModuleAddressSanitizerPass(
-            CompileKernel, Recover, ModuleUseAfterScope, UseOdrIndicator));
+            CompileKernel, Recover, ModuleUseAfterScope, UseOdrIndicator,
+            DestructorKind));
         MPM.addPass(createModuleToFunctionPassAdaptor(
             AddressSanitizerPass(CompileKernel, Recover, UseAfterScope)));
       }
@@ -1132,7 +1136,7 @@ static void addSanitizers(const Triple &TargetTriple,
     HWASanPass(SanitizerKind::KernelHWAddress, true);
 
     if (LangOpts.Sanitize.has(SanitizerKind::DataFlow)) {
-      MPM.addPass(DataFlowSanitizerPass(LangOpts.SanitizerBlacklistFiles));
+      MPM.addPass(DataFlowSanitizerPass(LangOpts.NoSanitizeFiles));
     }
   });
 }
@@ -1301,10 +1305,11 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
 
     // If we reached here with a non-empty index file name, then the index
     // file was empty and we are not performing ThinLTO backend compilation
-    // (used in testing in a distributed build environment). Drop any the type
-    // test assume sequences inserted for whole program vtables so that
-    // codegen doesn't complain.
-    if (!CodeGenOpts.ThinLTOIndexFile.empty())
+    // (used in testing in a distributed build environment).
+    bool IsThinLTOPostLink = !CodeGenOpts.ThinLTOIndexFile.empty();
+    // If so drop any the type test assume sequences inserted for whole program
+    // vtables so that codegen doesn't complain.
+    if (IsThinLTOPostLink)
       PB.registerPipelineStartEPCallback(
           [](ModulePassManager &MPM, PassBuilder::OptimizationLevel Level) {
             MPM.addPass(LowerTypeTestsPass(/*ExportSummary=*/nullptr,
@@ -1328,7 +1333,10 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
             FPM.addPass(BoundsCheckingPass());
           });
 
-    addSanitizers(TargetTriple, CodeGenOpts, LangOpts, PB);
+    // Don't add sanitizers if we are here from ThinLTO PostLink. That already
+    // done on PreLink stage.
+    if (!IsThinLTOPostLink)
+      addSanitizers(TargetTriple, CodeGenOpts, LangOpts, PB);
 
     if (Optional<GCOVOptions> Options = getGCOVOptions(CodeGenOpts, LangOpts))
       PB.registerPipelineStartEPCallback(

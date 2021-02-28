@@ -61,7 +61,6 @@ void mlir::linalg::CodegenStrategy::transform(FuncOp func) const {
       });
     }
     promoteSingleIterationLoops(cast<FuncOp>(op));
-    hoistViewAllocOps(cast<FuncOp>(op));
     if (lateCodegenStrategyOptions.enableHoistRedundantVectorTransfers)
       hoistRedundantVectorTransfers(cast<FuncOp>(op));
     if (lateCodegenStrategyOptions.enableHoistRedundantVectorTransfersOnTensor)
@@ -104,6 +103,6 @@ void mlir::linalg::CodegenStrategy::transform(FuncOp func) const {
 
   // Ensure we drop the marker in the end.
   func.walk([](LinalgOp op) {
-    op.removeAttr(LinalgTransforms::kLinalgTransformMarker);
+    op->removeAttr(LinalgTransforms::kLinalgTransformMarker);
   });
 }

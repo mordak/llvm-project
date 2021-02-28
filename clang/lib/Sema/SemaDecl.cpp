@@ -2831,6 +2831,11 @@ void Sema::mergeDeclAttributes(NamedDecl *New, Decl *Old,
     NewAttr->setInherited(true);
     New->addAttr(NewAttr);
   }
+  if (RetainAttr *OldAttr = Old->getMostRecentDecl()->getAttr<RetainAttr>()) {
+    RetainAttr *NewAttr = OldAttr->clone(Context);
+    NewAttr->setInherited(true);
+    New->addAttr(NewAttr);
+  }
 
   if (!Old->hasAttrs() && !New->hasAttrs())
     return;
@@ -2953,7 +2958,7 @@ void Sema::mergeDeclAttributes(NamedDecl *New, Decl *Old,
     }
 
     // Already handled.
-    if (isa<UsedAttr>(I))
+    if (isa<UsedAttr>(I) || isa<RetainAttr>(I))
       continue;
 
     if (mergeDeclAttribute(*this, New, I, LocalAMK))
@@ -6432,16 +6437,6 @@ static void checkAttributesAfterMerging(Sema &S, NamedDecl &ND) {
     }
   }
 
-  // Virtual functions cannot be marked as 'notail'.
-  if (auto *Attr = ND.getAttr<NotTailCalledAttr>())
-    if (auto *MD = dyn_cast<CXXMethodDecl>(&ND))
-      if (MD->isVirtual()) {
-        S.Diag(ND.getLocation(),
-               diag::err_invalid_attribute_on_virtual_function)
-            << Attr;
-        ND.dropAttr<NotTailCalledAttr>();
-      }
-
   // Check the attributes on the function type, if any.
   if (const auto *FD = dyn_cast<FunctionDecl>(&ND)) {
     // Don't declare this variable in the second operand of the for-statement;
@@ -7491,7 +7486,8 @@ enum ShadowedDeclKind {
   SDK_StaticMember,
   SDK_Field,
   SDK_Typedef,
-  SDK_Using
+  SDK_Using,
+  SDK_StructuredBinding
 };
 
 /// Determine what kind of declaration we're shadowing.
@@ -7501,6 +7497,8 @@ static ShadowedDeclKind computeShadowedDeclKind(const NamedDecl *ShadowedDecl,
     return SDK_Using;
   else if (isa<TypedefDecl>(ShadowedDecl))
     return SDK_Typedef;
+  else if (isa<BindingDecl>(ShadowedDecl))
+    return SDK_StructuredBinding;
   else if (isa<RecordDecl>(OldDC))
     return isa<FieldDecl>(ShadowedDecl) ? SDK_Field : SDK_StaticMember;
 
@@ -7540,9 +7538,8 @@ NamedDecl *Sema::getShadowedDeclaration(const VarDecl *D,
     return nullptr;
 
   NamedDecl *ShadowedDecl = R.getFoundDecl();
-  return isa<VarDecl>(ShadowedDecl) || isa<FieldDecl>(ShadowedDecl)
-             ? ShadowedDecl
-             : nullptr;
+  return isa<VarDecl, FieldDecl, BindingDecl>(ShadowedDecl) ? ShadowedDecl
+                                                            : nullptr;
 }
 
 /// Return the declaration shadowed by the given typedef \p D, or null
@@ -7558,6 +7555,18 @@ NamedDecl *Sema::getShadowedDeclaration(const TypedefNameDecl *D,
 
   NamedDecl *ShadowedDecl = R.getFoundDecl();
   return isa<TypedefNameDecl>(ShadowedDecl) ? ShadowedDecl : nullptr;
+}
+
+/// Return the declaration shadowed by the given variable \p D, or null
+/// if it doesn't shadow any declaration or shadowing warnings are disabled.
+NamedDecl *Sema::getShadowedDeclaration(const BindingDecl *D,
+                                        const LookupResult &R) {
+  if (!shouldWarnIfShadowedDecl(Diags, R))
+    return nullptr;
+
+  NamedDecl *ShadowedDecl = R.getFoundDecl();
+  return isa<VarDecl, FieldDecl, BindingDecl>(ShadowedDecl) ? ShadowedDecl
+                                                            : nullptr;
 }
 
 /// Diagnose variable or built-in function shadowing.  Implements
@@ -13295,8 +13304,16 @@ void Sema::FinalizeDeclaration(Decl *ThisDecl) {
 
   if (UsedAttr *Attr = VD->getAttr<UsedAttr>()) {
     if (!Attr->isInherited() && !VD->isThisDeclarationADefinition()) {
-      Diag(Attr->getLocation(), diag::warn_attribute_ignored) << Attr;
+      Diag(Attr->getLocation(), diag::warn_attribute_ignored_on_non_definition)
+          << Attr;
       VD->dropAttr<UsedAttr>();
+    }
+  }
+  if (RetainAttr *Attr = VD->getAttr<RetainAttr>()) {
+    if (!Attr->isInherited() && !VD->isThisDeclarationADefinition()) {
+      Diag(Attr->getLocation(), diag::warn_attribute_ignored_on_non_definition)
+          << Attr;
+      VD->dropAttr<RetainAttr>();
     }
   }
 
@@ -13873,7 +13890,7 @@ ShouldWarnAboutMissingPrototype(const FunctionDecl *FD,
   // Don't warn about 'main'.
   if (isa<TranslationUnitDecl>(FD->getDeclContext()->getRedeclContext()))
     if (IdentifierInfo *II = FD->getIdentifier())
-      if (II->isStr("main"))
+      if (II->isStr("main") || II->isStr("efi_main"))
         return false;
 
   // Don't warn about inline functions.

@@ -513,7 +513,7 @@ public:
   /// variable canonicalization. It supports both VF = 1 for unrolled loops and
   /// arbitrary length vectors.
   void widenPHIInstruction(Instruction *PN, RecurrenceDescriptor *RdxDesc,
-                           Value *StartV, VPValue *Def,
+                           VPValue *StartV, VPValue *Def,
                            VPTransformState &State);
 
   /// A helper function to scalarize a single Instruction in the innermost loop.
@@ -3634,13 +3634,31 @@ LoopVectorizationCostModel::getVectorCallCost(CallInst *CI, ElementCount VF,
   return Cost;
 }
 
+static Type *MaybeVectorizeType(Type *Elt, ElementCount VF) {
+  if (VF.isScalar() || (!Elt->isIntOrPtrTy() && !Elt->isFloatingPointTy()))
+    return Elt;
+  return VectorType::get(Elt, VF);
+}
+
 InstructionCost
 LoopVectorizationCostModel::getVectorIntrinsicCost(CallInst *CI,
                                                    ElementCount VF) {
   Intrinsic::ID ID = getVectorIntrinsicIDForCall(CI, TLI);
   assert(ID && "Expected intrinsic call!");
+  Type *RetTy = MaybeVectorizeType(CI->getType(), VF);
+  FastMathFlags FMF;
+  if (auto *FPMO = dyn_cast<FPMathOperator>(CI))
+    FMF = FPMO->getFastMathFlags();
 
-  IntrinsicCostAttributes CostAttrs(ID, *CI, VF);
+  SmallVector<const Value *> Arguments(CI->arg_begin(), CI->arg_end());
+  FunctionType *FTy = CI->getCalledFunction()->getFunctionType();
+  SmallVector<Type *> ParamTys;
+  std::transform(FTy->param_begin(), FTy->param_end(),
+                 std::back_inserter(ParamTys),
+                 [&](Type *Ty) { return MaybeVectorizeType(Ty, VF); });
+
+  IntrinsicCostAttributes CostAttrs(ID, RetTy, Arguments, ParamTys, FMF,
+                                    dyn_cast<IntrinsicInst>(CI));
   return TTI.getIntrinsicInstrCost(CostAttrs,
                                    TargetTransformInfo::TCK_RecipThroughput);
 }
@@ -4353,36 +4371,15 @@ void InnerLoopVectorizer::sinkScalarOperands(Instruction *PredInst) {
 
 void InnerLoopVectorizer::fixNonInductionPHIs(VPTransformState &State) {
   for (PHINode *OrigPhi : OrigPHIsToFix) {
-    PHINode *NewPhi =
-        cast<PHINode>(State.get(State.Plan->getVPValue(OrigPhi), 0));
-    unsigned NumIncomingValues = OrigPhi->getNumIncomingValues();
-
-    SmallVector<BasicBlock *, 2> ScalarBBPredecessors(
-        predecessors(OrigPhi->getParent()));
-    SmallVector<BasicBlock *, 2> VectorBBPredecessors(
-        predecessors(NewPhi->getParent()));
-    assert(ScalarBBPredecessors.size() == VectorBBPredecessors.size() &&
-           "Scalar and Vector BB should have the same number of predecessors");
-
-    // The insertion point in Builder may be invalidated by the time we get
-    // here. Force the Builder insertion point to something valid so that we do
-    // not run into issues during insertion point restore in
-    // State::get() calls below.
+    VPWidenPHIRecipe *VPPhi =
+        cast<VPWidenPHIRecipe>(State.Plan->getVPValue(OrigPhi));
+    PHINode *NewPhi = cast<PHINode>(State.get(VPPhi, 0));
+    // Make sure the builder has a valid insert point.
     Builder.SetInsertPoint(NewPhi);
-
-    // The predecessor order is preserved and we can rely on mapping between
-    // scalar and vector block predecessors.
-    for (unsigned i = 0; i < NumIncomingValues; ++i) {
-      BasicBlock *NewPredBB = VectorBBPredecessors[i];
-
-      // When looking up the new scalar/vector values to fix up, use incoming
-      // values from original phi.
-      Value *ScIncV =
-          OrigPhi->getIncomingValueForBlock(ScalarBBPredecessors[i]);
-
-      // Scalar incoming value may need a broadcast
-      Value *NewIncV = State.get(State.Plan->getOrAddVPValue(ScIncV), 0);
-      NewPhi->addIncoming(NewIncV, NewPredBB);
+    for (unsigned i = 0; i < VPPhi->getNumOperands(); ++i) {
+      VPValue *Inc = VPPhi->getIncomingValue(i);
+      VPBasicBlock *VPBB = VPPhi->getIncomingBlock(i);
+      NewPhi->addIncoming(State.get(Inc, 0), State.CFG.VPBB2IRBB[VPBB]);
     }
   }
 }
@@ -4460,7 +4457,7 @@ void InnerLoopVectorizer::widenGEP(GetElementPtrInst *GEP, VPValue *VPDef,
 
 void InnerLoopVectorizer::widenPHIInstruction(Instruction *PN,
                                               RecurrenceDescriptor *RdxDesc,
-                                              Value *StartV, VPValue *Def,
+                                              VPValue *StartVPV, VPValue *Def,
                                               VPTransformState &State) {
   PHINode *P = cast<PHINode>(PN);
   if (EnableVPlanNativePath) {
@@ -4481,6 +4478,7 @@ void InnerLoopVectorizer::widenPHIInstruction(Instruction *PN,
   assert(PN->getParent() == OrigLoop->getHeader() &&
          "Non-header phis should have been handled elsewhere");
 
+  Value *StartV = StartVPV ? StartVPV->getLiveInIRValue() : nullptr;
   // In order to support recurrences we need to be able to vectorize Phi nodes.
   // Phi nodes have cycles, so we need to vectorize them in two stages. This is
   // stage #1: We create a new vector PHI node with no incoming edges. We'll use
@@ -6813,7 +6811,7 @@ InstructionCost LoopVectorizationCostModel::getReductionPatternCost(
       unsigned ExtCost =
           TTI.getCastInstrCost(Op0->getOpcode(), VectorTy, ExtType,
                                TTI::CastContextHint::None, CostKind, Op0);
-      unsigned MulCost =
+      InstructionCost MulCost =
           TTI.getArithmeticInstrCost(Mul->getOpcode(), VectorTy, CostKind);
 
       InstructionCost RedCost = TTI.getExtendedAddReductionCost(
@@ -6823,7 +6821,7 @@ InstructionCost LoopVectorizationCostModel::getReductionPatternCost(
       if (RedCost.isValid() && RedCost < ExtCost * 2 + MulCost + BaseCost)
         return I == RetI ? *RedCost.getValue() : 0;
     } else {
-      unsigned MulCost =
+      InstructionCost MulCost =
           TTI.getArithmeticInstrCost(Mul->getOpcode(), VectorTy, CostKind);
 
       InstructionCost RedCost = TTI.getExtendedAddReductionCost(
@@ -6918,8 +6916,11 @@ LoopVectorizationCostModel::getScalarizationOverhead(Instruction *I,
 
   // Skip operands that do not require extraction/scalarization and do not incur
   // any overhead.
+  SmallVector<Type *> Tys;
+  for (auto *V : filterExtractingOperands(Ops, VF))
+    Tys.push_back(MaybeVectorizeType(V->getType(), VF));
   return Cost + TTI.getOperandsScalarizationOverhead(
-                    filterExtractingOperands(Ops, VF), VF.getKnownMinValue());
+                    filterExtractingOperands(Ops, VF), Tys);
 }
 
 void LoopVectorizationCostModel::setCostBasedWideningDecision(ElementCount VF) {
@@ -8250,15 +8251,24 @@ VPRecipeBuilder::tryToOptimizeInductionTruncate(TruncInst *I, VFRange &Range,
   return nullptr;
 }
 
-VPBlendRecipe *VPRecipeBuilder::tryToBlend(PHINode *Phi, VPlanPtr &Plan) {
+VPRecipeOrVPValueTy VPRecipeBuilder::tryToBlend(PHINode *Phi, VPlanPtr &Plan) {
+  // If all incoming values are equal, the incoming VPValue can be used directly
+  // instead of creating a new VPBlendRecipe.
+  Value *FirstIncoming = Phi->getIncomingValue(0);
+  if (all_of(Phi->incoming_values(), [FirstIncoming](const Value *Inc) {
+        return FirstIncoming == Inc;
+      })) {
+    return Plan->getOrAddVPValue(Phi->getIncomingValue(0));
+  }
+
   // We know that all PHIs in non-header blocks are converted into selects, so
   // we don't have to worry about the insertion order and we can just use the
   // builder. At this point we generate the predication tree. There may be
   // duplications since this is a simple recursive scan, but future
   // optimizations will clean it up.
-
   SmallVector<VPValue *, 2> Operands;
   unsigned NumIncoming = Phi->getNumIncomingValues();
+
   for (unsigned In = 0; In < NumIncoming; In++) {
     VPValue *EdgeMask =
       createEdgeMask(Phi->getIncomingBlock(In), Phi->getParent(), Plan);
@@ -8268,7 +8278,7 @@ VPBlendRecipe *VPRecipeBuilder::tryToBlend(PHINode *Phi, VPlanPtr &Plan) {
     if (EdgeMask)
       Operands.push_back(EdgeMask);
   }
-  return new VPBlendRecipe(Phi, Operands);
+  return toVPRecipeResult(new VPBlendRecipe(Phi, Operands));
 }
 
 VPWidenCallRecipe *VPRecipeBuilder::tryToWidenCall(CallInst *CI, VFRange &Range,
@@ -8450,53 +8460,53 @@ VPRegionBlock *VPRecipeBuilder::createReplicateRegion(Instruction *Instr,
   return Region;
 }
 
-VPRecipeBase *VPRecipeBuilder::tryToCreateWidenRecipe(Instruction *Instr,
-                                                      VFRange &Range,
-                                                      VPlanPtr &Plan) {
+VPRecipeOrVPValueTy VPRecipeBuilder::tryToCreateWidenRecipe(Instruction *Instr,
+                                                            VFRange &Range,
+                                                            VPlanPtr &Plan) {
   // First, check for specific widening recipes that deal with calls, memory
   // operations, inductions and Phi nodes.
   if (auto *CI = dyn_cast<CallInst>(Instr))
-    return tryToWidenCall(CI, Range, *Plan);
+    return toVPRecipeResult(tryToWidenCall(CI, Range, *Plan));
 
   if (isa<LoadInst>(Instr) || isa<StoreInst>(Instr))
-    return tryToWidenMemory(Instr, Range, Plan);
+    return toVPRecipeResult(tryToWidenMemory(Instr, Range, Plan));
 
   VPRecipeBase *Recipe;
   if (auto Phi = dyn_cast<PHINode>(Instr)) {
     if (Phi->getParent() != OrigLoop->getHeader())
       return tryToBlend(Phi, Plan);
     if ((Recipe = tryToOptimizeInductionPHI(Phi, *Plan)))
-      return Recipe;
+      return toVPRecipeResult(Recipe);
 
     if (Legal->isReductionVariable(Phi)) {
       RecurrenceDescriptor &RdxDesc = Legal->getReductionVars()[Phi];
       VPValue *StartV =
           Plan->getOrAddVPValue(RdxDesc.getRecurrenceStartValue());
-      return new VPWidenPHIRecipe(Phi, RdxDesc, *StartV);
+      return toVPRecipeResult(new VPWidenPHIRecipe(Phi, RdxDesc, *StartV));
     }
 
-    return new VPWidenPHIRecipe(Phi);
+    return toVPRecipeResult(new VPWidenPHIRecipe(Phi));
   }
 
   if (isa<TruncInst>(Instr) && (Recipe = tryToOptimizeInductionTruncate(
                                     cast<TruncInst>(Instr), Range, *Plan)))
-    return Recipe;
+    return toVPRecipeResult(Recipe);
 
   if (!shouldWiden(Instr, Range))
     return nullptr;
 
   if (auto GEP = dyn_cast<GetElementPtrInst>(Instr))
-    return new VPWidenGEPRecipe(GEP, Plan->mapToVPValues(GEP->operands()),
-                                OrigLoop);
+    return toVPRecipeResult(new VPWidenGEPRecipe(
+        GEP, Plan->mapToVPValues(GEP->operands()), OrigLoop));
 
   if (auto *SI = dyn_cast<SelectInst>(Instr)) {
     bool InvariantCond =
         PSE.getSE()->isLoopInvariant(PSE.getSCEV(SI->getOperand(0)), OrigLoop);
-    return new VPWidenSelectRecipe(*SI, Plan->mapToVPValues(SI->operands()),
-                                   InvariantCond);
+    return toVPRecipeResult(new VPWidenSelectRecipe(
+        *SI, Plan->mapToVPValues(SI->operands()), InvariantCond));
   }
 
-  return tryToWiden(Instr, *Plan);
+  return toVPRecipeResult(tryToWiden(Instr, *Plan));
 }
 
 void LoopVectorizationPlanner::buildVPlansWithVPRecipes(ElementCount MinVF,
@@ -8624,8 +8634,15 @@ VPlanPtr LoopVectorizationPlanner::buildVPlanWithVPRecipes(
       if (isa<BranchInst>(Instr) || DeadInstructions.count(Instr))
         continue;
 
-      if (auto Recipe =
+      if (auto RecipeOrValue =
               RecipeBuilder.tryToCreateWidenRecipe(Instr, Range, Plan)) {
+        // If Instr can be simplified to an existing VPValue, use it.
+        if (RecipeOrValue.is<VPValue *>()) {
+          Plan->addVPValue(Instr, RecipeOrValue.get<VPValue *>());
+          continue;
+        }
+        // Otherwise, add the new recipe.
+        VPRecipeBase *Recipe = RecipeOrValue.get<VPRecipeBase *>();
         for (auto *Def : Recipe->definedValues()) {
           auto *UV = Def->getUnderlyingValue();
           Plan->addVPValue(UV, Def);
@@ -8882,10 +8899,8 @@ void VPWidenIntOrFpInductionRecipe::execute(VPTransformState &State) {
 }
 
 void VPWidenPHIRecipe::execute(VPTransformState &State) {
-  Value *StartV =
-      getStartValue() ? getStartValue()->getLiveInIRValue() : nullptr;
   State.ILV->widenPHIInstruction(cast<PHINode>(getUnderlyingValue()), RdxDesc,
-                                 StartV, this, State);
+                                 getStartValue(), this, State);
 }
 
 void VPBlendRecipe::execute(VPTransformState &State) {

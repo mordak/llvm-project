@@ -20,6 +20,7 @@
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Parser.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SetVector.h"
@@ -120,6 +121,120 @@ static LogicalResult foldMemRefCast(Operation *op) {
   }
   return success(folded);
 }
+
+//===----------------------------------------------------------------------===//
+// Region builder helper.
+// TODO: Move this to a utility library.
+// The public methods on this class are referenced directly from generated code
+// and bind by name to math functions in the DSL as:
+//   `applyfn__{fnName}`
+// Examples:
+//   `applyfn__add`
+//   `applyfn__mul`
+// The naming convention is intentional in order to match snake-cased DSL names.
+// See mlir-linalg-ods-yaml-gen.cpp for the code that mates to this class.
+//
+// Implementations of the math functions must be polymorphic over numeric types,
+// internally performing necessary casts. If the function application makes no
+// sense, then the only recourse is to assert and return nullptr. This can be
+// extended later if it becomes possible to fail construction of the region. The
+// invariant should be enforced at a higher level.
+//
+// TODO: These helpers are currently type polymorphic over the class of integer
+// and floating point types, but they will not internally cast within bit
+// widths of a class (mixed precision such as i8->i32) or across classes
+// (i.e. mixed float and integer). Many such combinations are ambiguous or need
+// to be handled with care and work is being considered to extend the op
+// language to make such cases explicit. In the mean-time, violating this will
+// fail verification, which is deemed acceptable.
+//===----------------------------------------------------------------------===//
+
+namespace {
+
+class RegionBuilderHelper {
+public:
+  RegionBuilderHelper(Block &block) : block(block) {}
+
+  // Generates operations to cast the given operand to a specified type.
+  // If the cast cannot be performed, a warning will be issued and the
+  // operand returned as-is (which will presumably yield a verification
+  // issue downstream).
+  Value cast(Type toType, Value operand) {
+    OpBuilder builder = getBuilder(operand);
+    auto loc = operand.getLoc();
+
+    if (operand.getType() == toType)
+      return operand;
+    if (auto toIntType = toType.dyn_cast<IntegerType>()) {
+      // If operand is floating point, cast directly to the int type.
+      if (operand.getType().isa<FloatType>())
+        return builder.create<FPToSIOp>(loc, toType, operand);
+      if (auto fromIntType = operand.getType().dyn_cast<IntegerType>()) {
+        // Either sign extend or truncate.
+        if (toIntType.getWidth() > fromIntType.getWidth())
+          return builder.create<SignExtendIOp>(loc, toType, operand);
+        else if (toIntType.getWidth() < fromIntType.getWidth())
+          return builder.create<TruncateIOp>(loc, toType, operand);
+      }
+    } else if (auto toFloatType = toType.dyn_cast<FloatType>()) {
+      // If operand is integer, cast directly to the float type.
+      // Note that it is unclear how to cast from BF16<->FP16.
+      if (operand.getType().isa<IntegerType>())
+        return builder.create<SIToFPOp>(loc, toFloatType, operand);
+      if (auto fromFloatType = operand.getType().dyn_cast<FloatType>()) {
+        if (toFloatType.getWidth() > fromFloatType.getWidth())
+          return builder.create<FPExtOp>(loc, toFloatType, operand);
+        else if (toFloatType.getWidth() < fromFloatType.getWidth())
+          return builder.create<FPTruncOp>(loc, toFloatType, operand);
+      }
+    }
+
+    emitWarning(operand.getLoc()) << "could not cast operand of type "
+                                  << operand.getType() << " to " << toType;
+    return operand;
+  }
+
+  Value applyfn__add(Value lhs, Value rhs) {
+    OpBuilder builder = getBuilder(lhs);
+    if (isFloatingPoint(lhs))
+      return builder.create<AddFOp>(lhs.getLoc(), lhs, rhs);
+    else if (isInteger(lhs))
+      return builder.create<AddIOp>(lhs.getLoc(), lhs, rhs);
+    llvm_unreachable("unsupported non numeric type");
+  }
+
+  Value applyfn__mul(Value lhs, Value rhs) {
+    OpBuilder builder = getBuilder(lhs);
+    if (isFloatingPoint(lhs))
+      return builder.create<MulFOp>(lhs.getLoc(), lhs, rhs);
+    else if (isInteger(lhs))
+      return builder.create<MulIOp>(lhs.getLoc(), lhs, rhs);
+    llvm_unreachable("unsupported non numeric type");
+  }
+
+  void yieldOutputs(ValueRange values) {
+    assert(!values.empty() && "linalg ops must yield outputs");
+    if (values.empty())
+      return;
+    Value first = values.front();
+    OpBuilder builder = getBuilder(first);
+    builder.create<YieldOp>(first.getLoc(), values);
+  }
+
+private:
+  Block &block;
+
+  bool isFloatingPoint(Value value) { return value.getType().isa<FloatType>(); }
+  bool isInteger(Value value) { return value.getType().isa<IntegerType>(); }
+
+  OpBuilder getBuilder(Value value) {
+    OpBuilder builder(value.getContext());
+    builder.setInsertionPointToEnd(&block);
+    return builder;
+  }
+};
+
+} // namespace
 
 //===----------------------------------------------------------------------===//
 // CopyOp
@@ -381,7 +496,7 @@ static void printGenericOp(OpAsmPrinter &p, GenericOpType op) {
   llvm::StringSet<> genericAttrNamesSet;
   genericAttrNamesSet.insert(genericAttrNames.begin(), genericAttrNames.end());
   SmallVector<NamedAttribute, 8> genericAttrs;
-  for (auto attr : op.getAttrs())
+  for (auto attr : op->getAttrs())
     if (genericAttrNamesSet.count(attr.first.strref()) > 0)
       genericAttrs.push_back(attr);
   if (!genericAttrs.empty()) {
@@ -396,13 +511,13 @@ static void printGenericOp(OpAsmPrinter &p, GenericOpType op) {
   genericAttrNamesSet.insert(genericAttrNames.back());
 
   bool hasExtraAttrs = false;
-  for (NamedAttribute n : op.getAttrs()) {
+  for (NamedAttribute n : op->getAttrs()) {
     if ((hasExtraAttrs = !genericAttrNamesSet.contains(n.first.strref())))
       break;
   }
   if (hasExtraAttrs) {
     p << " attrs = ";
-    p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/genericAttrNames);
+    p.printOptionalAttrDict(op->getAttrs(), /*elidedAttrs=*/genericAttrNames);
   }
 
   // Print region.
@@ -1559,7 +1674,7 @@ static void print(OpAsmPrinter &p, linalg::YieldOp op) {
   p << op.getOperationName();
   if (op.getNumOperands() > 0)
     p << ' ' << op.getOperands();
-  p.printOptionalAttrDict(op.getAttrs());
+  p.printOptionalAttrDict(op->getAttrs());
   if (op.getNumOperands() > 0)
     p << " : " << op.getOperandTypes();
 }
@@ -1625,27 +1740,61 @@ static LogicalResult verify(linalg::YieldOp op) {
 // TiledLoopOp
 //===----------------------------------------------------------------------===//
 
+void TiledLoopOp::build(
+    OpBuilder &builder, OperationState &result, ValueRange lowerBounds,
+    ValueRange upperBounds, ValueRange steps, ValueRange inputs,
+    ValueRange outputs, ArrayRef<StringRef> iteratorTypes,
+    function_ref<void(OpBuilder &, Location, ValueRange)> bodyBuilderFn) {
+  result.addOperands(lowerBounds);
+  result.addOperands(upperBounds);
+  result.addOperands(steps);
+  result.addOperands(inputs);
+  result.addOperands(outputs);
+  result.addAttribute(
+      TiledLoopOp::getOperandSegmentSizeAttr(),
+      builder.getI32VectorAttr({static_cast<int32_t>(lowerBounds.size()),
+                                static_cast<int32_t>(upperBounds.size()),
+                                static_cast<int32_t>(steps.size()),
+                                static_cast<int32_t>(inputs.size()),
+                                static_cast<int32_t>(outputs.size())}));
+  result.addAttribute(getIteratorTypesAttrName(),
+                      builder.getStrArrayAttr(iteratorTypes));
+  result.addTypes(outputs.getTypes());
+
+  OpBuilder::InsertionGuard guard(builder);
+  unsigned numIVs = steps.size();
+  SmallVector<Type, 8> argTypes(numIVs, builder.getIndexType());
+  Region *bodyRegion = result.addRegion();
+  Block *bodyBlock = builder.createBlock(bodyRegion, {}, argTypes);
+
+  if (bodyBuilderFn) {
+    builder.setInsertionPointToStart(bodyBlock);
+    bodyBuilderFn(builder, result.location, bodyBlock->getArguments());
+  }
+  TiledLoopOp::ensureTerminator(*bodyRegion, builder, result.location);
+}
+
 static void print(OpAsmPrinter &p, TiledLoopOp op) {
   p << op.getOperationName() << " (" << op.getBody()->getArguments() << ") = ("
     << op.lowerBound() << ") to (" << op.upperBound() << ") step (" << op.step()
     << ")";
 
   if (!op.inputs().empty())
-    p << " ins (" << op.inputs() << ")";
+    p << " ins (" << op.inputs() << ": " << TypeRange(op.inputs()) << ")";
   if (!op.outputs().empty())
-    p << " outs (" << op.outputs() << ")";
+    p << " outs (" << op.outputs() << ":" << TypeRange(op.outputs()) << ")";
 
   if (llvm::any_of(op.iterator_types(), [](Attribute attr) {
         return attr.cast<StringAttr>().getValue() !=
                getParallelIteratorTypeName();
       })) {
-    p << " iterators(" << op.iterator_types() << ")";
+    p << " iterators" << op.iterator_types() << "";
   }
 
   p.printRegion(op.region(), /*printEntryBlockArgs=*/false);
   p.printOptionalAttrDict(
-      op.getAttrs(), /*elidedAttrs=*/{TiledLoopOp::getOperandSegmentSizeAttr(),
-                                      getIteratorTypesAttrName()});
+      op->getAttrs(), /*elidedAttrs=*/{TiledLoopOp::getOperandSegmentSizeAttr(),
+                                       getIteratorTypesAttrName()});
 }
 
 static ParseResult parseTiledLoopOp(OpAsmParser &parser,
@@ -1716,7 +1865,7 @@ static ParseResult parseTiledLoopOp(OpAsmParser &parser,
   if (succeeded(parser.parseOptionalKeyword("iterators"))) {
     StringAttr iterType;
 
-    if (parser.parseLParen() || parser.parseAttribute(iterType))
+    if (parser.parseLSquare() || parser.parseAttribute(iterType))
       return failure();
     iterTypes.push_back(iterType);
     for (int i = 1, e = ivs.size(); i < e; ++i) {
@@ -1724,7 +1873,7 @@ static ParseResult parseTiledLoopOp(OpAsmParser &parser,
         return failure();
       iterTypes.push_back(iterType);
     }
-    if (parser.parseRParen())
+    if (parser.parseRSquare())
       return failure();
   } else {
     auto parallelIter = builder.getStringAttr(getParallelIteratorTypeName());
@@ -1868,7 +2017,8 @@ struct EraseDeadLinalgOp;
 struct FoldTensorCastOp;
 } // namespace
 
-#include "mlir/Dialect/Linalg/IR/LinalgNamedStructuredOps.cpp.inc"
+#include "mlir/Dialect/Linalg/IR/LinalgNamedStructuredOps.tcgen.cpp.inc"
+#include "mlir/Dialect/Linalg/IR/LinalgNamedStructuredOps.yamlgen.cpp.inc"
 
 #define GET_OP_CLASSES
 #include "mlir/Dialect/Linalg/IR/LinalgOps.cpp.inc"
@@ -2032,7 +2182,8 @@ fillStructuredOpRegion(OpBuilder &opBuilder, Region &region,
   unsigned actual = body->getNumArguments();
   unsigned expected = NamedStructuredOpType::getNumRegionArgs();
   if (expected != actual) {
-    if (errorHandler) errorHandler(expected, actual);
+    if (errorHandler)
+      errorHandler(expected, actual);
     return;
   }
 
@@ -2182,7 +2333,7 @@ static void printNamedStructuredOpResults(OpAsmPrinter &p,
 template <typename NamedStructuredOpType>
 static void printNamedStructuredOp(OpAsmPrinter &p, NamedStructuredOpType op) {
   p << op.getOperationName();
-  p.printOptionalAttrDict(op.getAttrs(),
+  p.printOptionalAttrDict(op->getAttrs(),
                           /*elidedAttrs=*/{"operand_segment_sizes"});
 
   // Printing is shared with generic ops, except for the region and
