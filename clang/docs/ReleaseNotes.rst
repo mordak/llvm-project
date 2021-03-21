@@ -73,6 +73,15 @@ New Compiler Flags
 
 - ...
 
+- AArch64 options ``-moutline-atomics``, ``-mno-outline-atomics`` to enable
+  and disable calls to helper functions implementing atomic operations. These
+  out-of-line helpers like '__aarch64_cas8_relax' will detect at runtime
+  AArch64 Large System Extensions (LSE) availability and either use their
+  atomic instructions, or falls back to LL/SC loop. These options do not apply
+  if the compilation target supports LSE. Atomic instructions are used directly
+  in that case. The option's behaviour mirrors GCC, the helpers are implemented
+  both in compiler-rt and libgcc.
+
 - -fpch-codegen and -fpch-debuginfo generate shared code and/or debuginfo
   for contents of a precompiled header in a separate object file. This object
   file needs to be linked in, but its contents do not need to be generated
@@ -130,6 +139,16 @@ Modified Compiler Flags
   This behavior matches newer GCC.
   (`D91760 <https://reviews.llvm.org/D91760>`_)
   (`D92054 <https://reviews.llvm.org/D92054>`_)
+- Support has been added for the following processors (command-line identifiers
+  in parentheses):
+
+  - Arm Cortex-A78C (cortex-a78c).
+  - Arm Cortex-R82 (cortex-r82).
+  - Arm Neoverse V1 (neoverse-v1).
+  - Arm Neoverse N2 (neoverse-n2).
+  - Fujitsu A64FX (a64fx).
+  For example, to select architecture support and tuning for Neoverse-V1 based
+  systems, use ``-mcpu=neoverse-v1``.
 
 Removed Compiler Flags
 -------------------------
@@ -174,6 +193,13 @@ Windows Support
   exception. To workaround (with reduced security), compile with
   /guard:cf,nolongjmp.
 
+- Windows on Arm64: LLVM 12 adds official binary release hosted on
+  Windows on Arm64.  The binary is built and tested by Linaro alongside
+  AArch64 and ARM 32-bit Linux binary releases.  This first WoA release
+  includes Clang compiler, LLD Linker, and compiler-rt runtime libraries.
+  Work on LLDB, sanitizer support, OpenMP, and other features is in progress
+  and will be included in future Windows on Arm64 LLVM releases.
+
 C Language Changes in Clang
 ---------------------------
 
@@ -191,10 +217,38 @@ C++1z Feature Support
 Objective-C Language Changes in Clang
 -------------------------------------
 
-OpenCL C Language Changes in Clang
-----------------------------------
+OpenCL Kernel Language Changes in Clang
+---------------------------------------
 
-...
+- Improved online documentation: :doc:`UsersManual` and :doc:`OpenCLSupport`
+  pages.
+- Added ``-cl-std=CL3.0`` and predefined version macro for OpenCL 3.0.
+- Added ``-cl-std=CL1.0`` and mapped to the existing OpenCL 1.0 functionality.
+- Improved OpenCL extension handling per target.
+- Added clang extension for function pointers ``__cl_clang_function_pointers``
+  and variadic functions ``__cl_clang_variadic_functions``, more details can be
+  found in :doc:`LanguageExtensions`.
+- Removed extensions without kernel language changes:
+  ``cl_khr_select_fprounding_mode``, ``cl_khr_gl_sharing``, ``cl_khr_icd``,
+  ``cl_khr_gl_event``, ``cl_khr_d3d10_sharing``, ``cl_khr_context_abort``,
+  ``cl_khr_d3d11_sharing``, ``cl_khr_dx9_media_sharing``,
+  ``cl_khr_image2d_from_buffer``, ``cl_khr_initialize_memory``,
+  ``cl_khr_gl_depth_images``, ``cl_khr_spir``, ``cl_khr_egl_event``,
+  ``cl_khr_egl_image``, ``cl_khr_terminate_context``.
+- Improved diagnostics for  unevaluated ``vec_step`` expression.
+- Allow nested pointers (e.g. pointer-to-pointer) kernel arguments beyond OpenCL
+  1.2.
+- Added ``global_device`` and ``global_host`` address spaces for USM
+  allocations.
+
+Miscellaneous improvements in C++ for OpenCL support:
+
+- Added diagnostics for pointers to member functions and references to
+  functions.
+- Added support of ``vec_step`` builtin.
+- Fixed ICE on address spaces with forwarding references and templated copy
+  constructors.
+- Removed warning for variadic macro use.
 
 ABI Changes in Clang
 --------------------
@@ -368,7 +422,38 @@ libclang
 Static Analyzer
 ---------------
 
-- ...
+.. 3ff220de9009 [analyzer][StdLibraryFunctionsChecker] Add POSIX networking functions
+.. ...And a million other patches.
+- Improve the analyzer's understanding of several POSIX functions.
+
+.. https://reviews.llvm.org/D86533#2238207
+- Greatly improved the analyzer’s constraint solver by better understanding
+  when constraints are imposed on multiple symbolic values that are known to be
+  equal or known to be non-equal. It will now also efficiently reject impossible
+  if-branches between known comparison expressions. (Incorrectly stated as a
+  11.0.0 feature in the previous release notes)
+
+.. 820e8d8656ec [Analyzer][WebKit] UncountedLambdaCaptureChecker
+- New checker: :ref:`webkit.UncountedLambdaCapturesChecker<webkit-UncountedLambdaCapturesChecker>`
+  is a WebKit coding convention checker that flags raw pointers to
+  reference-counted objects captured by lambdas and suggests using intrusive
+  reference-counting smart pointers instead.
+
+.. 8a64689e264c [Analyzer][WebKit] UncountedLocalVarsChecker
+- New checker: :ref:`alpha.webkit.UncountedLocalVarsChecker<alpha-webkit-UncountedLocalVarsChecker>`
+  is a WebKit coding convention checker that intends to make sure that any
+  uncounted local variable is backed by a ref-counted object with lifetime that
+  is strictly larger than the scope of the uncounted local variable.
+
+.. i914f6c4ff8a4 [StaticAnalyzer] Support struct annotations in FuchsiaHandleChecker
+- ``fuchia.HandleChecker`` now recognizes handles in structs; All the handles
+  referenced by the structure (direct value or ptr) would be treated as
+  containing the release/use/acquire annotations directly.
+
+.. 8deaec122ec6 [analyzer] Update Fuchsia checker to catch releasing unowned handles.
+- Fuchsia checkers can detect the release of an unowned handle.
+
+- Numerous fixes and improvements to bug report generation.
 
 .. _release-notes-ubsan:
 
