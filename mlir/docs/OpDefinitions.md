@@ -451,7 +451,7 @@ def MyOp : Op<"my_op", []> {
   let arguments = (ins F32Attr:$attr);
 
   let builders = [
-    OpBuilderDAG<(ins "float":$val)>
+    OpBuilder<(ins "float":$val)>
   ];
 }
 ```
@@ -489,7 +489,7 @@ def MyOp : Op<"my_op", []> {
   let arguments = (ins F32Attr:$attr);
 
   let builders = [
-    OpBuilderDAG<(ins "float":$val), [{
+    OpBuilder<(ins "float":$val), [{
       $_state.addAttribute("attr", $_builder.getF32FloatAttr(val));
     }]>
   ];
@@ -511,7 +511,7 @@ def MyOp : Op<"my_op", []> {
   let arguments = (ins F32Attr:$attr);
 
   let builders = [
-    OpBuilderDAG<(ins CArg<"float", "0.5f">:$val), [{
+    OpBuilder<(ins CArg<"float", "0.5f">:$val), [{
       $_state.addAttribute("attr", $_builder.getF32FloatAttr(val));
     }]>
   ];
@@ -1400,7 +1400,7 @@ def IntegerType : Test_Type<"TestInteger"> {
 
   // The parser is defined here also.
   let parser = [{
-    if (parser.parseLess())
+    if ($_parser.parseLess())
       return Type();
     int width;
     if ($_parser.parseInteger(width))
@@ -1441,8 +1441,9 @@ need allocation in the storage constructor, there are two options:
 ### TypeParameter tablegen class
 
 This is used to further specify attributes about each of the types parameters.
-It includes documentation (`summary` and `syntax`), the C++ type to use, and a
-custom allocator to use in the storage constructor method.
+It includes documentation (`summary` and `syntax`), the C++ type to use, a
+custom allocator to use in the storage constructor method, and a custom
+comparator to decide if two instances of the parameter type are equal.
 
 ```tablegen
 // DO NOT DO THIS!
@@ -1471,6 +1472,11 @@ The `allocator` code block has the following substitutions:
 
 -   `$_allocator` is the TypeStorageAllocator in which to allocate objects.
 -   `$_dst` is the variable in which to place the allocated data.
+
+The `comparator` code block has the following substitutions:
+
+-   `$_lhs` is an instance of the parameter type.
+-   `$_rhs` is an instance of the parameter type.
 
 MLIR includes several specialized classes for common situations:
 

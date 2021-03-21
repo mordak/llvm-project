@@ -123,7 +123,6 @@ feature_test_macros = [ add_version_header(x) for x in [
     "name": "__cpp_lib_bind_front",
     "values": { "c++20": 201907 },
     "headers": ["functional"],
-    "unimplemented": True,
   }, {
     "name": "__cpp_lib_bit_cast",
     "values": { "c++20": 201806 },
@@ -423,7 +422,7 @@ feature_test_macros = [ add_version_header(x) for x in [
     "values": { "c++20": 201907 },
     "headers": ["numbers"],
     "depends": "defined(__cpp_concepts) && __cpp_concepts >= 201907L",
-    "internal_depends": "defined(__cpp_concepts) && __cpp_concepts >= 201907L",
+    "internal_depends": "!defined(_LIBCPP_HAS_NO_CONCEPTS)",
   }, {
     "name": "__cpp_lib_math_special_functions",
     "values": { "c++17": 201603 },
@@ -595,6 +594,10 @@ feature_test_macros = [ add_version_header(x) for x in [
     "headers": ["utility"],
     "unimplemented": True,
   }, {
+    "name": "__cpp_lib_to_underlying",
+    "values": { "c++2b": 202102 },
+    "headers": ["utility"],
+  }, {
     "name": "__cpp_lib_transformation_trait_aliases",
     "values": { "c++14": 201304 },
     "headers": ["type_traits"],
@@ -717,7 +720,7 @@ def get_std_number(std):
 
 def produce_macros_definition_for_std(std):
   result = ""
-  indent = 56
+  indent = 55
   for tc in feature_test_macros:
     if std not in tc["values"]:
       continue
@@ -731,7 +734,7 @@ def produce_macros_definition_for_std(std):
       result += "# undef  %s\n" % tc["name"]
     line = "#%sdefine %s" % ((" " * inner_indent), tc["name"])
     line += " " * (indent - len(line))
-    line += "%sL" % tc["values"][std]
+    line += " %sL" % tc["values"][std]
     if 'unimplemented' in tc.keys():
       line = "// " + line
     result += line

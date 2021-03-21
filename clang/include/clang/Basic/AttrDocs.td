@@ -1102,6 +1102,16 @@ data member, or for a typedef or using declaration.
   }];
 }
 
+def StandaloneDebugDocs : Documentation {
+  let Category = DocCatVariable;
+  let Content = [{
+The ``standalone_debug`` attribute causes debug info to be emitted for a record
+type regardless of the debug info optimizations that are enabled with
+-fno-standalone-debug. This attribute only has an effect when debug info
+optimizations are enabled (e.g. with -fno-standalone-debug), and is C++-only.
+  }];
+}
+
 def NoDuplicateDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
@@ -3022,10 +3032,39 @@ is retained by the return value of the annotated function
 (or, for a parameter of a constructor, in the value of the constructed object).
 It is only supported in C++.
 
-This attribute provides an experimental implementation of the facility
-described in the C++ committee paper `P0936R0 <http://wg21.link/p0936r0>`_,
-and is subject to change as the design of the corresponding functionality
-changes.
+This attribute causes warnings to be produced if a temporary object does not
+live long enough. For example:
+
+.. code-block:: c++
+
+    template<typename T, typename U>
+    const U &get_or_default(std::map<T, U> &m, const T &key,
+                            const U &default_value [[clang::lifetimebound]]);
+
+    std::map<std::string, std::string> m;
+    // warning: temporary "bar"s that might be bound to local reference 'val'
+    // will be destroyed at the end of the full-expression
+    const std::string &val = get_or_default(m, "foo"s, "bar"s);
+
+When applied to a reference parameter, the referenced object is assumed to be
+retained by the return value of the function. When applied to a non-reference
+parameter (for example, a pointer or a class type), all temporaries referenced
+by the parameter are assumed to be retained by the return value of the
+function.
+
+The attribute can be applied to the implicit ``this`` parameter of a member
+function by writing the attribute after the function type:
+
+.. code-block:: c++
+
+    struct string {
+      // The returned pointer should not outlive ``*this``.
+      const char *data() const [[clang::lifetimebound]];
+    };
+
+This attribute is inspired by the C++ committee paper `P0936R0
+<http://wg21.link/p0936r0>`_, but does not affect whether temporary objects
+have their lifetimes extended.
   }];
 }
 
@@ -4800,6 +4839,9 @@ def PatchableFunctionEntryDocs : Documentation {
 before the function entry and N-M NOPs after the function entry. This attribute
 takes precedence over the command line option ``-fpatchable-function-entry=N,M``.
 ``M`` defaults to 0 if omitted.
+
+This attribute is only supported on
+aarch64/aarch64-be/riscv32/riscv64/i386/x86-64 targets.
 }];
 }
 

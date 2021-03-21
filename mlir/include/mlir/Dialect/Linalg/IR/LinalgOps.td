@@ -101,24 +101,24 @@ def Linalg_InitTensorOp : Linalg_Op<"init_tensor", [NoSideEffect]> {
   }];
 
   let builders = [
-    OpBuilderDAG<(ins "ValueRange":$shape,
+    OpBuilder<(ins "ValueRange":$shape,
                   "ArrayRef<int64_t>":$staticShape, "Type":$elementType),
     [{
       build($_builder, $_state,
             InitTensorOp::inferResultType(staticShape, elementType),
             shape, $_builder.getI64ArrayAttr(staticShape));
     }]>,
-    OpBuilderDAG<(ins "ValueRange":$shape, "Type":$elementType),
+    OpBuilder<(ins "ValueRange":$shape, "Type":$elementType),
     [{
       SmallVector<int64_t, 4> staticShape(
         shape.size(), ShapedType::kDynamicSize);
       build($_builder, $_state, shape, staticShape, elementType);
     }]>,
-    OpBuilderDAG<(ins "ArrayRef<int64_t>":$staticShape, "Type":$elementType),
+    OpBuilder<(ins "ArrayRef<int64_t>":$staticShape, "Type":$elementType),
     [{
       build($_builder, $_state, ValueRange{}, staticShape, elementType);
     }]>,
-    OpBuilderDAG<(ins "ArrayRef<OpFoldResult>":$sizes, "Type":$elementType,
+    OpBuilder<(ins "ArrayRef<OpFoldResult>":$sizes, "Type":$elementType,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>
   ];
 
@@ -260,15 +260,15 @@ def Linalg_PadTensorOp : Linalg_Op<"pad_tensor",
 
   let builders = [
     // Build a PadTensorOp with mixed static and dynamic entries.
-    OpBuilderDAG<(ins "Value":$source, "ArrayRef<int64_t>":$staticLow,
+    OpBuilder<(ins "Value":$source, "ArrayRef<int64_t>":$staticLow,
       "ArrayRef<int64_t>":$staticHigh, "ValueRange":$low, "ValueRange":$high,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>,
     // Build a PadTensorOp with all dynamic entries.
-    OpBuilderDAG<(ins "Value":$source, "ValueRange":$low, "ValueRange":$high,
+    OpBuilder<(ins "Value":$source, "ValueRange":$low, "ValueRange":$high,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>,
     // Build a PadTensorOp with mixed static and dynamic entries and custom
     // result type. If the type passed is nullptr, it is inferred.
-    OpBuilderDAG<(ins "Type":$resultType, "Value":$source,
+    OpBuilder<(ins "Type":$resultType, "Value":$source,
       "ArrayRef<OpFoldResult>":$low, "ArrayRef<OpFoldResult>":$high,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>
   ];
@@ -291,7 +291,7 @@ def Linalg_RangeOp :
     ````
   }];
   let builders = [
-    OpBuilderDAG<(ins "Value":$min, "Value":$max, "Value":$step),
+    OpBuilder<(ins "Value":$min, "Value":$max, "Value":$step),
     [{
       auto rangeType = RangeType::get($_builder.getContext());
       build($_builder, $_state, rangeType, min, max, step);
@@ -307,10 +307,10 @@ class Linalg_ReshapeLikeOp<string mnemonic, list<OpTrait> traits = []> :
   let builders = [
     // Builders for a contracting reshape whose result type is computed from
     // `src` and `reassociation`.
-    OpBuilderDAG<(ins "Value":$src,
+    OpBuilder<(ins "Value":$src,
       "ArrayRef<ReassociationExprs>":$reassociation,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>,
-    OpBuilderDAG<(ins "Value":$src,
+    OpBuilder<(ins "Value":$src,
       "ArrayRef<ReassociationIndices>":$reassociation,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs),
     [{
@@ -321,10 +321,10 @@ class Linalg_ReshapeLikeOp<string mnemonic, list<OpTrait> traits = []> :
 
     // Builders for a reshape whose result type is passed explicitly. This may
     // be either a contracting or expanding reshape.
-    OpBuilderDAG<(ins "Type":$resultType, "Value":$src,
+    OpBuilder<(ins "Type":$resultType, "Value":$src,
       "ArrayRef<ReassociationExprs>":$reassociation,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>,
-    OpBuilderDAG<(ins "Type":$resultType, "Value":$src,
+    OpBuilder<(ins "Type":$resultType, "Value":$src,
       "ArrayRef<ReassociationIndices>":$reassociation,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs),
     [{
@@ -484,7 +484,7 @@ def Linalg_YieldOp : Linalg_Op<"yield", [NoSideEffect, ReturnLike, Terminator]>,
     linalg.yield %f0, %f1 : f32, f32
     ```
   }];
-  let builders = [OpBuilderDAG<(ins), [{ /* nothing to do */ }]>];
+  let builders = [OpBuilder<(ins), [{ /* nothing to do */ }]>];
 }
 
 def Linalg_TiledLoopOp : Linalg_Op<"tiled_loop", [
@@ -496,21 +496,25 @@ def Linalg_TiledLoopOp : Linalg_Op<"tiled_loop", [
   let summary = "Linalg tiled loop operation";
   let description = [{
     This is a loop-like operation with additional properties. The arguments
-    also include the input and the output tensors and the attributes to specify
-    the iterator types. The body region of the loop contains `subtensor`
-    operations applied to every tensor argument of TiledLoopOp.
+    also include the input and the output tensors or memrefs and the attributes
+    to specify the iterator types.
+
+    Parsing TiledLoopOp will set all elements of the `iterator_types` attribute
+    to "parallel" type, when it is absent from the custom format.
+
+    Tensor-based version:
+
+    The body region of the loop contains `subtensor` operations applied to
+    every tensor argument of TiledLoopOp.
 
     The body region must contain exactly one block that terminates with
     `linalg.yield` with the operands resulting from `subtensor_insert`
     operations.
 
-    Parsing TiledLoopOp will set all elements of the `iterator_types` attribute
-    to "parallel" type, when it is absent from the custom format.
-
     Example:
 
     ```mlir
-    linalg.tiled_loop (%i) = (%c0) to (%c24) step (%c4)
+    %0 = linalg.tiled_loop (%i) = (%c0) to (%c24) step (%c4)
         ins(%lhs, %rhs : tensor<24x64xi8>, tensor<24x64xi8>)
         outs(%out : tensor<24x64xi8>)
         iterators("parallel") {
@@ -528,21 +532,48 @@ def Linalg_TiledLoopOp : Linalg_Op<"tiled_loop", [
       linalg.yield %result : tensor<24x64xi8>
     }
     ```
+
+    MemRef-based version:
+
+    The body region of the loop contains `subview` operations applied to
+    every memref argument of TiledLoopOp.
+
+    The body region must contain exactly one block that terminates with
+    `linalg.yield` with no operands.
+
+    Example:
+
+    ```mlir
+    linalg.tiled_loop (%i) = (%c0) to (%c24) step (%c4)
+        ins(%lhs, %rhs : memref<24x64xi8>, memref<24x64xi8>)
+        outs(%out : memref<24x64xi8>)
+        iterators("parallel") {
+      %lhs_sub = subview %lhs[%i, 0] [%c4, %c64] [1, 1]
+          : memref<24x64xi8> to memref<?x?xi8>
+      %rhs_sub = subview %rhs[%i, 0] [%c4, %c64] [1, 1]
+          : memref<24x64xi8> to memref<?x?xi8>
+      %out_sub = subview %out[%i, 0] [%c4, %c64] [1, 1]
+          : memref<24x64xi8> to memref<?x?xi8>
+
+      %result_sub = linalg.generic ...
+      linalg.yield
+    }
+    ```
   }];
 
   let arguments = (ins Variadic<Index>:$lowerBound,
                        Variadic<Index>:$upperBound,
                        Variadic<Index>:$step,
-                       Variadic<AnyRankedTensor>:$inputs,
-                       Variadic<AnyRankedTensor>:$outputs,
+                       Variadic<LinalgOperand>:$inputs,
+                       Variadic<LinalgOperand>:$outputs,
                        ArrayAttr:$iterator_types);
   let results = (outs Variadic<AnyRankedTensor>:$results);
   let regions = (region SizedRegion<1>:$region);
 
   let builders = [
-    OpBuilderDAG<(ins "ValueRange":$lowerBounds, "ValueRange":$upperBounds,
+    OpBuilder<(ins "ValueRange":$lowerBounds, "ValueRange":$upperBounds,
       "ValueRange":$steps, "ValueRange":$inputs, "ValueRange":$outputs,
-      "ArrayRef<StringRef>":$iteratorTypes,
+      "ArrayAttr":$iteratorTypes,
       CArg<"function_ref<void (OpBuilder &, Location, ValueRange)>",
            "nullptr">:$bodyBuilderFn)>,
   ];

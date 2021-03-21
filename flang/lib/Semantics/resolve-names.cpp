@@ -2157,8 +2157,10 @@ void ScopeHandler::ApplyImplicitRules(
   if (allowForwardReference && ImplicitlyTypeForwardRef(symbol)) {
     return;
   }
-  Say(symbol.name(), "No explicit type declared for '%s'"_err_en_US);
-  context().SetError(symbol);
+  if (!context().HasError(symbol)) {
+    Say(symbol.name(), "No explicit type declared for '%s'"_err_en_US);
+    context().SetError(symbol);
+  }
 }
 
 // Extension: Allow forward references to scalar integer dummy arguments
@@ -2688,7 +2690,7 @@ void InterfaceVisitor::AddSpecificProcs(
 // this generic interface. Resolve those names to symbols.
 void InterfaceVisitor::ResolveSpecificsInGeneric(Symbol &generic) {
   auto &details{generic.get<GenericDetails>()};
-  SymbolSet symbolsSeen;
+  UnorderedSymbolSet symbolsSeen;
   for (const Symbol &symbol : details.specificProcs()) {
     symbolsSeen.insert(symbol);
   }
@@ -3155,6 +3157,13 @@ bool SubprogramVisitor::BeginMpSubprogram(const parser::Name &name) {
 // A subprogram declared with SUBROUTINE or FUNCTION
 bool SubprogramVisitor::BeginSubprogram(
     const parser::Name &name, Symbol::Flag subpFlag, bool hasModulePrefix) {
+  if (hasModulePrefix && currScope().IsGlobal()) { // C1547
+    Say(name,
+        "'%s' is a MODULE procedure which must be declared within a "
+        "MODULE or SUBMODULE"_err_en_US);
+    return false;
+  }
+
   if (hasModulePrefix && !inInterfaceBlock() &&
       !IsSeparateModuleProcedureInterface(
           FindSymbol(currScope().parent(), name))) {
@@ -3642,7 +3651,7 @@ Symbol &DeclarationVisitor::DeclareUnknownEntity(
 
 bool DeclarationVisitor::HasCycle(
     const Symbol &procSymbol, const ProcInterface &interface) {
-  SymbolSet procsInCycle;
+  OrderedSymbolSet procsInCycle;
   procsInCycle.insert(procSymbol);
   const ProcInterface *thisInterface{&interface};
   bool haveInterface{true};
@@ -3650,7 +3659,7 @@ bool DeclarationVisitor::HasCycle(
     haveInterface = false;
     if (const Symbol * interfaceSymbol{thisInterface->symbol()}) {
       if (procsInCycle.count(*interfaceSymbol) > 0) {
-        for (const auto procInCycle : procsInCycle) {
+        for (const auto &procInCycle : procsInCycle) {
           Say(procInCycle->name(),
               "The interface for procedure '%s' is recursively "
               "defined"_err_en_US,
@@ -6384,7 +6393,7 @@ void ResolveNamesVisitor::FinishSpecificationPart(
       CheckPossibleBadForwardRef(symbol);
     }
   }
-  currScope().InstantiateDerivedTypes(context());
+  currScope().InstantiateDerivedTypes();
   for (const auto &decl : decls) {
     if (const auto *statement{std::get_if<
             parser::Statement<common::Indirection<parser::StmtFunctionStmt>>>(

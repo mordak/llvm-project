@@ -167,12 +167,12 @@ static void *BackgroundThread(void *arg) {
     } else if (internal_strcmp(flags()->profile_memory, "stderr") == 0) {
       mprof_fd = 2;
     } else {
-      InternalScopedString filename(kMaxPathLength);
+      InternalScopedString filename;
       filename.append("%s.%d", flags()->profile_memory, (int)internal_getpid());
       fd_t fd = OpenFile(filename.data(), WrOnly);
       if (fd == kInvalidFd) {
         Printf("ThreadSanitizer: failed to open memory profile file '%s'\n",
-            &filename[0]);
+               filename.data());
       } else {
         mprof_fd = fd;
       }

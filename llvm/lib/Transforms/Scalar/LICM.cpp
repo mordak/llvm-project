@@ -185,6 +185,12 @@ static void moveInstructionBefore(Instruction &I, Instruction &Dest,
                                   ICFLoopSafetyInfo &SafetyInfo,
                                   MemorySSAUpdater *MSSAU, ScalarEvolution *SE);
 
+static void foreachMemoryAccess(MemorySSA *MSSA, Loop *L,
+                                function_ref<void(Instruction *)> Fn);
+static SmallVector<SmallSetVector<Value *, 8>, 0>
+collectPromotionCandidates(MemorySSA *MSSA, AliasAnalysis *AA, Loop *L,
+                           SmallVectorImpl<Instruction *> &MaybePromotable);
+
 namespace {
 struct LoopInvariantCodeMotion {
   bool runOnLoop(Loop *L, AAResults *AA, LoopInfo *LI, DominatorTree *DT,
@@ -203,9 +209,6 @@ private:
 
   std::unique_ptr<AliasSetTracker>
   collectAliasInfoForLoop(Loop *L, LoopInfo *LI, AAResults *AA);
-  std::unique_ptr<AliasSetTracker>
-  collectAliasInfoForLoopWithMSSA(Loop *L, AAResults *AA,
-                                  MemorySSAUpdater *MSSAU);
 };
 
 struct LegacyLICMPass : public LoopPass {
@@ -359,6 +362,22 @@ bool LoopInvariantCodeMotion::runOnLoop(
   std::unique_ptr<MemorySSAUpdater> MSSAU;
   std::unique_ptr<SinkAndHoistLICMFlags> Flags;
 
+  // Don't sink stores from loops with coroutine suspend instructions.
+  // LICM would sink instructions into the default destination of
+  // the coroutine switch. The default destination of the switch is to
+  // handle the case where the coroutine is suspended, by which point the
+  // coroutine frame may have been destroyed. No instruction can be sunk there.
+  // FIXME: This would unfortunately hurt the performance of coroutines, however
+  // there is currently no general solution for this. Similar issues could also
+  // potentially happen in other passes where instructions are being moved
+  // across that edge.
+  bool HasCoroSuspendInst = llvm::any_of(L->getBlocks(), [](BasicBlock *BB) {
+    return llvm::any_of(*BB, [](Instruction &I) {
+      IntrinsicInst *II = dyn_cast<IntrinsicInst>(&I);
+      return II && II->getIntrinsicID() == Intrinsic::coro_suspend;
+    });
+  });
+
   if (!MSSA) {
     LLVM_DEBUG(dbgs() << "LICM: Using Alias Set Tracker.\n");
     CurAST = collectAliasInfoForLoop(L, LI, AA);
@@ -405,7 +424,7 @@ bool LoopInvariantCodeMotion::runOnLoop(
   // preheader for SSA updater, so also avoid sinking when no preheader
   // is available.
   if (!DisablePromotion && Preheader && L->hasDedicatedExits() &&
-      !Flags->tooManyMemoryAccesses()) {
+      !Flags->tooManyMemoryAccesses() && !HasCoroSuspendInst) {
     // Figure out the loop exits and their insertion points
     SmallVector<BasicBlock *, 8> ExitBlocks;
     L->getUniqueExitBlocks(ExitBlocks);
@@ -430,31 +449,48 @@ bool LoopInvariantCodeMotion::runOnLoop(
       PredIteratorCache PIC;
 
       bool Promoted = false;
+      if (CurAST.get()) {
+        // Loop over all of the alias sets in the tracker object.
+        for (AliasSet &AS : *CurAST) {
+          // We can promote this alias set if it has a store, if it is a "Must"
+          // alias set, if the pointer is loop invariant, and if we are not
+          // eliminating any volatile loads or stores.
+          if (AS.isForwardingAliasSet() || !AS.isMod() || !AS.isMustAlias() ||
+              !L->isLoopInvariant(AS.begin()->getValue()))
+            continue;
 
-      // Build an AST using MSSA.
-      if (!CurAST.get())
-        CurAST = collectAliasInfoForLoopWithMSSA(L, AA, MSSAU.get());
+          assert(
+              !AS.empty() &&
+              "Must alias set should have at least one pointer element in it!");
 
-      // Loop over all of the alias sets in the tracker object.
-      for (AliasSet &AS : *CurAST) {
-        // We can promote this alias set if it has a store, if it is a "Must"
-        // alias set, if the pointer is loop invariant, and if we are not
-        // eliminating any volatile loads or stores.
-        if (AS.isForwardingAliasSet() || !AS.isMod() || !AS.isMustAlias() ||
-            !L->isLoopInvariant(AS.begin()->getValue()))
-          continue;
+          SmallSetVector<Value *, 8> PointerMustAliases;
+          for (const auto &ASI : AS)
+            PointerMustAliases.insert(ASI.getValue());
 
-        assert(
-            !AS.empty() &&
-            "Must alias set should have at least one pointer element in it!");
+          Promoted |= promoteLoopAccessesToScalars(
+              PointerMustAliases, ExitBlocks, InsertPts, MSSAInsertPts, PIC, LI,
+              DT, TLI, L, CurAST.get(), MSSAU.get(), &SafetyInfo, ORE);
+        }
+      } else {
+        SmallVector<Instruction *, 16> MaybePromotable;
+        foreachMemoryAccess(MSSA, L, [&](Instruction *I) {
+          MaybePromotable.push_back(I);
+        });
 
-        SmallSetVector<Value *, 8> PointerMustAliases;
-        for (const auto &ASI : AS)
-          PointerMustAliases.insert(ASI.getValue());
-
-        Promoted |= promoteLoopAccessesToScalars(
-            PointerMustAliases, ExitBlocks, InsertPts, MSSAInsertPts, PIC, LI,
-            DT, TLI, L, CurAST.get(), MSSAU.get(), &SafetyInfo, ORE);
+        // Promoting one set of accesses may make the pointers for another set
+        // loop invariant, so run this in a loop (with the MaybePromotable set
+        // decreasing in size over time).
+        bool LocalPromoted;
+        do {
+          LocalPromoted = false;
+          for (const SmallSetVector<Value *, 8> &PointerMustAliases :
+               collectPromotionCandidates(MSSA, AA, L, MaybePromotable)) {
+            LocalPromoted |= promoteLoopAccessesToScalars(
+                PointerMustAliases, ExitBlocks, InsertPts, MSSAInsertPts, PIC,
+                LI, DT, TLI, L, /*AST*/nullptr, MSSAU.get(), &SafetyInfo, ORE);
+          }
+          Promoted |= LocalPromoted;
+        } while (LocalPromoted);
       }
 
       // Once we have promoted values across the loop body we have to
@@ -1466,24 +1502,23 @@ static Instruction *cloneInstructionInExitBlock(
     }
   }
 
-  // Build LCSSA PHI nodes for any in-loop operands. Note that this is
-  // particularly cheap because we can rip off the PHI node that we're
+  // Build LCSSA PHI nodes for any in-loop operands (if legal).  Note that
+  // this is particularly cheap because we can rip off the PHI node that we're
   // replacing for the number and blocks of the predecessors.
   // OPT: If this shows up in a profile, we can instead finish sinking all
   // invariant instructions, and then walk their operands to re-establish
   // LCSSA. That will eliminate creating PHI nodes just to nuke them when
   // sinking bottom-up.
   for (Use &Op : New->operands())
-    if (Instruction *OInst = dyn_cast<Instruction>(Op))
-      if (Loop *OLoop = LI->getLoopFor(OInst->getParent()))
-        if (!OLoop->contains(&PN)) {
-          PHINode *OpPN =
-              PHINode::Create(OInst->getType(), PN.getNumIncomingValues(),
-                              OInst->getName() + ".lcssa", &ExitBlock.front());
-          for (unsigned i = 0, e = PN.getNumIncomingValues(); i != e; ++i)
-            OpPN->addIncoming(OInst, PN.getIncomingBlock(i));
-          Op = OpPN;
-        }
+    if (LI->wouldBeOutOfLoopUseRequiringLCSSA(Op.get(), PN.getParent())) {
+      auto *OInst = cast<Instruction>(Op.get());
+      PHINode *OpPN =
+        PHINode::Create(OInst->getType(), PN.getNumIncomingValues(),
+                        OInst->getName() + ".lcssa", &ExitBlock.front());
+      for (unsigned i = 0, e = PN.getNumIncomingValues(); i != e; ++i)
+        OpPN->addIncoming(OInst, PN.getIncomingBlock(i));
+      Op = OpPN;
+    }
   return New;
 }
 
@@ -1820,19 +1855,21 @@ class LoopPromoter : public LoadAndStorePromoter {
   AAMDNodes AATags;
   ICFLoopSafetyInfo &SafetyInfo;
 
+  // We're about to add a use of V in a loop exit block.  Insert an LCSSA phi
+  // (if legal) if doing so would add an out-of-loop use to an instruction
+  // defined in-loop.
   Value *maybeInsertLCSSAPHI(Value *V, BasicBlock *BB) const {
-    if (Instruction *I = dyn_cast<Instruction>(V))
-      if (Loop *L = LI.getLoopFor(I->getParent()))
-        if (!L->contains(BB)) {
-          // We need to create an LCSSA PHI node for the incoming value and
-          // store that.
-          PHINode *PN = PHINode::Create(I->getType(), PredCache.size(BB),
-                                        I->getName() + ".lcssa", &BB->front());
-          for (BasicBlock *Pred : PredCache.get(BB))
-            PN->addIncoming(I, Pred);
-          return PN;
-        }
-    return V;
+    if (!LI.wouldBeOutOfLoopUseRequiringLCSSA(V, BB))
+      return V;
+
+    Instruction *I = cast<Instruction>(V);
+    // We need to create an LCSSA PHI node for the incoming value and
+    // store that.
+    PHINode *PN = PHINode::Create(I->getType(), PredCache.size(BB),
+                                  I->getName() + ".lcssa", &BB->front());
+    for (BasicBlock *Pred : PredCache.get(BB))
+      PN->addIncoming(I, Pred);
+    return PN;
   }
 
 public:
@@ -2217,6 +2254,70 @@ bool llvm::promoteLoopAccessesToScalars(
   return true;
 }
 
+static void foreachMemoryAccess(MemorySSA *MSSA, Loop *L,
+                                function_ref<void(Instruction *)> Fn) {
+  for (const BasicBlock *BB : L->blocks())
+    if (const auto *Accesses = MSSA->getBlockAccesses(BB))
+      for (const auto &Access : *Accesses)
+        if (const auto *MUD = dyn_cast<MemoryUseOrDef>(&Access))
+          Fn(MUD->getMemoryInst());
+}
+
+static SmallVector<SmallSetVector<Value *, 8>, 0>
+collectPromotionCandidates(MemorySSA *MSSA, AliasAnalysis *AA, Loop *L,
+                           SmallVectorImpl<Instruction *> &MaybePromotable) {
+  AliasSetTracker AST(*AA);
+
+  auto IsPotentiallyPromotable = [L](const Instruction *I) {
+    if (const auto *SI = dyn_cast<StoreInst>(I))
+      return L->isLoopInvariant(SI->getPointerOperand());
+    if (const auto *LI = dyn_cast<LoadInst>(I))
+      return L->isLoopInvariant(LI->getPointerOperand());
+    return false;
+  };
+
+  // Populate AST with potentially promotable accesses and remove them from
+  // MaybePromotable, so they will not be checked again on the next iteration.
+  SmallPtrSet<Value *, 16> AttemptingPromotion;
+  llvm::erase_if(MaybePromotable, [&](Instruction *I) {
+    if (IsPotentiallyPromotable(I)) {
+      AttemptingPromotion.insert(I);
+      AST.add(I);
+      return true;
+    }
+    return false;
+  });
+
+  // We're only interested in must-alias sets that contain a mod.
+  SmallVector<const AliasSet *, 8> Sets;
+  for (AliasSet &AS : AST)
+    if (!AS.isForwardingAliasSet() && AS.isMod() && AS.isMustAlias())
+      Sets.push_back(&AS);
+
+  if (Sets.empty())
+    return {}; // Nothing to promote...
+
+  // Discard any sets for which there is an aliasing non-promotable access.
+  foreachMemoryAccess(MSSA, L, [&](Instruction *I) {
+    if (AttemptingPromotion.contains(I))
+      return;
+
+    llvm::erase_if(Sets, [&](const AliasSet *AS) {
+      return AS->aliasesUnknownInst(I, *AA);
+    });
+  });
+
+  SmallVector<SmallSetVector<Value *, 8>, 0> Result;
+  for (const AliasSet *Set : Sets) {
+    SmallSetVector<Value *, 8> PointerMustAliases;
+    for (const auto &ASI : *Set)
+      PointerMustAliases.insert(ASI.getValue());
+    Result.push_back(std::move(PointerMustAliases));
+  }
+
+  return Result;
+}
+
 /// Returns an owning pointer to an alias set which incorporates aliasing info
 /// from L and all subloops of L.
 std::unique_ptr<AliasSetTracker>
@@ -2234,15 +2335,6 @@ LoopInvariantCodeMotion::collectAliasInfoForLoop(Loop *L, LoopInfo *LI,
     if (LI->getLoopFor(BB) == L)
       CurAST->add(*BB);
 
-  return CurAST;
-}
-
-std::unique_ptr<AliasSetTracker>
-LoopInvariantCodeMotion::collectAliasInfoForLoopWithMSSA(
-    Loop *L, AAResults *AA, MemorySSAUpdater *MSSAU) {
-  auto *MSSA = MSSAU->getMemorySSA();
-  auto CurAST = std::make_unique<AliasSetTracker>(*AA, MSSA, L);
-  CurAST->addAllInstructionsInLoopUsingMSSA();
   return CurAST;
 }
 

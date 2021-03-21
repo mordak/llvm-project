@@ -254,6 +254,8 @@ static const char *getLDMOption(const llvm::Triple &T, const ArgList &Args) {
   case llvm::Triple::armeb:
   case llvm::Triple::thumbeb:
     return isArmBigEndian(T, Args) ? "armelfb_linux_eabi" : "armelf_linux_eabi";
+  case llvm::Triple::m68k:
+    return "m68kelf";
   case llvm::Triple::ppc:
     if (T.isOSLinux())
       return "elf32ppclinux";
@@ -1907,9 +1909,7 @@ void Generic_GCC::GCCInstallationDetector::init(
                            CandidateBiarchTripleAliases);
 
   // Compute the set of prefixes for our search.
-  SmallVector<std::string, 8> Prefixes(D.PrefixDirs.begin(),
-                                       D.PrefixDirs.end());
-
+  SmallVector<std::string, 8> Prefixes;
   StringRef GCCToolchainDir = getGCCToolchainDir(Args, D.SysRoot);
   if (GCCToolchainDir != "") {
     if (GCCToolchainDir.back() == '/')
@@ -1932,13 +1932,10 @@ void Generic_GCC::GCCInstallationDetector::init(
       // Typically /usr.
       AddDefaultGCCPrefixes(TargetTriple, Prefixes, D.SysRoot);
     }
-  }
 
-  // Try to respect gcc-config on Gentoo. However, do that only
-  // if --gcc-toolchain is not provided or equal to the Gentoo install
-  // in /usr. This avoids accidentally enforcing the system GCC version
-  // when using a custom toolchain.
-  if (GCCToolchainDir == "" || GCCToolchainDir == D.SysRoot + "/usr") {
+    // Try to respect gcc-config on Gentoo if --gcc-toolchain is not provided.
+    // This avoids accidentally enforcing the system GCC version when using a
+    // custom toolchain.
     SmallVector<StringRef, 16> GentooTestTriples;
     // Try to match an exact triple as target triple first.
     // e.g. crossdev -S x86_64-gentoo-linux-gnu will install gcc libs for
@@ -1958,7 +1955,8 @@ void Generic_GCC::GCCInstallationDetector::init(
 
   // Loop over the various components which exist and select the best GCC
   // installation available. GCC installs are ranked by version number.
-  Version = GCCVersion::Parse("0.0.0");
+  const GCCVersion VersionZero = GCCVersion::Parse("0.0.0");
+  Version = VersionZero;
   for (const std::string &Prefix : Prefixes) {
     auto &VFS = D.getVFS();
     if (!VFS.exists(Prefix))
@@ -1991,6 +1989,10 @@ void Generic_GCC::GCCInstallationDetector::init(
         ScanLibDirForGCCTriple(TargetTriple, Args, LibDir, Candidate, true,
                                GCCDirExists, GCCCrossDirExists);
     }
+
+    // Skip other prefixes once a GCC installation is found.
+    if (Version > VersionZero)
+      break;
   }
 }
 
@@ -2113,6 +2115,10 @@ void Generic_GCC::GCCInstallationDetector::AddDefaultGCCPrefixes(
       "i486-slackware-linux", "i686-montavista-linux", "i586-linux-gnu",
       "i686-linux-android",   "i386-gnu",              "i486-gnu",
       "i586-gnu",             "i686-gnu"};
+
+  static const char *const M68kLibDirs[] = {"/lib"};
+  static const char *const M68kTriples[] = {
+      "m68k-linux-gnu", "m68k-unknown-linux-gnu", "m68k-suse-linux"};
 
   static const char *const MIPSLibDirs[] = {"/lib"};
   static const char *const MIPSTriples[] = {
@@ -2353,6 +2359,10 @@ void Generic_GCC::GCCInstallationDetector::AddDefaultGCCPrefixes(
       BiarchTripleAliases.append(begin(X86_64Triples), end(X86_64Triples));
     }
     break;
+  case llvm::Triple::m68k:
+    LibDirs.append(begin(M68kLibDirs), end(M68kLibDirs));
+    TripleAliases.append(begin(M68kTriples), end(M68kTriples));
+    break;
   case llvm::Triple::mips:
     LibDirs.append(begin(MIPSLibDirs), end(MIPSLibDirs));
     TripleAliases.append(begin(MIPSTriples), end(MIPSTriples));
@@ -2496,7 +2506,6 @@ void Generic_GCC::GCCInstallationDetector::ScanLibDirForGCCTriple(
     const llvm::Triple &TargetTriple, const ArgList &Args,
     const std::string &LibDir, StringRef CandidateTriple,
     bool NeedsBiarchSuffix, bool GCCDirExists, bool GCCCrossDirExists) {
-  llvm::Triple::ArchType TargetArch = TargetTriple.getArch();
   // Locations relative to the system lib directory where GCC's triple-specific
   // directories might reside.
   struct GCCLibSuffix {
@@ -2520,24 +2529,7 @@ void Generic_GCC::GCCInstallationDetector::ScanLibDirForGCCTriple(
       // files in that location, not just GCC installation data.
       {CandidateTriple.str(), "..",
        TargetTriple.getVendor() == llvm::Triple::Freescale ||
-       TargetTriple.getVendor() == llvm::Triple::OpenEmbedded},
-
-      // Natively multiarch systems sometimes put the GCC triple-specific
-      // directory within their multiarch lib directory, resulting in the
-      // triple appearing twice.
-      {CandidateTriple.str() + "/gcc/" + CandidateTriple.str(), "../../..",
-       TargetTriple.getOS() != llvm::Triple::Solaris},
-
-      // Deal with cases (on Ubuntu) where the system architecture could be i386
-      // but the GCC target architecture could be (say) i686.
-      // FIXME: It may be worthwhile to generalize this and look for a second
-      // triple.
-      {"i386-linux-gnu/gcc/" + CandidateTriple.str(), "../../..",
-       (TargetArch == llvm::Triple::x86 &&
-        TargetTriple.getOS() != llvm::Triple::Solaris)},
-      {"i386-gnu/gcc/" + CandidateTriple.str(), "../../..",
-       (TargetArch == llvm::Triple::x86 &&
-        TargetTriple.getOS() != llvm::Triple::Solaris)}};
+           TargetTriple.getVendor() == llvm::Triple::OpenEmbedded}};
 
   for (auto &Suffix : Suffixes) {
     if (!Suffix.Active)
@@ -2760,6 +2752,7 @@ bool Generic_GCC::IsIntegratedAssemblerDefault() const {
   case llvm::Triple::mips64:
   case llvm::Triple::mips64el:
   case llvm::Triple::msp430:
+  case llvm::Triple::m68k:
     return true;
   case llvm::Triple::sparc:
   case llvm::Triple::sparcel:
@@ -2841,19 +2834,7 @@ void Generic_GCC::AddMultilibPaths(const Driver &D,
                         SelectedMultilib.osSuffix(),
                     Paths);
 
-    // If the GCC installation we found is inside of the sysroot, we want to
-    // prefer libraries installed in the parent prefix of the GCC installation.
-    // It is important to *not* use these paths when the GCC installation is
-    // outside of the system root as that can pick up unintended libraries.
-    // This usually happens when there is an external cross compiler on the
-    // host system, and a more minimal sysroot available that is the target of
-    // the cross. Note that GCC does include some of these directories in some
-    // configurations but this seems somewhere between questionable and simply
-    // a bug.
-    if (StringRef(LibPath).startswith(SysRoot)) {
-      addPathIfExists(D, LibPath + "/" + MultiarchTriple, Paths);
-      addPathIfExists(D, LibPath + "/../" + OSLibDir, Paths);
-    }
+    addPathIfExists(D, LibPath + "/../" + OSLibDir, Paths);
   }
 }
 
@@ -2864,11 +2845,6 @@ void Generic_GCC::AddMultiarchPaths(const Driver &D,
   // Try walking via the GCC triple path in case of biarch or multiarch GCC
   // installations with strange symlinks.
   if (GCCInstallation.isValid()) {
-    addPathIfExists(D,
-                    SysRoot + "/usr/lib/" + GCCInstallation.getTriple().str() +
-                        "/../../" + OSLibDir,
-                    Paths);
-
     // Add the 'other' biarch variant path
     Multilib BiarchSibling;
     if (GCCInstallation.getBiarchSibling(BiarchSibling)) {
@@ -2877,8 +2853,6 @@ void Generic_GCC::AddMultiarchPaths(const Driver &D,
                       Paths);
     }
 
-    // See comments above on the multilib variant for details of why this is
-    // included even from outside the sysroot.
     const std::string &LibPath =
         std::string(GCCInstallation.getParentLibPath());
     const llvm::Triple &GCCTriple = GCCInstallation.getTriple();
@@ -2886,24 +2860,26 @@ void Generic_GCC::AddMultiarchPaths(const Driver &D,
     addPathIfExists(
         D, LibPath + "/../" + GCCTriple.str() + "/lib" + Multilib.osSuffix(),
                     Paths);
-
-    // See comments above on the multilib variant for details of why this is
-    // only included from within the sysroot.
-    if (StringRef(LibPath).startswith(SysRoot))
-      addPathIfExists(D, LibPath, Paths);
+    addPathIfExists(D, LibPath, Paths);
   }
 }
 
 void Generic_GCC::AddMultilibIncludeArgs(const ArgList &DriverArgs,
                                          ArgStringList &CC1Args) const {
   // Add include directories specific to the selected multilib set and multilib.
-  if (GCCInstallation.isValid()) {
-    const auto &Callback = Multilibs.includeDirsCallback();
-    if (Callback) {
-      for (const auto &Path : Callback(GCCInstallation.getMultilib()))
-        addExternCSystemIncludeIfExists(
-            DriverArgs, CC1Args, GCCInstallation.getInstallPath() + Path);
-    }
+  if (!GCCInstallation.isValid())
+    return;
+  // gcc TOOL_INCLUDE_DIR.
+  const llvm::Triple &GCCTriple = GCCInstallation.getTriple();
+  std::string LibPath(GCCInstallation.getParentLibPath());
+  addSystemInclude(DriverArgs, CC1Args,
+                   Twine(LibPath) + "/../" + GCCTriple.str() + "/include");
+
+  const auto &Callback = Multilibs.includeDirsCallback();
+  if (Callback) {
+    for (const auto &Path : Callback(GCCInstallation.getMultilib()))
+      addExternCSystemIncludeIfExists(DriverArgs, CC1Args,
+                                      GCCInstallation.getInstallPath() + Path);
   }
 }
 

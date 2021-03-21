@@ -102,6 +102,12 @@ std::string Linux::getMultiarchTriple(const Driver &D,
     if (D.getVFS().exists(SysRoot + "/lib/aarch64_be-linux-gnu"))
       return "aarch64_be-linux-gnu";
     break;
+
+  case llvm::Triple::m68k:
+    if (D.getVFS().exists(SysRoot + "/lib/m68k-linux-gnu"))
+      return "m68k-linux-gnu";
+    break;
+
   case llvm::Triple::mips: {
     std::string MT = IsMipsR6 ? "mipsisa32r6-linux-gnu" : "mips-linux-gnu";
     if (D.getVFS().exists(SysRoot + "/lib/" + MT))
@@ -301,16 +307,6 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
 
   Generic_GCC::AddMultilibPaths(D, SysRoot, OSLibDir, MultiarchTriple, Paths);
 
-  // Similar to the logic for GCC above, if we currently running Clang inside
-  // of the requested system root, add its parent library paths to
-  // those searched.
-  // FIXME: It's not clear whether we should use the driver's installed
-  // directory ('Dir' below) or the ResourceDir.
-  if (StringRef(D.Dir).startswith(SysRoot)) {
-    addPathIfExists(D, D.Dir + "/../lib/" + MultiarchTriple, Paths);
-    addPathIfExists(D, D.Dir + "/../" + OSLibDir, Paths);
-  }
-
   addPathIfExists(D, SysRoot + "/lib/" + MultiarchTriple, Paths);
   addPathIfExists(D, SysRoot + "/lib/../" + OSLibDir, Paths);
 
@@ -355,6 +351,12 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
 
   addPathIfExists(D, SysRoot + "/lib", Paths);
   addPathIfExists(D, SysRoot + "/usr/lib", Paths);
+}
+
+ToolChain::RuntimeLibType Linux::GetDefaultRuntimeLibType() const {
+  if (getTriple().isAndroid())
+    return ToolChain::RLT_CompilerRT;
+  return Generic_ELF::GetDefaultRuntimeLibType();
 }
 
 ToolChain::CXXStdlibType Linux::GetDefaultCXXStdlibType() const {
@@ -476,6 +478,10 @@ std::string Linux::getDynamicLinker(const ArgList &Args) const {
     Loader = HF ? "ld-linux-armhf.so.3" : "ld-linux.so.3";
     break;
   }
+  case llvm::Triple::m68k:
+    LibDir = "lib";
+    Loader = "ld.so.1";
+    break;
   case llvm::Triple::mips:
   case llvm::Triple::mipsel:
   case llvm::Triple::mips64:
@@ -568,9 +574,14 @@ void Linux::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
   if (DriverArgs.hasArg(clang::driver::options::OPT_nostdinc))
     return;
 
-  if (!DriverArgs.hasArg(options::OPT_nostdlibinc))
+  if (!DriverArgs.hasArg(options::OPT_nostdlibinc)) {
+    // LOCAL_INCLUDE_DIR
     addSystemInclude(DriverArgs, CC1Args, SysRoot + "/usr/local/include");
+    // TOOL_INCLUDE_DIR
+    AddMultilibIncludeArgs(DriverArgs, CC1Args);
+  }
 
+  // Note: in gcc, GCC_INCLUDE_DIR (private headers) precedes LOCAL_INCLUDE_DIR.
   SmallString<128> ResourceDirInclude(D.ResourceDir);
   llvm::sys::path::append(ResourceDirInclude, "include");
   if (!DriverArgs.hasArg(options::OPT_nobuiltininc) &&
@@ -592,11 +603,6 @@ void Linux::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
     }
     return;
   }
-
-  // Lacking those, try to detect the correct set of system includes for the
-  // target triple.
-
-  AddMultilibIncludeArgs(DriverArgs, CC1Args);
 
   // Implement generic Debian multiarch support.
   const StringRef X86_64MultiarchIncludeDirs[] = {
@@ -624,6 +630,7 @@ void Linux::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
       "/usr/include/armeb-linux-gnueabi"};
   const StringRef ARMEBHFMultiarchIncludeDirs[] = {
       "/usr/include/armeb-linux-gnueabihf"};
+  const StringRef M68kMultiarchIncludeDirs[] = {"/usr/include/m68k-linux-gnu"};
   const StringRef MIPSMultiarchIncludeDirs[] = {"/usr/include/mips-linux-gnu"};
   const StringRef MIPSELMultiarchIncludeDirs[] = {
       "/usr/include/mipsel-linux-gnu"};
@@ -687,6 +694,9 @@ void Linux::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
       MultiarchIncludeDirs = ARMEBHFMultiarchIncludeDirs;
     else
       MultiarchIncludeDirs = ARMEBMultiarchIncludeDirs;
+    break;
+  case llvm::Triple::m68k:
+    MultiarchIncludeDirs = M68kMultiarchIncludeDirs;
     break;
   case llvm::Triple::mips:
     if (getTriple().getSubArch() == llvm::Triple::MipsSubArch_r6)

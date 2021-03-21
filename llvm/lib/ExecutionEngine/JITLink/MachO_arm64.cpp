@@ -26,7 +26,8 @@ namespace {
 class MachOLinkGraphBuilder_arm64 : public MachOLinkGraphBuilder {
 public:
   MachOLinkGraphBuilder_arm64(const object::MachOObjectFile &Obj)
-      : MachOLinkGraphBuilder(Obj, Triple("arm64-apple-darwin")),
+      : MachOLinkGraphBuilder(Obj, Triple("arm64-apple-darwin"),
+                              getMachOARM64RelocationKindName),
         NumSymbols(Obj.getSymtabLoadCommand().nsyms) {}
 
 private:
@@ -271,7 +272,7 @@ private:
           if (*Kind != Branch26 && *Kind != Page21 && *Kind != PageOffset12)
             return make_error<JITLinkError>(
                 "Invalid relocation pair: Addend + " +
-                getMachOARM64RelocationKindName(*Kind));
+                StringRef(getMachOARM64RelocationKindName(*Kind)));
 
           LLVM_DEBUG({
             dbgs() << "    Addend: value = " << formatv("{0:x6}", Addend)
@@ -410,9 +411,10 @@ public:
   MachO_arm64_GOTAndStubsBuilder(LinkGraph &G)
       : BasicGOTAndStubsBuilder<MachO_arm64_GOTAndStubsBuilder>(G) {}
 
-  bool isGOTEdge(Edge &E) const {
-    return E.getKind() == GOTPage21 || E.getKind() == GOTPageOffset12 ||
-           E.getKind() == PointerToGOT;
+  bool isGOTEdgeToFix(Edge &E) const {
+    return (E.getKind() == GOTPage21 || E.getKind() == GOTPageOffset12 ||
+            E.getKind() == PointerToGOT) &&
+           E.getTarget().isExternal();
   }
 
   Symbol &createGOTEntry(Symbol &Target) {
@@ -506,20 +508,6 @@ public:
       : JITLinker(std::move(Ctx), std::move(G), std::move(PassConfig)) {}
 
 private:
-  StringRef getEdgeKindName(Edge::Kind R) const override {
-    return getMachOARM64RelocationKindName(R);
-  }
-
-  static Error targetOutOfRangeError(const Block &B, const Edge &E) {
-    std::string ErrMsg;
-    {
-      raw_string_ostream ErrStream(ErrMsg);
-      ErrStream << "Relocation target out of range: ";
-      printEdge(ErrStream, B, E, getMachOARM64RelocationKindName(E.getKind()));
-      ErrStream << "\n";
-    }
-    return make_error<JITLinkError>(std::move(ErrMsg));
-  }
 
   static unsigned getPageOffset12Shift(uint32_t Instr) {
     constexpr uint32_t LoadStoreImm12Mask = 0x3b000000;
@@ -537,7 +525,8 @@ private:
     return 0;
   }
 
-  Error applyFixup(Block &B, const Edge &E, char *BlockWorkingMem) const {
+  Error applyFixup(LinkGraph &G, Block &B, const Edge &E,
+                   char *BlockWorkingMem) const {
     using namespace support;
 
     char *FixupPtr = BlockWorkingMem + E.getOffset();
@@ -554,7 +543,7 @@ private:
                                         "aligned");
 
       if (Value < -(1 << 27) || Value > ((1 << 27) - 1))
-        return targetOutOfRangeError(B, E);
+        return makeTargetOutOfRangeError(G, B, E);
 
       uint32_t RawInstr = *(little32_t *)FixupPtr;
       assert((RawInstr & 0x7fffffff) == 0x14000000 &&
@@ -567,7 +556,7 @@ private:
     case Pointer32: {
       uint64_t Value = E.getTarget().getAddress() + E.getAddend();
       if (Value > std::numeric_limits<uint32_t>::max())
-        return targetOutOfRangeError(B, E);
+        return makeTargetOutOfRangeError(G, B, E);
       *(ulittle32_t *)FixupPtr = Value;
       break;
     }
@@ -588,7 +577,7 @@ private:
 
       int64_t PageDelta = TargetPage - PCPage;
       if (PageDelta < -(1 << 30) || PageDelta > ((1 << 30) - 1))
-        return targetOutOfRangeError(B, E);
+        return makeTargetOutOfRangeError(G, B, E);
 
       uint32_t RawInstr = *(ulittle32_t *)FixupPtr;
       assert((RawInstr & 0xffffffe0) == 0x90000000 &&
@@ -638,7 +627,7 @@ private:
         return make_error<JITLinkError>("LDR literal target is not 32-bit "
                                         "aligned");
       if (Delta < -(1 << 20) || Delta > ((1 << 20) - 1))
-        return targetOutOfRangeError(B, E);
+        return makeTargetOutOfRangeError(G, B, E);
 
       uint32_t EncodedImm = (static_cast<uint32_t>(Delta) >> 2) << 5;
       uint32_t FixedInstr = RawInstr | EncodedImm;
@@ -658,7 +647,7 @@ private:
       if (E.getKind() == Delta32 || E.getKind() == NegDelta32) {
         if (Value < std::numeric_limits<int32_t>::min() ||
             Value > std::numeric_limits<int32_t>::max())
-          return targetOutOfRangeError(B, E);
+          return makeTargetOutOfRangeError(G, B, E);
         *(little32_t *)FixupPtr = Value;
       } else
         *(little64_t *)FixupPtr = Value;
@@ -701,14 +690,14 @@ void link_MachO_arm64(std::unique_ptr<LinkGraph> G,
     });
   }
 
-  if (auto Err = Ctx->modifyPassConfig(G->getTargetTriple(), Config))
+  if (auto Err = Ctx->modifyPassConfig(*G, Config))
     return Ctx->notifyFailed(std::move(Err));
 
   // Construct a JITLinker and run the link function.
   MachOJITLinker_arm64::link(std::move(Ctx), std::move(G), std::move(Config));
 }
 
-StringRef getMachOARM64RelocationKindName(Edge::Kind R) {
+const char *getMachOARM64RelocationKindName(Edge::Kind R) {
   switch (R) {
   case Branch26:
     return "Branch26";

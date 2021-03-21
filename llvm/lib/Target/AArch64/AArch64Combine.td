@@ -24,10 +24,20 @@ def icmp_redundant_trunc : GICombineRule<
          [{ return matchICmpRedundantTrunc(*${root}, MRI, Helper.getKnownBits(), ${matchinfo}); }]),
   (apply [{ applyICmpRedundantTrunc(*${root}, MRI, B, Observer, ${matchinfo}); }])>;
 
+// AArch64-specific offset folding for G_GLOBAL_VALUE.
+def fold_global_offset_matchdata : GIDefMatchData<"std::pair<uint64_t, uint64_t>">;
+def fold_global_offset : GICombineRule<
+  (defs root:$root, fold_global_offset_matchdata:$matchinfo),
+  (match (wip_match_opcode G_GLOBAL_VALUE):$root,
+          [{ return matchFoldGlobalOffset(*${root}, MRI, ${matchinfo}); }]),
+  (apply [{  return applyFoldGlobalOffset(*${root}, MRI, B, Observer, ${matchinfo});}])
+>;
+
 def AArch64PreLegalizerCombinerHelper: GICombinerHelper<
   "AArch64GenPreLegalizerCombinerHelper", [all_combines,
                                            fconstant_to_constant,
-                                           icmp_redundant_trunc]> {
+                                           icmp_redundant_trunc,
+                                           fold_global_offset]> {
   let DisableRuleOption = "aarch64prelegalizercombiner-disable-rule";
   let StateClass = "AArch64PreLegalizerCombinerHelperState";
   let AdditionalArguments = [];
@@ -135,13 +145,22 @@ def mul_const : GICombineRule<
   (apply [{ applyAArch64MulConstCombine(*${root}, MRI, B, ${matchinfo}); }])
 >;
 
+def build_vector_to_dup : GICombineRule<
+  (defs root:$root),
+  (match (wip_match_opcode G_BUILD_VECTOR):$root,
+          [{ return matchBuildVectorToDup(*${root}, MRI); }]),
+  (apply [{ return applyBuildVectorToDup(*${root}, MRI, B); }])
+>;
+
+def build_vector_lowering : GICombineGroup<[build_vector_to_dup]>;
+
 // Post-legalization combines which should happen at all optimization levels.
 // (E.g. ones that facilitate matching for the selector) For example, matching
 // pseudos.
 def AArch64PostLegalizerLoweringHelper
     : GICombinerHelper<"AArch64GenPostLegalizerLoweringHelper",
                        [shuffle_vector_lowering, vashr_vlshr_imm,
-                        icmp_lowering]> {
+                        icmp_lowering, build_vector_lowering]> {
   let DisableRuleOption = "aarch64postlegalizerlowering-disable-rule";
 }
 

@@ -110,7 +110,8 @@ private:
   // that has a symbol.
   const Symbol *innermostSymbol_{nullptr};
   // Cache of calls to Procedure::Characterize(Symbol)
-  std::map<SymbolRef, std::optional<Procedure>> characterizeCache_;
+  std::map<SymbolRef, std::optional<Procedure>, SymbolAddressCompare>
+      characterizeCache_;
 };
 
 class DistinguishabilityHelper {
@@ -1356,6 +1357,14 @@ void CheckHelper::CheckPassArg(
               : "Procedure binding '%s' with no dummy arguments"
                 " must have NOPASS attribute"_err_en_US,
           name);
+      context_.SetError(*interface);
+      return;
+    }
+    Symbol *argSym{dummyArgs[0]};
+    if (!argSym) {
+      messages_.Say(interface->name(),
+          "Cannot use an alternate return as the passed-object dummy "
+          "argument"_err_en_US);
       return;
     }
     passName = dummyArgs[0]->name();
@@ -1480,7 +1489,7 @@ void CheckHelper::CheckProcBinding(
               SayWithDeclaration(*overridden,
                   "A type-bound procedure and its override must have compatible interfaces"_err_en_US);
             }
-          } else {
+          } else if (!context_.HasError(binding.symbol())) {
             int passIndex{bindingChars->FindPassIndex(binding.passName())};
             int overriddenPassIndex{
                 overriddenChars->FindPassIndex(overriddenBinding->passName())};

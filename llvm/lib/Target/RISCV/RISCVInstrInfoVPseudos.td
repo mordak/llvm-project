@@ -394,7 +394,7 @@ def RISCVVPseudosTable : GenericTable {
 def RISCVVIntrinsicsTable : GenericTable {
   let FilterClass = "RISCVVIntrinsic";
   let CppTypeName = "RISCVVIntrinsicInfo";
-  let Fields = ["IntrinsicID", "ExtendOperand"];
+  let Fields = ["IntrinsicID", "SplatOperand"];
   let PrimaryKey = ["IntrinsicID"];
   let PrimaryKeyName = "getRISCVVIntrinsicInfo";
 }
@@ -3171,6 +3171,20 @@ let hasSideEffects = 0, mayLoad = 1, mayStore = 0, isCodeGenOnly = 1 in {
   def PseudoVRELOAD_M8 : VPseudo<VL8RE8_V, V_M8, (outs VRM8:$rs1), (ins GPR:$rs2)>;
 }
 
+foreach lmul = MxList.m in {
+  foreach nf = NFSet<lmul>.L in {
+    defvar vreg = SegRegClass<lmul, nf>.RC;
+    let hasSideEffects = 0, mayLoad = 0, mayStore = 1, isCodeGenOnly = 1 in {
+      def "PseudoVSPILL" # nf # "_" # lmul.MX :
+        Pseudo<(outs), (ins vreg:$rs1, GPR:$rs2, GPR:$vlenb), []>;
+    }
+    let hasSideEffects = 0, mayLoad = 1, mayStore = 0, isCodeGenOnly = 1 in {
+      def "PseudoVRELOAD" # nf # "_" # lmul.MX :
+        Pseudo<(outs vreg:$rs1), (ins GPR:$rs2, GPR:$vlenb), []>;
+    }
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // 6. Configuration-Setting Instructions
 //===----------------------------------------------------------------------===//
@@ -3863,10 +3877,10 @@ foreach vti = AllIntegerVectors in {
                                                                (DecImm simm5_plus1:$rs2),
                                                                GPR:$vl,
                                                                vti.SEW)>;
-  def : Pat<(vti.Mask (int_riscv_vmslt_mask (vti.Mask V0),
+  def : Pat<(vti.Mask (int_riscv_vmslt_mask (vti.Mask VR:$merge),
                                             (vti.Vector vti.RegClass:$rs1),
                                             (vti.Scalar simm5_plus1:$rs2),
-                                            (vti.Mask VR:$merge),
+                                            (vti.Mask V0),
                                             (XLenVT (VLOp GPR:$vl)))),
             (!cast<Instruction>("PseudoVMSLE_VI_"#vti.LMul.MX#"_MASK")
                                                       VR:$merge,
@@ -3876,17 +3890,17 @@ foreach vti = AllIntegerVectors in {
                                                       GPR:$vl,
                                                       vti.SEW)>;
 
- def : Pat<(vti.Mask (int_riscv_vmsltu (vti.Vector vti.RegClass:$rs1),
+  def : Pat<(vti.Mask (int_riscv_vmsltu (vti.Vector vti.RegClass:$rs1),
                                         (vti.Scalar simm5_plus1:$rs2),
                                         (XLenVT (VLOp GPR:$vl)))),
             (!cast<Instruction>("PseudoVMSLEU_VI_"#vti.LMul.MX) vti.RegClass:$rs1,
                                                                 (DecImm simm5_plus1:$rs2),
                                                                 GPR:$vl,
                                                                 vti.SEW)>;
-  def : Pat<(vti.Mask (int_riscv_vmsltu_mask (vti.Mask V0),
+  def : Pat<(vti.Mask (int_riscv_vmsltu_mask (vti.Mask VR:$merge),
                                              (vti.Vector vti.RegClass:$rs1),
                                              (vti.Scalar simm5_plus1:$rs2),
-                                             (vti.Mask VR:$merge),
+                                             (vti.Mask V0),
                                              (XLenVT (VLOp GPR:$vl)))),
             (!cast<Instruction>("PseudoVMSLEU_VI_"#vti.LMul.MX#"_MASK")
                                                       VR:$merge,
@@ -3904,11 +3918,11 @@ foreach vti = AllIntegerVectors in {
                                                                vti.RegClass:$rs1,
                                                                GPR:$vl,
                                                                vti.SEW)>;
-  def : Pat<(vti.Mask (int_riscv_vmsltu_mask (vti.Mask V0),
-                                            (vti.Vector vti.RegClass:$rs1),
-                                            (vti.Scalar 0),
-                                            (vti.Mask VR:$merge),
-                                            (XLenVT (VLOp GPR:$vl)))),
+  def : Pat<(vti.Mask (int_riscv_vmsltu_mask (vti.Mask VR:$merge),
+                                             (vti.Vector vti.RegClass:$rs1),
+                                             (vti.Scalar 0),
+                                             (vti.Mask V0),
+                                             (XLenVT (VLOp GPR:$vl)))),
             (!cast<Instruction>("PseudoVMSNE_VV_"#vti.LMul.MX#"_MASK")
                                                      VR:$merge,
                                                      vti.RegClass:$rs1,
@@ -4268,10 +4282,7 @@ let Predicates = [HasStdExtV] in {
 foreach vti = AllIntegerVectors in {
   def : Pat<(riscv_vmv_x_s (vti.Vector vti.RegClass:$rs2)),
             (!cast<Instruction>("PseudoVMV_X_S_" # vti.LMul.MX) $rs2, vti.SEW)>;
-  def : Pat<(vti.Vector (int_riscv_vmv_s_x (vti.Vector vti.RegClass:$rs1),
-                                           GPR:$rs2, (XLenVT (VLOp GPR:$vl)))),
-            (!cast<Instruction>("PseudoVMV_S_X_" # vti.LMul.MX)
-             (vti.Vector $rs1), $rs2, GPR:$vl, vti.SEW)>;
+  // vmv.s.x is handled with a custom node in RISCVInstrInfoVVLPatterns.td
 }
 } // Predicates = [HasStdExtV]
 

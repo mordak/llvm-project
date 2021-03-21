@@ -636,6 +636,10 @@ void StmtPrinter::VisitSEHLeaveStmt(SEHLeaveStmt *Node) {
 //  OpenMP directives printing methods
 //===----------------------------------------------------------------------===//
 
+void StmtPrinter::VisitOMPCanonicalLoop(OMPCanonicalLoop *Node) {
+  PrintStmt(Node->getLoopStmt());
+}
+
 void StmtPrinter::PrintOMPExecutableDirective(OMPExecutableDirective *S,
                                               bool ForceNoStmt) {
   OMPClausePrinter Printer(OS, Policy);
@@ -955,6 +959,11 @@ void StmtPrinter::VisitOMPTargetTeamsDistributeParallelForSimdDirective(
 void StmtPrinter::VisitOMPTargetTeamsDistributeSimdDirective(
     OMPTargetTeamsDistributeSimdDirective *Node) {
   Indent() << "#pragma omp target teams distribute simd";
+  PrintOMPExecutableDirective(Node);
+}
+
+void StmtPrinter::VisitOMPInteropDirective(OMPInteropDirective *Node) {
+  Indent() << "#pragma omp interop";
   PrintOMPExecutableDirective(Node);
 }
 

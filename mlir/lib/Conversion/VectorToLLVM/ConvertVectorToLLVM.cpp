@@ -12,6 +12,7 @@
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVMPass.h"
 #include "mlir/Dialect/LLVMIR/FunctionCallUtils.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Vector/VectorOps.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -188,7 +189,7 @@ static LogicalResult getIndexedPtrs(ConversionPatternRewriter &rewriter,
   SmallVector<int64_t, 4> strides;
   auto successStrides = getStridesAndOffset(memRefType, strides, offset);
   if (failed(successStrides) || strides.back() != 1 ||
-      memRefType.getMemorySpace() != 0)
+      memRefType.getMemorySpaceAsInt() != 0)
     return failure();
   auto pType = MemRefDescriptor(memref).getElementPtrType();
   auto ptrsType = LLVM::getFixedVectorType(pType, vType.getDimSize(0));
@@ -200,7 +201,7 @@ static LogicalResult getIndexedPtrs(ConversionPatternRewriter &rewriter,
 // will be in the same address space as the incoming memref type.
 static Value castDataPtr(ConversionPatternRewriter &rewriter, Location loc,
                          Value ptr, MemRefType memRefType, Type vt) {
-  auto pType = LLVM::LLVMPointerType::get(vt, memRefType.getMemorySpace());
+  auto pType = LLVM::LLVMPointerType::get(vt, memRefType.getMemorySpaceAsInt());
   return rewriter.create<LLVM::BitcastOp>(loc, pType, ptr);
 }
 
@@ -1262,7 +1263,7 @@ public:
     unsigned vecWidth = LLVM::getVectorNumElements(vtp).getFixedValue();
     unsigned lastIndex = llvm::size(xferOp.indices()) - 1;
     Value off = xferOp.indices()[lastIndex];
-    Value dim = rewriter.create<DimOp>(loc, xferOp.source(), lastIndex);
+    Value dim = rewriter.create<memref::DimOp>(loc, xferOp.source(), lastIndex);
     Value mask = buildVectorComparison(
         rewriter, xferOp, enableIndexOptimizations, vecWidth, dim, &off);
 

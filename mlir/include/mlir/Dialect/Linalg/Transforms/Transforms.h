@@ -147,8 +147,8 @@ LinalgOp interchange(LinalgOp op, ArrayRef<unsigned> interchangeVector);
 /// dimension. If that is not possible, contains the dynamic size of the
 /// subview. The call back should return the buffer to use.
 using AllocBufferCallbackFn = std::function<Optional<Value>(
-    OpBuilder &b, SubViewOp subView, ArrayRef<Value> boundingSubViewSize,
-    OperationFolder *folder)>;
+    OpBuilder &b, memref::SubViewOp subView,
+    ArrayRef<Value> boundingSubViewSize, OperationFolder *folder)>;
 
 /// Callback function type used to deallocate the buffers used to hold the
 /// promoted subview.
@@ -244,7 +244,7 @@ struct PromotionInfo {
   Value partialLocalView;
 };
 Optional<PromotionInfo>
-promoteSubviewAsNewBuffer(OpBuilder &b, Location loc, SubViewOp subView,
+promoteSubviewAsNewBuffer(OpBuilder &b, Location loc, memref::SubViewOp subView,
                           AllocBufferCallbackFn allocationFn,
                           OperationFolder *folder = nullptr);
 
@@ -263,12 +263,8 @@ Optional<LinalgOp> promoteSubViews(OpBuilder &b, LinalgOp op,
                                    OperationFolder *folder = nullptr);
 
 /// Emit a suitable vector form for a Linalg op with fully static shape.
-struct VectorizedLinalgOp {
-  SmallVector<Value> tensorResults;
-  VectorizedLinalgOp &operator=(const VectorizedLinalgOp &) = default;
-};
-Optional<VectorizedLinalgOp> vectorizeLinalgOp(OpBuilder &builder,
-                                               Operation *op);
+LogicalResult vectorizeLinalgOp(OpBuilder &builder, Operation *op,
+                                SmallVectorImpl<Value> &newResults);
 
 /// Emits a loop nest of `LoopTy` with the proper body for `op`.
 template <typename LoopTy>
@@ -822,7 +818,7 @@ struct PadTensorOpVectorizationPattern : public OpRewritePattern<PadTensorOp> {
 /// Match and rewrite for the pattern:
 /// ```
 ///    %alloc = ...
-///    [optional] %view = std.view %alloc ...
+///    [optional] %view = memref.view %alloc ...
 ///    %subView = subview %allocOrView ...
 ///    [optional] linalg.fill(%allocOrView, %cst) ...
 ///    ...
@@ -832,7 +828,7 @@ struct PadTensorOpVectorizationPattern : public OpRewritePattern<PadTensorOp> {
 /// into
 /// ```
 ///    [unchanged] %alloc = ...
-///    [unchanged] [optional] %view = std.view %alloc ...
+///    [unchanged] [optional] %view = memref.view %alloc ...
 ///    [unchanged] [unchanged] %subView = subview %allocOrView ...
 ///    ...
 ///    vector.transfer_read %in[...], %cst ...
@@ -853,7 +849,7 @@ struct LinalgCopyVTRForwardingPattern
 /// Match and rewrite for the pattern:
 /// ```
 ///    %alloc = ...
-///    [optional] %view = std.view %alloc ...
+///    [optional] %view = memref.view %alloc ...
 ///    %subView = subview %allocOrView...
 ///    ...
 ///    vector.transfer_write %..., %allocOrView[...]
@@ -862,7 +858,7 @@ struct LinalgCopyVTRForwardingPattern
 /// into
 /// ```
 ///    [unchanged] %alloc = ...
-///    [unchanged] [optional] %view = std.view %alloc ...
+///    [unchanged] [optional] %view = memref.view %alloc ...
 ///    [unchanged] %subView = subview %allocOrView...
 ///    ...
 ///    vector.transfer_write %..., %out[...]
@@ -896,6 +892,30 @@ struct AffineMinSCFCanonicalizationPattern
   LogicalResult matchAndRewrite(AffineMinOp minOp,
                                 PatternRewriter &rewriter) const override;
 };
+
+  /// Helper struct to return the results of `substituteMin`.
+struct AffineMapAndOperands {
+  AffineMap map;
+  SmallVector<Value> dims;
+  SmallVector<Value> symbols;
+};
+/// Traverse the dims of the AffineMap of `affineMinOp` and substitute scf loop
+/// induction variables by new expressions involving the lower or upper bound:
+///   - If the AffineDimExpr mapped to a loop IV has a positive sign, it is
+///     replaced by the loop upper bound.
+///   - If the AffineDimExpr mapped to a loop IV has a negative sign, it is
+///     replaced by the loop lower bound.
+/// All loop induction variables are iteratively replaced, unless a
+/// `substituteOperation` hook is passed to more finely determine which
+/// operations are substituted.
+/// This is used as an intermediate step in computing bounding boxes and
+/// canonicalize AffineMinOps. All dim and symbol operands are assumed to have
+/// positive values (positive orthant assumptions).
+/// Return a new AffineMap, dims and symbols that have been canonicalized and
+/// simplified.
+AffineMapAndOperands substituteMin(
+  AffineMinOp affineMinOp,
+  llvm::function_ref<bool(Operation *)> substituteOperation = nullptr);
 
 /// Converts Convolution op into vector contraction.
 ///

@@ -2385,7 +2385,8 @@ static bool shouldOmitDefinition(codegenoptions::DebugInfoKind DebugKind,
   if (DebugKind == codegenoptions::DebugLineTablesOnly)
     return true;
 
-  if (DebugKind > codegenoptions::LimitedDebugInfo)
+  if (DebugKind > codegenoptions::LimitedDebugInfo ||
+      RD->hasAttr<StandaloneDebugAttr>())
     return false;
 
   if (!LangOpts.CPlusPlus)
@@ -3521,7 +3522,7 @@ void CGDebugInfo::collectFunctionDeclProps(GlobalDecl GD, llvm::DIFile *Unit,
                                            llvm::DIScope *&FDContext,
                                            llvm::DINodeArray &TParamsArray,
                                            llvm::DINode::DIFlags &Flags) {
-  const auto *FD = cast<FunctionDecl>(GD.getDecl());
+  const auto *FD = cast<FunctionDecl>(GD.getCanonicalDecl().getDecl());
   Name = getFunctionName(FD);
   // Use mangled name as linkage name for C/C++ functions.
   if (FD->hasPrototype()) {

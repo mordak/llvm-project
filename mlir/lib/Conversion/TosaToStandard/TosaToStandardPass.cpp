@@ -32,7 +32,9 @@ public:
     OwningRewritePatternList patterns;
     ConversionTarget target(getContext());
     target.addIllegalOp<tosa::ConstOp>();
-    target.addLegalOp<ConstantOp>();
+    target.addIllegalOp<tosa::SliceOp>();
+    target.addIllegalOp<tosa::ApplyScaleOp>();
+    target.addLegalDialect<StandardOpsDialect>();
 
     auto *op = getOperation();
     mlir::tosa::populateTosaToStandardConversionPatterns(op->getContext(),

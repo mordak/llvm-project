@@ -1270,6 +1270,7 @@ Instruction *InstCombinerImpl::visitZExt(ZExtInst &CI) {
     ICmpInst *LHS = dyn_cast<ICmpInst>(SrcI->getOperand(0));
     ICmpInst *RHS = dyn_cast<ICmpInst>(SrcI->getOperand(1));
     if (LHS && RHS && LHS->hasOneUse() && RHS->hasOneUse() &&
+        LHS->getOperand(0)->getType() == RHS->getOperand(0)->getType() &&
         (transformZExtICmp(LHS, CI, false) ||
          transformZExtICmp(RHS, CI, false))) {
       // zext (or icmp, icmp) -> or (zext icmp), (zext icmp)
@@ -2402,6 +2403,11 @@ Instruction *InstCombinerImpl::optimizeBitCastFromPhi(CastInst &CI,
         Value *Addr = LI->getOperand(0);
         if (Addr == &CI || isa<LoadInst>(Addr))
           return nullptr;
+        // If there is any loss for the pointer bitcast, abandon.
+        auto *DestPtrTy = DestTy->getPointerTo(LI->getPointerAddressSpace());
+        auto *SrcPtrTy = Addr->getType();
+        if (!SrcPtrTy->canLosslesslyBitCastTo(DestPtrTy))
+          return nullptr;
         if (LI->hasOneUse() && LI->isSimple())
           continue;
         // If a LoadInst has more than one use, changing the type of loaded
@@ -2587,8 +2593,8 @@ Instruction *InstCombinerImpl::visitBitCast(BitCastInst &CI) {
 
       // If the source pointer is dereferenceable, then assume it points to an
       // allocated object and apply "inbounds" to the GEP.
-      bool CanBeNull;
-      if (Src->getPointerDereferenceableBytes(DL, CanBeNull)) {
+      bool CanBeNull, CanBeFreed;
+      if (Src->getPointerDereferenceableBytes(DL, CanBeNull, CanBeFreed)) {
         // In a non-default address space (not 0), a null pointer can not be
         // assumed inbounds, so ignore that case (dereferenceable_or_null).
         // The reason is that 'null' is not treated differently in these address

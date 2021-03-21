@@ -550,6 +550,7 @@ public:
   void printVersionDependencySection(const Elf_Shdr *Sec) override;
   void printHashHistograms() override;
   void printCGProfile() override;
+  void printBBAddrMaps() override;
   void printAddrsig() override;
   void printNotes() override;
   void printELFLinkerOptions() override;
@@ -660,6 +661,7 @@ public:
   void printVersionDependencySection(const Elf_Shdr *Sec) override;
   void printHashHistograms() override;
   void printCGProfile() override;
+  void printBBAddrMaps() override;
   void printAddrsig() override;
   void printNotes() override;
   void printELFLinkerOptions() override;
@@ -4617,6 +4619,10 @@ template <class ELFT> void GNUELFDumper<ELFT>::printCGProfile() {
   OS << "GNUStyle::printCGProfile not implemented\n";
 }
 
+template <class ELFT> void GNUELFDumper<ELFT>::printBBAddrMaps() {
+  OS << "GNUStyle::printBBAddrMaps not implemented\n";
+}
+
 static Expected<std::vector<uint64_t>> toULEB128Array(ArrayRef<uint8_t> Data) {
   std::vector<uint64_t> Ret;
   const uint8_t *Cur = Data.begin();
@@ -4730,47 +4736,6 @@ static std::string getGNUProperty(uint32_t Type, uint32_t DataSize,
     if (PrData)
       OS << format("<unknown flags: 0x%x>", PrData);
     return OS.str();
-  case GNU_PROPERTY_X86_ISA_1_NEEDED:
-  case GNU_PROPERTY_X86_ISA_1_USED:
-    OS << "x86 ISA "
-       << (Type == GNU_PROPERTY_X86_ISA_1_NEEDED ? "needed: " : "used: ");
-    if (DataSize != 4) {
-      OS << format("<corrupt length: 0x%x>", DataSize);
-      return OS.str();
-    }
-    PrData = support::endian::read32<ELFT::TargetEndianness>(Data.data());
-    if (PrData == 0) {
-      OS << "<None>";
-      return OS.str();
-    }
-    DumpBit(GNU_PROPERTY_X86_ISA_1_CMOV, "CMOV");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_SSE, "SSE");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_SSE2, "SSE2");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_SSE3, "SSE3");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_SSSE3, "SSSE3");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_SSE4_1, "SSE4_1");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_SSE4_2, "SSE4_2");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX, "AVX");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX2, "AVX2");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_FMA, "FMA");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512F, "AVX512F");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512CD, "AVX512CD");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512ER, "AVX512ER");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512PF, "AVX512PF");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512VL, "AVX512VL");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512DQ, "AVX512DQ");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512BW, "AVX512BW");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512_4FMAPS, "AVX512_4FMAPS");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512_4VNNIW, "AVX512_4VNNIW");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512_BITALG, "AVX512_BITALG");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512_IFMA, "AVX512_IFMA");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512_VBMI, "AVX512_VBMI");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512_VBMI2, "AVX512_VBMI2");
-    DumpBit(GNU_PROPERTY_X86_ISA_1_AVX512_VNNI, "AVX512_VNNI");
-    if (PrData)
-      OS << format("<unknown flags: 0x%x>", PrData);
-    return OS.str();
-    break;
   case GNU_PROPERTY_X86_FEATURE_2_NEEDED:
   case GNU_PROPERTY_X86_FEATURE_2_USED:
     OS << "x86 feature "
@@ -4794,6 +4759,26 @@ static std::string getGNUProperty(uint32_t Type, uint32_t DataSize,
     DumpBit(GNU_PROPERTY_X86_FEATURE_2_XSAVE, "XSAVE");
     DumpBit(GNU_PROPERTY_X86_FEATURE_2_XSAVEOPT, "XSAVEOPT");
     DumpBit(GNU_PROPERTY_X86_FEATURE_2_XSAVEC, "XSAVEC");
+    if (PrData)
+      OS << format("<unknown flags: 0x%x>", PrData);
+    return OS.str();
+  case GNU_PROPERTY_X86_ISA_1_NEEDED:
+  case GNU_PROPERTY_X86_ISA_1_USED:
+    OS << "x86 ISA "
+       << (Type == GNU_PROPERTY_X86_ISA_1_NEEDED ? "needed: " : "used: ");
+    if (DataSize != 4) {
+      OS << format("<corrupt length: 0x%x>", DataSize);
+      return OS.str();
+    }
+    PrData = support::endian::read32<ELFT::TargetEndianness>(Data.data());
+    if (PrData == 0) {
+      OS << "<None>";
+      return OS.str();
+    }
+    DumpBit(GNU_PROPERTY_X86_ISA_1_BASELINE, "x86-64-baseline");
+    DumpBit(GNU_PROPERTY_X86_ISA_1_V2, "x86-64-v2");
+    DumpBit(GNU_PROPERTY_X86_ISA_1_V3, "x86-64-v3");
+    DumpBit(GNU_PROPERTY_X86_ISA_1_V4, "x86-64-v4");
     if (PrData)
       OS << format("<unknown flags: 0x%x>", PrData);
     return OS.str();
@@ -6517,6 +6502,34 @@ template <class ELFT> void LLVMELFDumper<ELFT>::printCGProfile() {
     W.printNumber("To", this->getStaticSymbolName(CGPE.cgp_to),
                   CGPE.cgp_to);
     W.printNumber("Weight", CGPE.cgp_weight);
+  }
+}
+
+template <class ELFT> void LLVMELFDumper<ELFT>::printBBAddrMaps() {
+  for (const Elf_Shdr &Sec : cantFail(this->Obj.sections())) {
+    if (Sec.sh_type != SHT_LLVM_BB_ADDR_MAP)
+      continue;
+    ListScope L(W, "BBAddrMap");
+    Expected<std::vector<Elf_BBAddrMap>> BBAddrMapOrErr =
+        this->Obj.decodeBBAddrMap(Sec);
+    if (!BBAddrMapOrErr) {
+      this->reportUniqueWarning("unable to dump " + this->describe(Sec) + ": " +
+                                toString(BBAddrMapOrErr.takeError()));
+      continue;
+    }
+    for (const Elf_BBAddrMap &AM : *BBAddrMapOrErr) {
+      DictScope D(W, "Function");
+      W.printHex("At", AM.Addr);
+      ListScope L(W, "BB entries");
+      for (const typename Elf_BBAddrMap::BBEntry &BBE : AM.BBEntries) {
+        DictScope L(W);
+        W.printHex("Offset", BBE.Offset);
+        W.printHex("Size", BBE.Size);
+        W.printBoolean("HasReturn", BBE.HasReturn);
+        W.printBoolean("HasTailCall", BBE.HasTailCall);
+        W.printBoolean("IsEHPad", BBE.IsEHPad);
+      }
+    }
   }
 }
 

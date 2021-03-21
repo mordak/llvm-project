@@ -1217,7 +1217,8 @@ int AArch64TTIImpl::getArithmeticReductionCost(unsigned Opcode,
 }
 
 int AArch64TTIImpl::getShuffleCost(TTI::ShuffleKind Kind, VectorType *Tp,
-                                   int Index, VectorType *SubTp) {
+                                   ArrayRef<int> Mask, int Index,
+                                   VectorType *SubTp) {
   if (Kind == TTI::SK_Broadcast || Kind == TTI::SK_Transpose ||
       Kind == TTI::SK_Select || Kind == TTI::SK_PermuteSingleSrc ||
       Kind == TTI::SK_Reverse) {
@@ -1279,11 +1280,15 @@ int AArch64TTIImpl::getShuffleCost(TTI::ShuffleKind Kind, VectorType *Tp,
       { TTI::SK_Reverse, MVT::nxv8bf16, 1 },
       { TTI::SK_Reverse, MVT::nxv4f32,  1 },
       { TTI::SK_Reverse, MVT::nxv2f64,  1 },
+      { TTI::SK_Reverse, MVT::nxv16i1,  1 },
+      { TTI::SK_Reverse, MVT::nxv8i1,   1 },
+      { TTI::SK_Reverse, MVT::nxv4i1,   1 },
+      { TTI::SK_Reverse, MVT::nxv2i1,   1 },
     };
     std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, Tp);
     if (const auto *Entry = CostTableLookup(ShuffleTbl, Kind, LT.second))
       return LT.first * Entry->Cost;
   }
 
-  return BaseT::getShuffleCost(Kind, Tp, Index, SubTp);
+  return BaseT::getShuffleCost(Kind, Tp, Mask, Index, SubTp);
 }

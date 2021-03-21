@@ -548,7 +548,8 @@ int SystemZTTIImpl::getArithmeticInstrCost(
 }
 
 int SystemZTTIImpl::getShuffleCost(TTI::ShuffleKind Kind, VectorType *Tp,
-                                   int Index, VectorType *SubTp) {
+                                   ArrayRef<int> Mask, int Index,
+                                   VectorType *SubTp) {
   if (ST->hasVector()) {
     unsigned NumVectors = getNumVectorRegs(Tp);
 
@@ -581,7 +582,7 @@ int SystemZTTIImpl::getShuffleCost(TTI::ShuffleKind Kind, VectorType *Tp,
     }
   }
 
-  return BaseT::getShuffleCost(Kind, Tp, Index, SubTp);
+  return BaseT::getShuffleCost(Kind, Tp, Mask, Index, SubTp);
 }
 
 // Return the log2 difference of the element sizes of the two vector types.
@@ -749,8 +750,13 @@ int SystemZTTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
     }
   }
   else if (ST->hasVector()) {
+    // Vector to scalar cast.
     auto *SrcVecTy = cast<FixedVectorType>(Src);
-    auto *DstVecTy = cast<FixedVectorType>(Dst);
+    auto *DstVecTy = dyn_cast<FixedVectorType>(Dst);
+    if (!DstVecTy) {
+      // TODO: tune vector-to-scalar cast.
+      return BaseT::getCastInstrCost(Opcode, Dst, Src, CCH, CostKind, I);
+    }
     unsigned VF = SrcVecTy->getNumElements();
     unsigned NumDstVectors = getNumVectorRegs(Dst);
     unsigned NumSrcVectors = getNumVectorRegs(Src);

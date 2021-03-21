@@ -285,6 +285,22 @@ def G_UREM : GenericInstruction {
   let isCommutable = false;
 }
 
+// Generic signed division and remainder.
+def G_SDIVREM : GenericInstruction {
+  let OutOperandList = (outs type0:$div, type0:$rem);
+  let InOperandList = (ins type0:$src1, type0:$src2);
+  let hasSideEffects = false;
+  let isCommutable = false;
+}
+
+// Generic unsigned division and remainder.
+def G_UDIVREM : GenericInstruction {
+  let OutOperandList = (outs type0:$div, type0:$rem);
+  let InOperandList = (ins type0:$src1, type0:$src2);
+  let hasSideEffects = false;
+  let isCommutable = false;
+}
+
 // Generic bitwise and.
 def G_AND : GenericInstruction {
   let OutOperandList = (outs type0:$dst);
@@ -1336,6 +1352,24 @@ def G_MEMSET : GenericInstruction {
   let InOperandList = (ins ptype0:$dst_addr, type1:$value, type2:$size, untyped_imm_0:$tailcall);
   let hasSideEffects = false;
   let mayStore = true;
+}
+
+//------------------------------------------------------------------------------
+// Bitfield extraction.
+//------------------------------------------------------------------------------
+
+// Generic signed bitfield extraction.
+def G_SBFX : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src, type0:$lsb, type0:$width);
+  let hasSideEffects = false;
+}
+
+// Generic unsigned bitfield extraction.
+def G_UBFX : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src, type0:$lsb, type0:$width);
+  let hasSideEffects = false;
 }
 
 //------------------------------------------------------------------------------

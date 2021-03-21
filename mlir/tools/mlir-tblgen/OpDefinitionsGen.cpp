@@ -90,13 +90,14 @@ const char *adapterSegmentSizeAttrInitCode = R"(
   auto sizeAttr = odsAttrs.get("{0}").cast<::mlir::DenseIntElementsAttr>();
 )";
 const char *opSegmentSizeAttrInitCode = R"(
-  auto sizeAttr = (*this)->getAttrOfType<::mlir::DenseIntElementsAttr>("{0}");
+  auto sizeAttr = (*this)->getAttr("{0}").cast<::mlir::DenseIntElementsAttr>();
 )";
 const char *attrSizedSegmentValueRangeCalcCode = R"(
+  auto sizeAttrValues = sizeAttr.getValues<uint32_t>();
   unsigned start = 0;
   for (unsigned i = 0; i < index; ++i)
-    start += (*(sizeAttr.begin() + i)).getZExtValue();
-  unsigned size = (*(sizeAttr.begin() + index)).getZExtValue();
+    start += *(sizeAttrValues.begin() + i);
+  unsigned size = *(sizeAttrValues.begin() + index);
   return {start, size};
 )";
 
@@ -2181,8 +2182,10 @@ void OpEmitter::genTraits() {
 
 void OpEmitter::genOpNameGetter() {
   auto *method = opClass.addMethodAndPrune(
-      "::llvm::StringRef", "getOperationName", OpMethod::MP_Static);
-  method->body() << "  return \"" << op.getOperationName() << "\";\n";
+      "::llvm::StringLiteral", "getOperationName",
+      OpMethod::Property(OpMethod::MP_Static | OpMethod::MP_Constexpr));
+  method->body() << "  return ::llvm::StringLiteral(\"" << op.getOperationName()
+                 << "\");";
 }
 
 void OpEmitter::genOpAsmInterface() {

@@ -1301,6 +1301,13 @@ void Verifier::visitDIMacroFile(const DIMacroFile &N) {
   }
 }
 
+void Verifier::visitDIArgList(const DIArgList &N) {
+  AssertDI(!N.getNumOperands(),
+           "DIArgList should have no operands other than a list of "
+           "ValueAsMetadata",
+           &N);
+}
+
 void Verifier::visitDIModule(const DIModule &N) {
   AssertDI(N.getTag() == dwarf::DW_TAG_module, "invalid tag", &N);
   AssertDI(!N.getName().empty(), "anonymous module", &N);
@@ -3671,10 +3678,9 @@ void Verifier::visitStoreInst(StoreInst &SI) {
 /// Check that SwiftErrorVal is used as a swifterror argument in CS.
 void Verifier::verifySwiftErrorCall(CallBase &Call,
                                     const Value *SwiftErrorVal) {
-  unsigned Idx = 0;
-  for (auto I = Call.arg_begin(), E = Call.arg_end(); I != E; ++I, ++Idx) {
-    if (*I == SwiftErrorVal) {
-      Assert(Call.paramHasAttr(Idx, Attribute::SwiftError),
+  for (const auto &I : llvm::enumerate(Call.args())) {
+    if (I.value() == SwiftErrorVal) {
+      Assert(Call.paramHasAttr(I.index(), Attribute::SwiftError),
              "swifterror value when used in a callsite should be marked "
              "with swifterror attribute",
              SwiftErrorVal, Call);
@@ -4536,7 +4542,8 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
   // know they are legal for the intrinsic!) get the intrinsic name through the
   // usual means.  This allows us to verify the mangling of argument types into
   // the name.
-  const std::string ExpectedName = Intrinsic::getName(ID, ArgTys);
+  const std::string ExpectedName =
+      Intrinsic::getName(ID, ArgTys, IF->getParent(), IFTy);
   Assert(ExpectedName == IF->getName(),
          "Intrinsic name not mangled correctly for type arguments! "
          "Should be: " +
@@ -5365,10 +5372,10 @@ void Verifier::visitConstrainedFPIntrinsic(ConstrainedFPIntrinsic &FPI) {
 }
 
 void Verifier::visitDbgIntrinsic(StringRef Kind, DbgVariableIntrinsic &DII) {
-  auto *MD = cast<MetadataAsValue>(DII.getArgOperand(0))->getMetadata();
-  AssertDI(isa<ValueAsMetadata>(MD) ||
-             (isa<MDNode>(MD) && !cast<MDNode>(MD)->getNumOperands()),
-         "invalid llvm.dbg." + Kind + " intrinsic address/value", &DII, MD);
+  auto *MD = DII.getRawLocation();
+  AssertDI(isa<ValueAsMetadata>(MD) || isa<DIArgList>(MD) ||
+               (isa<MDNode>(MD) && !cast<MDNode>(MD)->getNumOperands()),
+           "invalid llvm.dbg." + Kind + " intrinsic address/value", &DII, MD);
   AssertDI(isa<DILocalVariable>(DII.getRawVariable()),
          "invalid llvm.dbg." + Kind + " intrinsic variable", &DII,
          DII.getRawVariable());

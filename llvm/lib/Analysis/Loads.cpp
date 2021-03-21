@@ -67,10 +67,12 @@ static bool isDereferenceableAndAlignedPointer(
           Visited, MaxDepth);
   }
 
-  bool CheckForNonNull = false;
+  bool CheckForNonNull, CheckForFreed;
   APInt KnownDerefBytes(Size.getBitWidth(),
-                        V->getPointerDereferenceableBytes(DL, CheckForNonNull));
-  if (KnownDerefBytes.getBoolValue() && KnownDerefBytes.uge(Size))
+                        V->getPointerDereferenceableBytes(DL, CheckForNonNull,
+                                                          CheckForFreed));
+  if (KnownDerefBytes.getBoolValue() && KnownDerefBytes.uge(Size) &&
+      !CheckForFreed)
     if (!CheckForNonNull || isKnownNonZero(V, DL, 0, nullptr, CtxI, DT)) {
       // As we recursed through GEPs to get here, we've incrementally checked
       // that each step advanced by a multiple of the alignment. If our base is
@@ -469,14 +471,16 @@ static Value *getAvailableLoadStore(Instruction *Inst, Value *Ptr,
   // (This is true even if the load is volatile or atomic, although
   // those cases are unlikely.)
   if (LoadInst *LI = dyn_cast<LoadInst>(Inst)) {
-    if (AreEquivalentAddressValues(
-            LI->getPointerOperand()->stripPointerCasts(), Ptr) &&
-        CastInst::isBitOrNoopPointerCastable(LI->getType(), AccessTy, DL)) {
-      // We can value forward from an atomic to a non-atomic, but not the
-      // other way around.
-      if (LI->isAtomic() < AtLeastAtomic)
-        return nullptr;
+    // We can value forward from an atomic to a non-atomic, but not the
+    // other way around.
+    if (LI->isAtomic() < AtLeastAtomic)
+      return nullptr;
 
+    Value *LoadPtr = LI->getPointerOperand()->stripPointerCasts();
+    if (!AreEquivalentAddressValues(LoadPtr, Ptr))
+      return nullptr;
+
+    if (CastInst::isBitOrNoopPointerCastable(LI->getType(), AccessTy, DL)) {
       if (IsLoadCSE)
         *IsLoadCSE = true;
       return LI;
@@ -487,18 +491,20 @@ static Value *getAvailableLoadStore(Instruction *Inst, Value *Ptr,
   // (This is true even if the store is volatile or atomic, although
   // those cases are unlikely.)
   if (StoreInst *SI = dyn_cast<StoreInst>(Inst)) {
-    Value *StorePtr = SI->getPointerOperand()->stripPointerCasts();
-    if (AreEquivalentAddressValues(StorePtr, Ptr) &&
-        CastInst::isBitOrNoopPointerCastable(SI->getValueOperand()->getType(),
-                                             AccessTy, DL)) {
-      // We can value forward from an atomic to a non-atomic, but not the
-      // other way around.
-      if (SI->isAtomic() < AtLeastAtomic)
-        return nullptr;
+    // We can value forward from an atomic to a non-atomic, but not the
+    // other way around.
+    if (SI->isAtomic() < AtLeastAtomic)
+      return nullptr;
 
+    Value *StorePtr = SI->getPointerOperand()->stripPointerCasts();
+    if (!AreEquivalentAddressValues(StorePtr, Ptr))
+      return nullptr;
+
+    Value *Val = SI->getValueOperand();
+    if (CastInst::isBitOrNoopPointerCastable(Val->getType(), AccessTy, DL)) {
       if (IsLoadCSE)
         *IsLoadCSE = false;
-      return SI->getOperand(0);
+      return Val;
     }
   }
 
