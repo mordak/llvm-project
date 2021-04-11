@@ -120,7 +120,7 @@ Parser::ParseStatementOrDeclaration(StmtVector &Stmts,
   if (Attrs.empty() || Res.isInvalid())
     return Res;
 
-  return Actions.ProcessStmtAttributes(Res.get(), Attrs, Attrs.Range);
+  return Actions.ActOnAttributedStmt(Attrs, Res.get());
 }
 
 namespace {
@@ -172,7 +172,6 @@ Retry:
   switch (Kind) {
   case tok::at: // May be a @try or @throw statement
     {
-      ProhibitAttributes(Attrs); // TODO: is it correct?
       AtLoc = ConsumeToken();  // consume @
       return ParseObjCAtStatement(AtLoc, StmtCtx);
     }
@@ -658,8 +657,7 @@ StmtResult Parser::ParseLabeledStatement(ParsedAttributesWithRange &attrs,
       SubStmt = ParseStatementOrDeclarationAfterAttributes(Stmts, StmtCtx,
                                                            nullptr, TempAttrs);
       if (!TempAttrs.empty() && !SubStmt.isInvalid())
-        SubStmt = Actions.ProcessStmtAttributes(SubStmt.get(), TempAttrs,
-                                                TempAttrs.Range);
+        SubStmt = Actions.ActOnAttributedStmt(TempAttrs, SubStmt.get());
     } else {
       Diag(Tok, diag::err_expected_after) << "__attribute__" << tok::semi;
     }
@@ -1145,7 +1143,7 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
         ExpectAndConsumeSemi(diag::err_expected_semi_after_expr);
         R = handleExprStmt(Res, SubStmtCtx);
         if (R.isUsable())
-          R = Actions.ProcessStmtAttributes(R.get(), attrs, attrs.Range);
+          R = Actions.ActOnAttributedStmt(attrs, R.get());
       }
     }
 

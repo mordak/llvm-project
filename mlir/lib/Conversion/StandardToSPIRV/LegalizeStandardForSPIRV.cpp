@@ -79,7 +79,7 @@ void LoadOpOfSubViewFolder<vector::TransferReadOp>::replaceOp(
     ArrayRef<Value> sourceIndices, PatternRewriter &rewriter) const {
   rewriter.replaceOpWithNewOp<vector::TransferReadOp>(
       loadOp, loadOp.getVectorType(), subViewOp.source(), sourceIndices,
-      loadOp.permutation_map(), loadOp.padding(), loadOp.maskedAttr());
+      loadOp.permutation_map(), loadOp.padding(), loadOp.in_boundsAttr());
 }
 
 template <>
@@ -92,12 +92,12 @@ void StoreOpOfSubViewFolder<memref::StoreOp>::replaceOp(
 
 template <>
 void StoreOpOfSubViewFolder<vector::TransferWriteOp>::replaceOp(
-    vector::TransferWriteOp tranferWriteOp, memref::SubViewOp subViewOp,
+    vector::TransferWriteOp transferWriteOp, memref::SubViewOp subViewOp,
     ArrayRef<Value> sourceIndices, PatternRewriter &rewriter) const {
   rewriter.replaceOpWithNewOp<vector::TransferWriteOp>(
-      tranferWriteOp, tranferWriteOp.vector(), subViewOp.source(),
-      sourceIndices, tranferWriteOp.permutation_map(),
-      tranferWriteOp.maskedAttr());
+      transferWriteOp, transferWriteOp.vector(), subViewOp.source(),
+      sourceIndices, transferWriteOp.permutation_map(),
+      transferWriteOp.in_boundsAttr());
 }
 } // namespace
 
@@ -193,11 +193,12 @@ StoreOpOfSubViewFolder<OpTy>::matchAndRewrite(OpTy storeOp,
 //===----------------------------------------------------------------------===//
 
 void mlir::populateStdLegalizationPatternsForSPIRVLowering(
-    MLIRContext *context, OwningRewritePatternList &patterns) {
-  patterns.insert<LoadOpOfSubViewFolder<memref::LoadOp>,
-                  LoadOpOfSubViewFolder<vector::TransferReadOp>,
-                  StoreOpOfSubViewFolder<memref::StoreOp>,
-                  StoreOpOfSubViewFolder<vector::TransferWriteOp>>(context);
+    RewritePatternSet &patterns) {
+  patterns.add<LoadOpOfSubViewFolder<memref::LoadOp>,
+               LoadOpOfSubViewFolder<vector::TransferReadOp>,
+               StoreOpOfSubViewFolder<memref::StoreOp>,
+               StoreOpOfSubViewFolder<vector::TransferWriteOp>>(
+      patterns.getContext());
 }
 
 //===----------------------------------------------------------------------===//
@@ -212,9 +213,8 @@ struct SPIRVLegalization final
 } // namespace
 
 void SPIRVLegalization::runOnOperation() {
-  OwningRewritePatternList patterns;
-  auto *context = &getContext();
-  populateStdLegalizationPatternsForSPIRVLowering(context, patterns);
+  RewritePatternSet patterns(&getContext());
+  populateStdLegalizationPatternsForSPIRVLowering(patterns);
   (void)applyPatternsAndFoldGreedily(getOperation()->getRegions(),
                                      std::move(patterns));
 }

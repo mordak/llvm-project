@@ -279,17 +279,18 @@ GPUs), and are required to align with the LLVM definition of these intrinsics.
 Syntax:
 
 ```
-operation         ::= op-result-list? (generic-operation | custom-operation)
-                      trailing-location?
-generic-operation ::= string-literal `(` value-use-list? `)`  successor-list?
-                      (`(` region-list `)`)? dictionary-attribute? `:` function-type
-custom-operation  ::= bare-id custom-operation-format
-op-result-list    ::= op-result (`,` op-result)* `=`
-op-result         ::= value-id (`:` integer-literal)
-successor-list    ::= successor (`,` successor)*
-successor         ::= caret-id (`:` bb-arg-list)?
-region-list       ::= region (`,` region)*
-trailing-location ::= (`loc` `(` location `)`)?
+operation            ::= op-result-list? (generic-operation | custom-operation)
+                         trailing-location?
+generic-operation    ::= string-literal `(` value-use-list? `)`  successor-list?
+                         region-list? dictionary-attribute? `:` function-type
+custom-operation     ::= bare-id custom-operation-format
+op-result-list       ::= op-result (`,` op-result)* `=`
+op-result            ::= value-id (`:` integer-literal)
+successor-list       ::= `[` successor (`,` successor)* `]`
+successor            ::= caret-id (`:` bb-arg-list)?
+region-list          ::= `(` region (`,` region)* `)`
+dictionary-attribute ::= `{` (attribute-entry (`,` attribute-entry)*)? `}`
+trailing-location    ::= (`loc` `(` location `)`)?
 ```
 
 MLIR introduces a uniform concept called _operations_ to enable describing
@@ -351,12 +352,17 @@ value-id-and-type-list ::= value-id-and-type (`,` value-id-and-type)*
 block-arg-list ::= `(` value-id-and-type-list? `)`
 ```
 
-A *Block* is an ordered list of operations, concluding with a single
-[terminator operation](#terminator-operations). In [SSACFG
+A *Block* is a list of operations. In [SSACFG
 regions](#control-flow-and-ssacfg-regions), each block represents a compiler
 [basic block](https://en.wikipedia.org/wiki/Basic_block) where instructions
 inside the block are executed in order and terminator operations implement
 control flow branches between basic blocks.
+
+A region with a single block may not include a [terminator
+operation](#terminator-operations). The enclosing op can opt-out of this
+requirement with the `NoTerminator` trait. The top-level `ModuleOp` is an
+example of such operation which defined this trait and whose block body does
+not have a terminator.
 
 Blocks in MLIR take a list of block arguments, notated in a function-like
 way. Block arguments are bound to values specified by the semantics of

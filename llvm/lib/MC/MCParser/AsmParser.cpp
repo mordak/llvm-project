@@ -936,6 +936,8 @@ bool AsmParser::Run(bool NoInitialTextSection, bool NoFinalize) {
   if (!Filename.empty() && (Filename.compare(StringRef("-")) != 0))
     Out.emitFileDirective(Filename);
 
+  getTargetParser().onBeginOfFile();
+
   // While we have input, parse each statement.
   while (Lexer.isNot(AsmToken::Eof)) {
     ParseStatementInfo Info(&AsmStrRewrites);

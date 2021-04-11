@@ -27,6 +27,7 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/AtomicOrdering.h"
+#include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/InstructionCost.h"
 #include <functional>
@@ -236,8 +237,6 @@ public:
       Cost = getUserCost(I, kind);
       break;
     }
-    if (Cost == -1)
-      Cost.setInvalid();
     return Cost;
   }
 
@@ -318,15 +317,19 @@ public:
   ///
   /// The returned cost is defined in terms of \c TargetCostConstants, see its
   /// comments for a detailed explanation of the cost values.
-  int getUserCost(const User *U, ArrayRef<const Value *> Operands,
-                  TargetCostKind CostKind) const;
+  InstructionCost getUserCost(const User *U, ArrayRef<const Value *> Operands,
+                              TargetCostKind CostKind) const;
 
   /// This is a helper function which calls the two-argument getUserCost
   /// with \p Operands which are the current operands U has.
-  int getUserCost(const User *U, TargetCostKind CostKind) const {
+  InstructionCost getUserCost(const User *U, TargetCostKind CostKind) const {
     SmallVector<const Value *, 4> Operands(U->operand_values());
     return getUserCost(U, Operands, CostKind);
   }
+
+  /// If a branch or a select condition is skewed in one direction by more than
+  /// this factor, it is very likely to be predicted correctly.
+  BranchProbability getPredictableBranchThreshold() const;
 
   /// Return true if branch divergence exists.
   ///
@@ -915,8 +918,10 @@ public:
   /// \return the target-provided register class name
   const char *getRegisterClassName(unsigned ClassID) const;
 
+  enum RegisterKind { RGK_Scalar, RGK_FixedWidthVector, RGK_ScalableVector };
+
   /// \return The width of the largest scalar or vector register type.
-  unsigned getRegisterBitWidth(bool Vector) const;
+  TypeSize getRegisterBitWidth(RegisterKind K) const;
 
   /// \return The width of the smallest vector register type.
   unsigned getMinVectorRegisterBitWidth() const;
@@ -1098,9 +1103,10 @@ public:
                                unsigned Index = -1) const;
 
   /// \return The expected cost of control-flow related instructions such as
-  /// Phi, Ret, Br.
+  /// Phi, Ret, Br, Switch.
   int getCFInstrCost(unsigned Opcode,
-                     TTI::TargetCostKind CostKind = TTI::TCK_SizeAndLatency) const;
+                     TTI::TargetCostKind CostKind = TTI::TCK_SizeAndLatency,
+                     const Instruction *I = nullptr) const;
 
   /// \returns The expected cost of compare and select instructions. If there
   /// is an existing instruction that holds Opcode, it may be passed in the
@@ -1192,8 +1198,8 @@ public:
   /// \returns The cost of Intrinsic instructions. Analyses the real arguments.
   /// Three cases are handled: 1. scalar instruction 2. vector instruction
   /// 3. scalar instruction which is to be vectorized.
-  int getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
-                            TTI::TargetCostKind CostKind) const;
+  InstructionCost getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
+                                        TTI::TargetCostKind CostKind) const;
 
   /// \returns The cost of Call instructions.
   int getCallInstrCost(Function *F, Type *RetTy, ArrayRef<Type *> Tys,
@@ -1366,11 +1372,11 @@ public:
 private:
   /// Estimate the latency of specified instruction.
   /// Returns 1 as the default value.
-  int getInstructionLatency(const Instruction *I) const;
+  InstructionCost getInstructionLatency(const Instruction *I) const;
 
   /// Returns the expected throughput cost of the instruction.
   /// Returns -1 if the cost is unknown.
-  int getInstructionThroughput(const Instruction *I) const;
+  InstructionCost getInstructionThroughput(const Instruction *I) const;
 
   /// The abstract base class used to type erase specific TTI
   /// implementations.
@@ -1398,8 +1404,10 @@ public:
   getEstimatedNumberOfCaseClusters(const SwitchInst &SI, unsigned &JTSize,
                                    ProfileSummaryInfo *PSI,
                                    BlockFrequencyInfo *BFI) = 0;
-  virtual int getUserCost(const User *U, ArrayRef<const Value *> Operands,
-                          TargetCostKind CostKind) = 0;
+  virtual InstructionCost getUserCost(const User *U,
+                                      ArrayRef<const Value *> Operands,
+                                      TargetCostKind CostKind) = 0;
+  virtual BranchProbability getPredictableBranchThreshold() = 0;
   virtual bool hasBranchDivergence() = 0;
   virtual bool useGPUDivergenceAnalysis() = 0;
   virtual bool isSourceOfDivergence(const Value *V) = 0;
@@ -1512,7 +1520,7 @@ public:
   virtual unsigned getRegisterClassForType(bool Vector,
                                            Type *Ty = nullptr) const = 0;
   virtual const char *getRegisterClassName(unsigned ClassID) const = 0;
-  virtual unsigned getRegisterBitWidth(bool Vector) const = 0;
+  virtual TypeSize getRegisterBitWidth(RegisterKind K) const = 0;
   virtual unsigned getMinVectorRegisterBitWidth() = 0;
   virtual Optional<unsigned> getMaxVScale() const = 0;
   virtual bool shouldMaximizeVectorBandwidth(bool OptSize) const = 0;
@@ -1566,8 +1574,8 @@ public:
                                const Instruction *I) = 0;
   virtual int getExtractWithExtendCost(unsigned Opcode, Type *Dst,
                                        VectorType *VecTy, unsigned Index) = 0;
-  virtual int getCFInstrCost(unsigned Opcode,
-                             TTI::TargetCostKind CostKind) = 0;
+  virtual int getCFInstrCost(unsigned Opcode, TTI::TargetCostKind CostKind,
+                             const Instruction *I = nullptr) = 0;
   virtual int getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy,
                                  CmpInst::Predicate VecPred,
                                  TTI::TargetCostKind CostKind,
@@ -1600,8 +1608,9 @@ public:
   virtual InstructionCost getExtendedAddReductionCost(
       bool IsMLA, bool IsUnsigned, Type *ResTy, VectorType *Ty,
       TTI::TargetCostKind CostKind = TTI::TCK_RecipThroughput) = 0;
-  virtual int getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
-                                    TTI::TargetCostKind CostKind) = 0;
+  virtual InstructionCost
+  getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
+                        TTI::TargetCostKind CostKind) = 0;
   virtual int getCallInstrCost(Function *F, Type *RetTy,
                                ArrayRef<Type *> Tys,
                                TTI::TargetCostKind CostKind) = 0;
@@ -1655,7 +1664,7 @@ public:
   virtual unsigned getGISelRematGlobalCost() const = 0;
   virtual bool supportsScalableVectors() const = 0;
   virtual bool hasActiveVectorLength() const = 0;
-  virtual int getInstructionLatency(const Instruction *I) = 0;
+  virtual InstructionCost getInstructionLatency(const Instruction *I) = 0;
 };
 
 template <typename T>
@@ -1687,9 +1696,12 @@ public:
   int getMemcpyCost(const Instruction *I) override {
     return Impl.getMemcpyCost(I);
   }
-  int getUserCost(const User *U, ArrayRef<const Value *> Operands,
-                  TargetCostKind CostKind) override {
+  InstructionCost getUserCost(const User *U, ArrayRef<const Value *> Operands,
+                              TargetCostKind CostKind) override {
     return Impl.getUserCost(U, Operands, CostKind);
+  }
+  BranchProbability getPredictableBranchThreshold() override {
+    return Impl.getPredictableBranchThreshold();
   }
   bool hasBranchDivergence() override { return Impl.hasBranchDivergence(); }
   bool useGPUDivergenceAnalysis() override {
@@ -1935,8 +1947,8 @@ public:
   const char *getRegisterClassName(unsigned ClassID) const override {
     return Impl.getRegisterClassName(ClassID);
   }
-  unsigned getRegisterBitWidth(bool Vector) const override {
-    return Impl.getRegisterBitWidth(Vector);
+  TypeSize getRegisterBitWidth(RegisterKind K) const override {
+    return Impl.getRegisterBitWidth(K);
   }
   unsigned getMinVectorRegisterBitWidth() override {
     return Impl.getMinVectorRegisterBitWidth();
@@ -2029,8 +2041,9 @@ public:
                                unsigned Index) override {
     return Impl.getExtractWithExtendCost(Opcode, Dst, VecTy, Index);
   }
-  int getCFInstrCost(unsigned Opcode, TTI::TargetCostKind CostKind) override {
-    return Impl.getCFInstrCost(Opcode, CostKind);
+  int getCFInstrCost(unsigned Opcode, TTI::TargetCostKind CostKind,
+                     const Instruction *I = nullptr) override {
+    return Impl.getCFInstrCost(Opcode, CostKind, I);
   }
   int getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy,
                          CmpInst::Predicate VecPred,
@@ -2088,8 +2101,8 @@ public:
     return Impl.getExtendedAddReductionCost(IsMLA, IsUnsigned, ResTy, Ty,
                                             CostKind);
   }
-  int getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
-                            TTI::TargetCostKind CostKind) override {
+  InstructionCost getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
+                                        TTI::TargetCostKind CostKind) override {
     return Impl.getIntrinsicInstrCost(ICA, CostKind);
   }
   int getCallInstrCost(Function *F, Type *RetTy,
@@ -2205,7 +2218,7 @@ public:
     return Impl.hasActiveVectorLength();
   }
 
-  int getInstructionLatency(const Instruction *I) override {
+  InstructionCost getInstructionLatency(const Instruction *I) override {
     return Impl.getInstructionLatency(I);
   }
 };

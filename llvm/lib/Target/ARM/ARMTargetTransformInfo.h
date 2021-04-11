@@ -149,16 +149,20 @@ public:
     return 13;
   }
 
-  unsigned getRegisterBitWidth(bool Vector) const {
-    if (Vector) {
+  TypeSize getRegisterBitWidth(TargetTransformInfo::RegisterKind K) const {
+    switch (K) {
+    case TargetTransformInfo::RGK_Scalar:
+      return TypeSize::getFixed(32);
+    case TargetTransformInfo::RGK_FixedWidthVector:
       if (ST->hasNEON())
-        return 128;
+        return TypeSize::getFixed(128);
       if (ST->hasMVEIntegerOps())
-        return 128;
-      return 0;
+        return TypeSize::getFixed(128);
+      return TypeSize::getFixed(0);
+    case TargetTransformInfo::RGK_ScalableVector:
+      return TypeSize::getScalable(0);
     }
-
-    return 32;
+    llvm_unreachable("Unsupported register kind");
   }
 
   unsigned getMaxInterleaveFactor(unsigned VF) {
@@ -194,8 +198,8 @@ public:
 
   bool shouldExpandReduction(const IntrinsicInst *II) const { return false; }
 
-  int getCFInstrCost(unsigned Opcode,
-                     TTI::TargetCostKind CostKind);
+  int getCFInstrCost(unsigned Opcode, TTI::TargetCostKind CostKind,
+                     const Instruction *I = nullptr);
 
   int getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
                        TTI::CastContextHint CCH, TTI::TargetCostKind CostKind,
@@ -248,8 +252,8 @@ public:
                                               Type *ResTy, VectorType *ValTy,
                                               TTI::TargetCostKind CostKind);
 
-  int getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
-                            TTI::TargetCostKind CostKind);
+  InstructionCost getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
+                                        TTI::TargetCostKind CostKind);
 
   bool maybeLoweredToCall(Instruction &I);
   bool isLoweredToCall(const Function *F);

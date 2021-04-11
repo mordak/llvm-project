@@ -645,7 +645,7 @@ public:
 
   /// Returns true if the function contains a tail call.
   bool hasTailCall() const { return HasTailCall; }
-  void setHasTailCall() { HasTailCall = true; }
+  void setHasTailCall(bool V = true) { HasTailCall = V; }
 
   /// Computes the maximum size of a callframe and the AdjustsStack property.
   /// This only works for targets defining

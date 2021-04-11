@@ -322,8 +322,9 @@ struct FragmentCompiler {
                llvm::SMRange BlockRange) {
 #ifndef CLANGD_ENABLE_REMOTE
     if (External.Server) {
-      diag(Error, "Clangd isn't compiled with remote index support, ignoring "
-                  "Server." External.Server->Range);
+      elog("Clangd isn't compiled with remote index support, ignoring Server: "
+           "{0}",
+           *External.Server);
       External.Server.reset();
     }
 #endif
@@ -371,7 +372,7 @@ struct FragmentCompiler {
   }
 
   void compile(Fragment::DiagnosticsBlock &&F) {
-    std::vector<llvm::StringRef> Normalized;
+    std::vector<std::string> Normalized;
     for (const auto &Suppressed : F.Suppress) {
       if (*Suppressed == "*") {
         Out.Apply.push_back([&](const Params &, Config &C) {
@@ -380,15 +381,16 @@ struct FragmentCompiler {
         });
         return;
       }
-      Normalized.push_back(normalizeSuppressedCode(*Suppressed));
+      Normalized.push_back(normalizeSuppressedCode(*Suppressed).str());
     }
     if (!Normalized.empty())
-      Out.Apply.push_back([Normalized](const Params &, Config &C) {
-        if (C.Diagnostics.SuppressAll)
-          return;
-        for (llvm::StringRef N : Normalized)
-          C.Diagnostics.Suppress.insert(N);
-      });
+      Out.Apply.push_back(
+          [Normalized(std::move(Normalized))](const Params &, Config &C) {
+            if (C.Diagnostics.SuppressAll)
+              return;
+            for (llvm::StringRef N : Normalized)
+              C.Diagnostics.Suppress.insert(N);
+          });
 
     compile(std::move(F.ClangTidy));
   }

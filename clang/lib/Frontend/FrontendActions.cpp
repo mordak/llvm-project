@@ -722,7 +722,7 @@ void DumpModuleInfoAction::ExecuteAction() {
   if (!OutputFileName.empty() && OutputFileName != "-") {
     std::error_code EC;
     OutFile.reset(new llvm::raw_fd_ostream(OutputFileName.str(), EC,
-                                           llvm::sys::fs::OF_Text));
+                                           llvm::sys::fs::OF_TextWithCRLF));
   }
   llvm::raw_ostream &Out = OutFile.get()? *OutFile.get() : llvm::outs();
 
@@ -867,6 +867,7 @@ void PrintPreambleAction::ExecuteAction() {
   case Language::ObjC:
   case Language::ObjCXX:
   case Language::OpenCL:
+  case Language::OpenCLCXX:
   case Language::CUDA:
   case Language::HIP:
     break;

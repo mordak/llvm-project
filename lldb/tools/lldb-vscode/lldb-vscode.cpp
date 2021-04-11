@@ -44,12 +44,15 @@
 #include <vector>
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/Option.h"
 #include "llvm/Support/Errno.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "JSONUtils.h"
@@ -347,6 +350,34 @@ void SendStdOutStdErr(lldb::SBProcess &process) {
     g_vsc.SendOutput(OutputType::Stdout, llvm::StringRef(buffer, count));
   while ((count = process.GetSTDERR(buffer, sizeof(buffer))) > 0)
     g_vsc.SendOutput(OutputType::Stderr, llvm::StringRef(buffer, count));
+}
+
+void ProgressEventThreadFunction() {
+  lldb::SBListener listener("lldb-vscode.progress.listener");
+  g_vsc.debugger.GetBroadcaster().AddListener(
+      listener, lldb::SBDebugger::eBroadcastBitProgress);
+  g_vsc.broadcaster.AddListener(listener, eBroadcastBitStopProgressThread);
+  lldb::SBEvent event;
+  bool done = false;
+  while (!done) {
+    if (listener.WaitForEvent(1, event)) {
+      const auto event_mask = event.GetType();
+      if (event.BroadcasterMatchesRef(g_vsc.broadcaster)) {
+        if (event_mask & eBroadcastBitStopProgressThread) {
+          done = true;
+        }
+      } else {
+        uint64_t progress_id = 0;
+        uint64_t completed = 0;
+        uint64_t total = 0;
+        bool is_debugger_specific = false;
+        const char *message = lldb::SBDebugger::GetProgressFromEvent(
+            event, progress_id, completed, total, is_debugger_specific);
+        if (message)
+          g_vsc.SendProgressEvent(progress_id, message, completed, total);
+      }
+    }
+  }
 }
 
 // All events from the debugger, target, process, thread and frames are
@@ -805,6 +836,10 @@ void request_disconnect(const llvm::json::Object &request) {
   if (g_vsc.event_thread.joinable()) {
     g_vsc.broadcaster.BroadcastEventByType(eBroadcastBitStopEventThread);
     g_vsc.event_thread.join();
+  }
+  if (g_vsc.progress_event_thread.joinable()) {
+    g_vsc.broadcaster.BroadcastEventByType(eBroadcastBitStopProgressThread);
+    g_vsc.progress_event_thread.join();
   }
 }
 
@@ -1357,6 +1392,8 @@ void request_modules(const llvm::json::Object &request) {
 // }
 void request_initialize(const llvm::json::Object &request) {
   g_vsc.debugger = lldb::SBDebugger::Create(true /*source_init_files*/);
+  g_vsc.progress_event_thread = std::thread(ProgressEventThreadFunction);
+
   // Create an empty target right away since we might get breakpoint requests
   // before we are given an executable to launch in a "launch" request, or a
   // executable when attaching to a process by process ID in a "attach"
@@ -1453,6 +1490,8 @@ void request_initialize(const llvm::json::Object &request) {
   body.try_emplace("supportsDelayedStackTraceLoading", true);
   // The debug adapter supports the 'loadedSources' request.
   body.try_emplace("supportsLoadedSourcesRequest", false);
+  // The debug adapter supports sending progress reporting events.
+  body.try_emplace("supportsProgressReporting", true);
 
   response.try_emplace("body", std::move(body));
   g_vsc.SendJSON(llvm::json::Value(std::move(response)));
@@ -3042,6 +3081,9 @@ void LaunchRunInTerminalTarget(llvm::opt::Arg &target_arg,
 }
 
 int main(int argc, char *argv[]) {
+  llvm::InitLLVM IL(argc, argv, /*InstallPipeSignalExitHandler=*/false);
+  llvm::PrettyStackTraceProgram X(argc, argv);
+
   llvm::SmallString<256> program_path(argv[0]);
   llvm::sys::fs::make_absolute(program_path);
   g_vsc.debug_adaptor_path = program_path.str().str();
@@ -3064,12 +3106,16 @@ int main(int argc, char *argv[]) {
     } else {
       llvm::errs() << "\"--launch-target\" requires \"--comm-file\" to be "
                       "specified\n";
-      exit(EXIT_FAILURE);
+      return EXIT_FAILURE;
     }
   }
 
   // Initialize LLDB first before we do anything.
   lldb::SBDebugger::Initialize();
+
+  // Terminate the debugger before the C++ destructor chain kicks in.
+  auto terminate_debugger =
+      llvm::make_scope_exit([] { lldb::SBDebugger::Terminate(); });
 
   RegisterRequestCallbacks();
 
@@ -3077,7 +3123,7 @@ int main(int argc, char *argv[]) {
 
   if (input_args.hasArg(OPT_help)) {
     printHelp(T, llvm::sys::path::filename(argv[0]));
-    return 0;
+    return EXIT_SUCCESS;
   }
 
   if (auto *arg = input_args.getLastArg(OPT_port)) {
@@ -3086,7 +3132,7 @@ int main(int argc, char *argv[]) {
     portno = strtol(optarg, &remainder, 0);
     if (remainder == optarg || *remainder != '\0') {
       fprintf(stderr, "'%s' is not a valid port number.\n", optarg);
-      exit(1);
+      return EXIT_FAILURE;
     }
   }
 
@@ -3103,7 +3149,7 @@ int main(int argc, char *argv[]) {
       g_vsc.input.descriptor = StreamDescriptor::from_socket(socket_fd, true);
       g_vsc.output.descriptor = StreamDescriptor::from_socket(socket_fd, false);
     } else {
-      exit(1);
+      return EXIT_FAILURE;
     }
   } else {
     g_vsc.input.descriptor = StreamDescriptor::from_file(fileno(stdin), false);
@@ -3124,8 +3170,5 @@ int main(int argc, char *argv[]) {
     ++packet_idx;
   }
 
-  // We must terminate the debugger in a thread before the C++ destructor
-  // chain messes everything up.
-  lldb::SBDebugger::Terminate();
-  return 0;
+  return EXIT_SUCCESS;
 }

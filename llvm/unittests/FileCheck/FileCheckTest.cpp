@@ -161,7 +161,7 @@ struct ExpressionFormatParameterisedFixture
     return (Twine(Prefix) + Twine(Num)).str();
   }
 
-  void checkWildcardRegexCharMatchFailure(StringRef Chars) const {
+  void checkPerCharWildcardRegexMatchFailure(StringRef Chars) const {
     for (auto C : Chars) {
       std::string Str = addBasePrefix(StringRef(&C, 1));
       EXPECT_FALSE(WildcardRegex.match(Str));
@@ -259,9 +259,9 @@ TEST_P(ExpressionFormatParameterisedFixture, FormatGetWildcardRegex) {
   if (AllowHex) {
     LongNumberStr = addBasePrefix(AcceptedHexOnlyDigits);
     checkWildcardRegexMatch(LongNumberStr, 16);
-    checkWildcardRegexCharMatchFailure(RefusedHexOnlyDigits);
+    checkPerCharWildcardRegexMatchFailure(RefusedHexOnlyDigits);
   }
-  checkWildcardRegexCharMatchFailure(FirstInvalidCharDigits);
+  checkPerCharWildcardRegexMatchFailure(FirstInvalidCharDigits);
 
   // Check leading zeros are only accepted if number of digits is less than the
   // precision.
@@ -1342,6 +1342,9 @@ TEST_F(FileCheckTest, ParsePattern) {
 
   // Collision with numeric variable.
   EXPECT_TRUE(Tester.parsePattern("[[FOO:]]"));
+
+  // Invalid use of string variable.
+  EXPECT_TRUE(Tester.parsePattern("[[FOO-BAR]]"));
 
   // Valid use of string variable.
   EXPECT_FALSE(Tester.parsePattern("[[BAR]]"));
