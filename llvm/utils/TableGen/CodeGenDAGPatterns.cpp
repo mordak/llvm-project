@@ -111,10 +111,8 @@ bool TypeSetByHwMode::insert(const ValueTypeByHwMode &VVT) {
   bool ContainsDefault = false;
   MVT DT = MVT::Other;
 
-  SmallDenseSet<unsigned, 4> Modes;
   for (const auto &P : VVT) {
     unsigned M = P.first;
-    Modes.insert(M);
     // Make sure there exists a set for each specific mode from VVT.
     Changed |= getOrCreate(M).insert(P.second).second;
     // Cache VVT's default mode.
@@ -128,7 +126,7 @@ bool TypeSetByHwMode::insert(const ValueTypeByHwMode &VVT) {
   // modes in "this" that do not exist in VVT.
   if (ContainsDefault)
     for (auto &I : *this)
-      if (!Modes.count(I.first))
+      if (!VVT.hasMode(I.first))
         Changed |= I.second.insert(DT).second;
 
   return Changed;
@@ -224,7 +222,7 @@ bool TypeSetByHwMode::operator==(const TypeSetByHwMode &VTS) const {
   if (HaveDefault != VTSHaveDefault)
     return false;
 
-  SmallDenseSet<unsigned, 4> Modes;
+  SmallSet<unsigned, 4> Modes;
   for (auto &I : *this)
     Modes.insert(I.first);
   for (const auto &I : VTS)
@@ -1252,7 +1250,7 @@ StringRef TreePredicateFn::getImmType() const {
 StringRef TreePredicateFn::getImmTypeIdentifier() const {
   if (immCodeUsesAPInt())
     return "APInt";
-  else if (immCodeUsesAPFloat())
+  if (immCodeUsesAPFloat())
     return "APFloat";
   return "I64";
 }
@@ -1801,7 +1799,7 @@ static unsigned GetNumNodeResults(Record *Operator, CodeGenDAGPatterns &CDP) {
       // The number of results of a fragment with alternative records is the
       // maximum number of results across all alternatives.
       unsigned NumResults = 0;
-      for (auto T : PFRec->getTrees())
+      for (const auto &T : PFRec->getTrees())
         NumResults = std::max(NumResults, T->getNumTypes());
       return NumResults;
     }
@@ -2023,10 +2021,13 @@ void TreePatternNode::InlinePatternFragments(
       if (ChildAlternatives[i].empty())
         return;
 
-      for (auto NewChild : ChildAlternatives[i])
-        assert((Child->getPredicateCalls().empty() ||
-                NewChild->getPredicateCalls() == Child->getPredicateCalls()) &&
-               "Non-empty child predicate clobbered!");
+      assert((Child->getPredicateCalls().empty() ||
+              llvm::all_of(ChildAlternatives[i],
+                           [&](const TreePatternNodePtr &NewChild) {
+                             return NewChild->getPredicateCalls() ==
+                                    Child->getPredicateCalls();
+                           })) &&
+             "Non-empty child predicate clobbered!");
     }
 
     // The end result is an all-pairs construction of the resultant pattern.
@@ -2098,7 +2099,7 @@ void TreePatternNode::InlinePatternFragments(
   }
 
   // Loop over all fragment alternatives.
-  for (auto Alternative : Frag->getTrees()) {
+  for (const auto &Alternative : Frag->getTrees()) {
     TreePatternNodePtr FragTree = Alternative->clone();
 
     if (!PredFn.isAlwaysTrue())
@@ -3083,14 +3084,14 @@ CodeGenDAGPatterns::CodeGenDAGPatterns(RecordKeeper &R,
   ParsePatternFragments(/*OutFrags*/true);
   ParsePatterns();
 
+  // Generate variants.  For example, commutative patterns can match
+  // multiple ways.  Add them to PatternsToMatch as well.
+  GenerateVariants();
+
   // Break patterns with parameterized types into a series of patterns,
   // where each one has a fixed type and is predicated on the conditions
   // of the associated HW mode.
   ExpandHwModeBasedTypes();
-
-  // Generate variants.  For example, commutative patterns can match
-  // multiple ways.  Add them to PatternsToMatch as well.
-  GenerateVariants();
 
   // Infer instruction flags.  For example, we can detect loads,
   // stores, and side effects in many cases by examining an
@@ -3214,7 +3215,7 @@ void CodeGenDAGPatterns::ParsePatternFragments(bool OutFrags) {
     // it.
     Record *Transform = Frag->getValueAsDef("OperandTransform");
     if (!getSDNodeTransform(Transform).second.empty())    // not noop xform?
-      for (auto T : P->getTrees())
+      for (const auto &T : P->getTrees())
         T->setTransformFn(Transform);
   }
 
@@ -4187,7 +4188,7 @@ void CodeGenDAGPatterns::ParseOnePattern(Record *TheDef,
     // resolve cases where the input type is known to be a pointer type (which
     // is considered resolved), but the result knows it needs to be 32- or
     // 64-bits.  Infer the other way for good measure.
-    for (auto T : Pattern.getTrees())
+    for (const auto &T : Pattern.getTrees())
       for (unsigned i = 0, e = std::min(Result.getOnlyTree()->getNumTypes(),
                                         T->getNumTypes());
          i != e; ++i) {
@@ -4241,7 +4242,7 @@ void CodeGenDAGPatterns::ParseOnePattern(Record *TheDef,
   // will lead to a contradiction, which is not an error however, but
   // a sign that this pattern will simply never match.
   if (Temp.getOnlyTree()->hasPossibleType())
-    for (auto T : Pattern.getTrees())
+    for (const auto &T : Pattern.getTrees())
       if (T->hasPossibleType())
         AddPatternToMatch(&Pattern,
                           PatternToMatch(TheDef, makePredList(Preds),
@@ -4704,7 +4705,7 @@ void CodeGenDAGPatterns::GenerateVariants() {
       }
   }
 
-  for (auto it : PatternsWithVariants) {
+  for (const auto &it : PatternsWithVariants) {
     unsigned i = it.first;
     const MultipleUseVarSet &DepVars = it.second.first;
     const std::vector<TreePatternNodePtr> &Variants = it.second.second;

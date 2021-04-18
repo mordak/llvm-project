@@ -24,8 +24,8 @@ string(SUBSTRING ${CMAKE_CURRENT_BINARY_DIR} ${PATH_LIB_END} -1 PATH_TAIL)
 string(CONCAT BINARY_INCLUDE_DIR ${PATH_HEAD} "/include/clang/" ${PATH_TAIL})
 
 if (NOT Python3_EXECUTABLE
-    OR WIN32
     OR APPLE
+    OR CMAKE_CROSSCOMPILING
     OR GENERATOR_IS_MULTI_CONFIG
     OR NOT LLVM_NATIVE_ARCH IN_LIST LLVM_TARGETS_TO_BUILD
     OR NOT X86 IN_LIST LLVM_TARGETS_TO_BUILD
@@ -35,10 +35,32 @@ if (NOT Python3_EXECUTABLE
 namespace clang {
 namespace tooling {
 
+bool NodeIntrospection::hasIntrospectionSupport() { return false; }
+
 NodeLocationAccessors NodeIntrospection::GetLocations(clang::Stmt const *) {
   return {};
 }
 NodeLocationAccessors NodeIntrospection::GetLocations(clang::Decl const *) {
+  return {};
+}
+NodeLocationAccessors NodeIntrospection::GetLocations(
+    clang::CXXCtorInitializer const *) {
+  return {};
+}
+NodeLocationAccessors NodeIntrospection::GetLocations(
+    clang::NestedNameSpecifierLoc const*) {
+  return {};
+}
+NodeLocationAccessors NodeIntrospection::GetLocations(
+    clang::TemplateArgumentLoc const*) {
+  return {};
+}
+NodeLocationAccessors NodeIntrospection::GetLocations(
+    clang::CXXBaseSpecifier const*) {
+  return {};
+}
+NodeLocationAccessors NodeIntrospection::GetLocations(
+    clang::TypeLoc const&) {
   return {};
 }
 NodeLocationAccessors
@@ -62,11 +84,6 @@ else()
 
   set(skip_expensive_processing $<OR:$<CONFIG:Debug>,$<NOT:$<BOOL:${CLANG_TOOLING_BUILD_AST_INTROSPECTION}>>>)
 
-  file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ASTTU.cpp
-    CONTENT "
-#include <clang/AST/AST.h>
-")
-
   set(implicitDirs)
   foreach(implicitDir ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
     list(APPEND implicitDirs -I ${implicitDir})
@@ -75,12 +92,11 @@ else()
   add_custom_command(
       COMMENT Generate ASTNodeAPI.json
       OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ASTNodeAPI.json
-      DEPENDS clang-ast-dump clang-resource-headers ${CMAKE_CURRENT_BINARY_DIR}/ASTTU.cpp
+      DEPENDS clang-ast-dump clang-resource-headers
       COMMAND
       $<TARGET_FILE:clang-ast-dump>
         # Skip this in debug mode because parsing AST.h is too slow
         --skip-processing=${skip_expensive_processing}
-        --astheader=${CMAKE_CURRENT_BINARY_DIR}/ASTTU.cpp
         -I ${CMAKE_BINARY_DIR}/lib/clang/${CLANG_VERSION}/include
         -I ${CMAKE_SOURCE_DIR}/../clang/include
         -I ${CMAKE_BINARY_DIR}/tools/clang/include
