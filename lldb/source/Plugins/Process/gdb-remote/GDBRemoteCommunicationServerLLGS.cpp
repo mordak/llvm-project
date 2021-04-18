@@ -3562,7 +3562,7 @@ std::vector<std::string> GDBRemoteCommunicationServerLLGS::HandleFeatures(
   ret.insert(ret.end(), {
     "QThreadSuffixSupported+", "QListThreadsInStopReply+",
         "qXfer:features:read+", "multiprocess+",
-#if defined(__linux__) || defined(__NetBSD__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__NetBSD__) || defined(__FreeBSD__) || defined(__OpenBSD__)
         "QPassSignals+", "qXfer:auxv:read+", "qXfer:libraries-svr4:read+",
 #endif
   });
