@@ -3943,6 +3943,7 @@ public:
   void        setSP(reg_t value) { _registers[2] = value; }
   reg_t       getIP() const { return _registers[0]; }
   void        setIP(reg_t value) { _registers[0] = value; }
+  uint64_t    getWCookie() const     { return 0; }
 
 private:
   // _registers[0] holds the pc
