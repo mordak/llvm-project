@@ -37,6 +37,8 @@ public:
     llvm::Expected<std::unique_ptr<NativeProcessProtocol>>
     Attach(lldb::pid_t pid, NativeDelegate &native_delegate,
            MainLoop &mainloop) const override;
+
+    Extension GetSupportedExtensions() const override;
   };
 
   // ---------------------------------------------------------------------

@@ -141,6 +141,13 @@ NativeProcessOpenBSD::Factory::Attach(
   return std::move(process_up);
 }
 
+NativeProcessOpenBSD::Extension
+NativeProcessOpenBSD::Factory::GetSupportedExtensions() const {
+    return Extension::multiprocess | Extension::fork | Extension::vfork |
+           Extension::pass_signals | Extension::auxv | Extension::libraries_svr4;
+}
+
+
 // -----------------------------------------------------------------------------
 // Public Instance Methods
 // -----------------------------------------------------------------------------
