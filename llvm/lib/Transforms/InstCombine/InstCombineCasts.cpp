@@ -589,16 +589,16 @@ Instruction *InstCombinerImpl::narrowFunnelShift(TruncInst &Trunc) {
   if (!ShAmt)
     return nullptr;
 
-  // The shifted value must have high zeros in the wide type. Typically, this
-  // will be a zext, but it could also be the result of an 'and' or 'shift'.
+  // The right-shifted value must have high zeros in the wide type (for example
+  // from 'zext', 'and' or 'shift'). High bits of the left-shifted value are
+  // truncated, so those do not matter.
   unsigned WideWidth = Trunc.getSrcTy()->getScalarSizeInBits();
   APInt HiBitMask = APInt::getHighBitsSet(WideWidth, WideWidth - NarrowWidth);
-  if (!MaskedValueIsZero(ShVal0, HiBitMask, 0, &Trunc) ||
-      !MaskedValueIsZero(ShVal1, HiBitMask, 0, &Trunc))
+  if (!MaskedValueIsZero(ShVal1, HiBitMask, 0, &Trunc))
     return nullptr;
 
   // We have an unnecessarily wide rotate!
-  // trunc (or (lshr ShVal0, ShAmt), (shl ShVal1, BitWidth - ShAmt))
+  // trunc (or (shl ShVal0, ShAmt), (lshr ShVal1, BitWidth - ShAmt))
   // Narrow the inputs and convert to funnel shift intrinsic:
   // llvm.fshl.i8(trunc(ShVal), trunc(ShVal), trunc(ShAmt))
   Value *NarrowShAmt = Builder.CreateTrunc(ShAmt, DestTy);
@@ -2409,10 +2409,11 @@ Instruction *InstCombinerImpl::optimizeBitCastFromPhi(CastInst &CI,
         Value *Addr = LI->getOperand(0);
         if (Addr == &CI || isa<LoadInst>(Addr))
           return nullptr;
-        // If there is any loss for the pointer bitcast, abandon.
-        auto *DestPtrTy = DestTy->getPointerTo(LI->getPointerAddressSpace());
-        auto *SrcPtrTy = Addr->getType();
-        if (!SrcPtrTy->canLosslesslyBitCastTo(DestPtrTy))
+        // Don't tranform "load <256 x i32>, <256 x i32>*" to
+        // "load x86_amx, x86_amx*", because x86_amx* is invalid.
+        // TODO: Remove this check when bitcast between vector and x86_amx
+        // is replaced with a specific intrinsic.
+        if (DestTy->isX86_AMXTy())
           return nullptr;
         if (LI->hasOneUse() && LI->isSimple())
           continue;
