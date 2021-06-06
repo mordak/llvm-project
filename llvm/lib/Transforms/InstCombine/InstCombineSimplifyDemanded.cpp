@@ -575,8 +575,11 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
       // demanding those bits from the pre-shifted operand either.
       if (unsigned CTLZ = DemandedMask.countLeadingZeros()) {
         APInt DemandedFromOp(APInt::getLowBitsSet(BitWidth, BitWidth - CTLZ));
-        if (SimplifyDemandedBits(I, 0, DemandedFromOp, Known, Depth + 1))
+        if (SimplifyDemandedBits(I, 0, DemandedFromOp, Known, Depth + 1)) {
+          // We can't guarantee that nsw/nuw hold after simplifying the operand.
+          I->dropPoisonGeneratingFlags();
           return I;
+        }
       }
       computeKnownBits(I, Known, Depth, CxtI);
     }
@@ -1259,7 +1262,7 @@ Value *InstCombinerImpl::SimplifyDemandedVectorElts(Value *V,
     if (all_of(Shuffle->getShuffleMask(), [](int Elt) { return Elt == 0; }) &&
         DemandedElts.isAllOnesValue()) {
       if (!match(I->getOperand(1), m_Undef())) {
-        I->setOperand(1, UndefValue::get(I->getOperand(1)->getType()));
+        I->setOperand(1, PoisonValue::get(I->getOperand(1)->getType()));
         MadeChange = true;
       }
       APInt LeftDemanded(OpWidth, 1);

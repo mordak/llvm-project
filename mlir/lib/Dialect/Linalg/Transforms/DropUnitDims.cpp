@@ -18,7 +18,6 @@
 #include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
-#include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/Transforms/FoldUtils.h"
@@ -29,8 +28,6 @@
 #define DEBUG_TYPE "linalg-drop-unit-dims"
 
 using namespace mlir;
-using namespace mlir::edsc;
-using namespace mlir::edsc::intrinsics;
 using namespace mlir::linalg;
 
 /// Implements a pass that canonicalizes the uses of unit-extent dimensions for
@@ -146,13 +143,13 @@ static ArrayAttr replaceUnitDims(DenseSet<unsigned> &unitDims,
 }
 
 /// Update the index accesses of linalg operations having index semantics.
-template <typename GenericOpTy>
-static void replaceUnitDimIndexOps(GenericOpTy op,
+static void replaceUnitDimIndexOps(GenericOp genericOp,
                                    const DenseSet<unsigned> &unitDims,
                                    PatternRewriter &rewriter) {
-  assert(op->getNumRegions() == 1 && op->getRegion(0).getBlocks().size() == 1 &&
+  assert(genericOp->getNumRegions() == 1 &&
+         genericOp->getRegion(0).getBlocks().size() == 1 &&
          "expected generic operation to have one block.");
-  Block &block = op->getRegion(0).front();
+  Block &block = genericOp->getRegion(0).front();
 
   for (IndexOp indexOp : llvm::make_early_inc_range(block.getOps<IndexOp>())) {
     OpBuilder::InsertionGuard guard(rewriter);
@@ -170,39 +167,13 @@ static void replaceUnitDimIndexOps(GenericOpTy op,
   }
 }
 
-/// Modify the region of indexed generic op to drop arguments corresponding to
-/// loops that are unit trip count.
-template <typename OpTy>
-static LogicalResult
-replaceBlockArgForUnitDimLoops(OpTy op, const DenseSet<unsigned> &unitDims,
-                               PatternRewriter &rewriterp) {
-  return success();
-}
-
-template <>
-LogicalResult replaceBlockArgForUnitDimLoops<IndexedGenericOp>(
-    IndexedGenericOp op, const DenseSet<unsigned> &unitDims,
-    PatternRewriter &rewriter) {
-  OpBuilder::InsertionGuard guard(rewriter);
-  Block *entryBlock = &op->getRegion(0).front();
-  rewriter.setInsertionPointToStart(entryBlock);
-  Value zero = rewriter.create<ConstantIndexOp>(op.getLoc(), 0);
-  for (unsigned unitDimLoop : unitDims) {
-    entryBlock->getArgument(unitDimLoop).replaceAllUsesWith(zero);
-  }
-  SmallVector<unsigned, 8> unitDimsToErase(unitDims.begin(), unitDims.end());
-  entryBlock->eraseArguments(unitDimsToErase);
-  return success();
-}
-
 namespace {
 /// Pattern to fold unit-trip count loops in GenericOps.
-template <typename GenericOpTy>
-struct FoldUnitDimLoops : public OpRewritePattern<GenericOpTy> {
-  using OpRewritePattern<GenericOpTy>::OpRewritePattern;
-  LogicalResult matchAndRewrite(GenericOpTy op,
+struct FoldUnitDimLoops : public OpRewritePattern<GenericOp> {
+  using OpRewritePattern<GenericOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(GenericOp genericOp,
                                 PatternRewriter &rewriter) const override {
-    SmallVector<AffineMap, 4> indexingMaps = op.getIndexingMaps();
+    SmallVector<AffineMap, 4> indexingMaps = genericOp.getIndexingMaps();
     if (indexingMaps.empty())
       return failure();
 
@@ -212,16 +183,14 @@ struct FoldUnitDimLoops : public OpRewritePattern<GenericOpTy> {
     AffineMap invertedMap = inversePermutation(concatAffineMaps(indexingMaps));
     if (!invertedMap)
       return failure();
-    SmallVector<int64_t, 4> dims;
-    for (ShapedType shapedType : op.getShapedOperandTypes())
-      dims.append(shapedType.getShape().begin(), shapedType.getShape().end());
+    SmallVector<int64_t> dims = genericOp.getStaticShape();
 
     // Find all the reduction iterators. Those need some special consideration
     // (see below).
     auto getLoopDimsOfType =
         [&](StringRef iteratorTypeName) -> SmallVector<unsigned, 4> {
       SmallVector<AffineExpr> dimExprs;
-      getDimsOfType(op, iteratorTypeName, dimExprs);
+      getDimsOfType(genericOp, iteratorTypeName, dimExprs);
       return llvm::to_vector<4>(llvm::map_range(dimExprs, [](AffineExpr expr) {
         return expr.cast<AffineDimExpr>().getPosition();
       }));
@@ -230,7 +199,7 @@ struct FoldUnitDimLoops : public OpRewritePattern<GenericOpTy> {
 
     DenseSet<unsigned> unitDims;
     SmallVector<unsigned, 4> unitDimsReductionLoops;
-    ArrayAttr iteratorTypes = op.iterator_types();
+    ArrayAttr iteratorTypes = genericOp.iterator_types();
     for (auto expr : enumerate(invertedMap.getResults())) {
       if (AffineDimExpr dimExpr = expr.value().dyn_cast<AffineDimExpr>())
         if (dims[dimExpr.getPosition()] == 1) {
@@ -260,7 +229,7 @@ struct FoldUnitDimLoops : public OpRewritePattern<GenericOpTy> {
     ArrayAttr newIndexingMapAttr =
         replaceUnitDims(unitDims, indexingMaps, context);
     if (!newIndexingMapAttr)
-      return op.emitError("unable to compute modified indexing_maps");
+      return genericOp.emitError("unable to compute modified indexing_maps");
 
     // Compute the iterator types of the modified op by dropping the one-trip
     // count loops.
@@ -270,12 +239,11 @@ struct FoldUnitDimLoops : public OpRewritePattern<GenericOpTy> {
         newIteratorTypes.push_back(attr.value());
     }
 
-    rewriter.startRootUpdate(op);
-    op.indexing_mapsAttr(newIndexingMapAttr);
-    op.iterator_typesAttr(ArrayAttr::get(context, newIteratorTypes));
-    (void)replaceBlockArgForUnitDimLoops(op, unitDims, rewriter);
-    replaceUnitDimIndexOps(op, unitDims, rewriter);
-    rewriter.finalizeRootUpdate(op);
+    rewriter.startRootUpdate(genericOp);
+    genericOp.indexing_mapsAttr(newIndexingMapAttr);
+    genericOp.iterator_typesAttr(ArrayAttr::get(context, newIteratorTypes));
+    replaceUnitDimIndexOps(genericOp, unitDims, rewriter);
+    rewriter.finalizeRootUpdate(genericOp);
     return success();
   }
 };
@@ -297,17 +265,18 @@ struct UnitExtentReplacementInfo {
 /// - modified index map that can be used to access the replaced result/operand
 /// - the reassociation that converts from the original tensor type to the
 ///   modified tensor type.
-static UnitExtentReplacementInfo replaceUnitExtents(AffineMap indexMap,
-                                                    RankedTensorType type,
+static UnitExtentReplacementInfo replaceUnitExtents(GenericOp genericOp,
+                                                    OpOperand *opOperand,
                                                     MLIRContext *context) {
-  ArrayRef<int64_t> shape = type.getShape();
-  ArrayRef<AffineExpr> exprs = indexMap.getResults();
+  AffineMap indexingMap = genericOp.getTiedIndexingMap(opOperand);
+  ArrayRef<int64_t> shape = genericOp.getShape(opOperand);
+  ArrayRef<AffineExpr> exprs = indexingMap.getResults();
   SmallVector<AffineExpr, 2> reassociations;
   SmallVector<Attribute, 4> reassociationMaps;
   SmallVector<AffineExpr, 4> newIndexExprs;
   SmallVector<int64_t, 4> newShape;
 
-  int64_t origRank = type.getRank();
+  int64_t origRank = genericOp.getRank(opOperand);
   AffineExpr zeroExpr = getAffineConstantExpr(0, context);
   auto isUnitExtent = [&](int64_t dim) -> bool {
     return shape[dim] == 1 && exprs[dim] == zeroExpr;
@@ -327,13 +296,14 @@ static UnitExtentReplacementInfo replaceUnitExtents(AffineMap indexMap,
       reassociations.push_back(getAffineDimExpr(dim, context));
     }
     reassociationMaps.push_back(AffineMapAttr::get(AffineMap::get(
-        origRank, /*numSymbols = */ 0, reassociations, context)));
+        origRank, /*symbolCount = */ 0, reassociations, context)));
     reassociations.clear();
     ++dim;
   }
   UnitExtentReplacementInfo info = {
-      RankedTensorType::get(newShape, type.getElementType()),
-      AffineMap::get(indexMap.getNumDims(), indexMap.getNumSymbols(),
+      RankedTensorType::get(newShape,
+                            getElementTypeOrSelf(opOperand->get().getType())),
+      AffineMap::get(indexingMap.getNumDims(), indexingMap.getNumSymbols(),
                      newIndexExprs, context),
       ArrayAttr::get(context, reassociationMaps)};
   return info;
@@ -341,31 +311,37 @@ static UnitExtentReplacementInfo replaceUnitExtents(AffineMap indexMap,
 
 namespace {
 
+SmallVector<ReassociationExprs, 2>
+convertAffineMapArrayToExprs(ArrayAttr affineMapArrayAttr) {
+  SmallVector<ReassociationExprs, 2> reassociationExprs;
+  for (auto attr : affineMapArrayAttr)
+    reassociationExprs.push_back(
+        llvm::to_vector<4>(attr.cast<AffineMapAttr>().getValue().getResults()));
+  return reassociationExprs;
+}
+
 /// Pattern to replace tensors operands/results that are unit extents.
-template <typename GenericOpTy>
-struct ReplaceUnitExtentTensors : public OpRewritePattern<GenericOpTy> {
-  using OpRewritePattern<GenericOpTy>::OpRewritePattern;
-  LogicalResult matchAndRewrite(GenericOpTy op,
+struct ReplaceUnitExtentTensors : public OpRewritePattern<GenericOp> {
+  using OpRewritePattern<GenericOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(GenericOp genericOp,
                                 PatternRewriter &rewriter) const override {
-    if (!op.hasTensorSemantics())
+    if (!genericOp.hasTensorSemantics())
       return failure();
 
     MLIRContext *context = rewriter.getContext();
-    Location loc = op.getLoc();
+    Location loc = genericOp.getLoc();
 
     SmallVector<AffineMap, 4> newIndexingMaps;
     SmallVector<ArrayAttr, 4> reassociationMaps;
     SmallVector<ShapedType, 4> newInputOutputTypes;
     bool doCanonicalization = false;
-    for (auto it :
-         llvm::zip(op.getIndexingMaps(), op.getShapedOperandTypes())) {
-      auto replacementInfo = replaceUnitExtents(
-          std::get<0>(it), std::get<1>(it).template cast<RankedTensorType>(),
-          context);
+
+    for (OpOperand *opOperand : genericOp.getInputAndOutputOperands()) {
+      auto replacementInfo = replaceUnitExtents(genericOp, opOperand, context);
       reassociationMaps.push_back(replacementInfo.reassociation);
       newIndexingMaps.push_back(replacementInfo.indexMap);
       newInputOutputTypes.push_back(replacementInfo.type);
-      doCanonicalization |= replacementInfo.type != std::get<1>(it);
+      doCanonicalization |= replacementInfo.type != opOperand->get().getType();
     }
 
     // If the indexing maps of the result operation are not invertible (i.e. not
@@ -384,29 +360,30 @@ struct ReplaceUnitExtentTensors : public OpRewritePattern<GenericOpTy> {
       for (auto operand : llvm::enumerate(values)) {
         if (operand.value().getType() == newInputOutputTypes[flattenedIdx])
           res.push_back(operand.value());
-        else
-          res.push_back(rewriter.create<linalg::TensorReshapeOp>(
+        else {
+          res.push_back(rewriter.create<TensorCollapseShapeOp>(
               loc, newInputOutputTypes[flattenedIdx], operand.value(),
-              reassociationMaps[flattenedIdx]));
+              convertAffineMapArrayToExprs(reassociationMaps[flattenedIdx])));
+        }
         ++flattenedIdx;
       }
       return res;
     };
 
-    SmallVector<Value, 4> newInputs = insertReshapes(op.inputs());
-    SmallVector<Value, 4> newOutputs = insertReshapes(op.outputs());
+    SmallVector<Value, 4> newInputs = insertReshapes(genericOp.inputs());
+    SmallVector<Value, 4> newOutputs = insertReshapes(genericOp.outputs());
 
     // If any result type changes, insert a reshape to convert from the original
     // type to the new type.
     SmallVector<Type, 4> resultTypes;
-    resultTypes.reserve(op.getNumResults());
-    for (unsigned i : llvm::seq<unsigned>(0, op.getNumResults()))
-      resultTypes.push_back(newInputOutputTypes[i + op.getNumInputs()]);
-    GenericOpTy replacementOp = rewriter.create<GenericOpTy>(
+    resultTypes.reserve(genericOp.getNumResults());
+    for (unsigned i : llvm::seq<unsigned>(0, genericOp.getNumResults()))
+      resultTypes.push_back(newInputOutputTypes[i + genericOp.getNumInputs()]);
+    GenericOp replacementOp = rewriter.create<GenericOp>(
         loc, resultTypes, newInputs, newOutputs, newIndexingMaps,
         llvm::to_vector<4>(
-            op.iterator_types().template getAsValueRange<StringAttr>()));
-    rewriter.inlineRegionBefore(op.region(), replacementOp.region(),
+            genericOp.iterator_types().template getAsValueRange<StringAttr>()));
+    rewriter.inlineRegionBefore(genericOp.region(), replacementOp.region(),
                                 replacementOp.region().begin());
 
     // If any result tensor has a modified shape, then add reshape to recover
@@ -414,16 +391,17 @@ struct ReplaceUnitExtentTensors : public OpRewritePattern<GenericOpTy> {
     SmallVector<Value, 4> resultReplacements;
     for (auto result : llvm::enumerate(replacementOp.getResults())) {
       unsigned index = result.index() + replacementOp.getNumInputs();
-      RankedTensorType origResultType = op.getResult(result.index())
+      RankedTensorType origResultType = genericOp.getResult(result.index())
                                             .getType()
                                             .template cast<RankedTensorType>();
-      if (origResultType != result.value().getType())
-        resultReplacements.push_back(rewriter.create<linalg::TensorReshapeOp>(
-            loc, origResultType, result.value(), reassociationMaps[index]));
-      else
+      if (origResultType != result.value().getType()) {
+        resultReplacements.push_back(rewriter.create<TensorExpandShapeOp>(
+            loc, origResultType, result.value(),
+            convertAffineMapArrayToExprs(reassociationMaps[index])));
+      } else
         resultReplacements.push_back(result.value());
     }
-    rewriter.replaceOp(op, resultReplacements);
+    rewriter.replaceOp(genericOp, resultReplacements);
     return success();
   }
 };
@@ -449,7 +427,10 @@ getReassociationMapForFoldingUnitDims(ArrayRef<OpFoldResult> mixedSizes) {
     reassociation.emplace_back(ReassociationIndices{});
     std::swap(reassociation.back(), curr);
   }
-  if (!curr.empty())
+  // When the reassociations are not empty, then fold the remaining
+  // unit-dimensions into the last dimension.  If the reassociations so far is
+  // empty, then leave it emtpy. This will fold everything to a rank-0 tensor.
+  if (!curr.empty() && !reassociation.empty())
     reassociation.back().append(curr.begin(), curr.end());
   return reassociation;
 }
@@ -478,8 +459,8 @@ struct UseRankReducedSubTensorOp : public OpRewritePattern<SubTensorOp> {
     Location loc = subTensorOp.getLoc();
     Value newSubTensor = rewriter.create<SubTensorOp>(
         loc, rankReducedType, subTensorOp.source(), offsets, sizes, strides);
-    rewriter.replaceOpWithNewOp<TensorReshapeOp>(subTensorOp, resultType,
-                                                 newSubTensor, *reassociation);
+    rewriter.replaceOpWithNewOp<TensorExpandShapeOp>(
+        subTensorOp, resultType, newSubTensor, *reassociation);
     return success();
   }
 };
@@ -500,7 +481,7 @@ struct UseRankReducedSubTensorInsertOp
         reassociation->size() == static_cast<size_t>(sourceType.getRank()))
       return failure();
     Location loc = insertOp.getLoc();
-    auto reshapedSource = rewriter.create<TensorReshapeOp>(
+    auto reshapedSource = rewriter.create<TensorCollapseShapeOp>(
         loc, insertOp.source(), *reassociation);
     rewriter.replaceOpWithNewOp<SubTensorInsertOp>(
         insertOp, reshapedSource, insertOp.dest(), insertOp.getMixedOffsets(),
@@ -515,12 +496,11 @@ struct UseRankReducedSubTensorInsertOp
 void mlir::linalg::populateFoldUnitExtentDimsPatterns(
     RewritePatternSet &patterns) {
   auto *context = patterns.getContext();
-  patterns.add<FoldUnitDimLoops<GenericOp>, FoldUnitDimLoops<IndexedGenericOp>,
-               ReplaceUnitExtentTensors<GenericOp>,
-               ReplaceUnitExtentTensors<IndexedGenericOp>,
+  patterns.add<FoldUnitDimLoops, ReplaceUnitExtentTensors,
                UseRankReducedSubTensorOp, UseRankReducedSubTensorInsertOp>(
       context);
-  TensorReshapeOp::getCanonicalizationPatterns(patterns, context);
+  TensorCollapseShapeOp::getCanonicalizationPatterns(patterns, context);
+  TensorExpandShapeOp::getCanonicalizationPatterns(patterns, context);
 }
 
 namespace {
@@ -532,9 +512,7 @@ struct LinalgFoldUnitExtentDimsPass
     MLIRContext *context = funcOp.getContext();
     RewritePatternSet patterns(context);
     if (foldOneTripLoopsOnly)
-      patterns
-          .add<FoldUnitDimLoops<GenericOp>, FoldUnitDimLoops<IndexedGenericOp>>(
-              context);
+      patterns.add<FoldUnitDimLoops>(context);
     else
       populateFoldUnitExtentDimsPatterns(patterns);
     (void)applyPatternsAndFoldGreedily(funcOp.getBody(), std::move(patterns));

@@ -11,11 +11,13 @@
 #define _LIBCPP___ITERATOR_CONCEPTS_H
 
 #include <__config>
-#include <concepts>
-#include <__iterator/iter_move.h>
 #include <__iterator/incrementable_traits.h>
+#include <__iterator/iter_move.h>
 #include <__iterator/iterator_traits.h>
 #include <__iterator/readable_traits.h>
+#include <__memory/pointer_traits.h>
+#include <concepts>
+#include <type_traits>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #pragma GCC system_header
@@ -46,6 +48,9 @@ concept __indirectly_readable_impl =
 
 template<class _In>
 concept indirectly_readable = __indirectly_readable_impl<remove_cvref_t<_In> >;
+
+template<indirectly_readable _Tp>
+using iter_common_reference_t = common_reference_t<iter_reference_t<_Tp>, iter_value_t<_Tp>&>;
 
 // [iterator.concept.writable]
 template<class _Out, class _Tp>
@@ -137,7 +142,37 @@ concept bidirectional_iterator =
     { __i-- } -> same_as<_Ip>;
   };
 
-  // clang-format on
+template<class _Ip>
+concept random_access_iterator =
+  bidirectional_iterator<_Ip> &&
+  derived_from<_ITER_CONCEPT<_Ip>, random_access_iterator_tag> &&
+  totally_ordered<_Ip> &&
+  sized_sentinel_for<_Ip, _Ip> &&
+  requires(_Ip __i, const _Ip __j, const iter_difference_t<_Ip> __n) {
+    { __i += __n } -> same_as<_Ip&>;
+    { __j +  __n } -> same_as<_Ip>;
+    { __n +  __j } -> same_as<_Ip>;
+    { __i -= __n } -> same_as<_Ip&>;
+    { __j -  __n } -> same_as<_Ip>;
+    {  __j[__n]  } -> same_as<iter_reference_t<_Ip>>;
+  };
+
+template<class _Ip>
+concept contiguous_iterator =
+  random_access_iterator<_Ip> &&
+  derived_from<_ITER_CONCEPT<_Ip>, contiguous_iterator_tag> &&
+  is_lvalue_reference_v<iter_reference_t<_Ip>> &&
+  same_as<iter_value_t<_Ip>, remove_cvref_t<iter_reference_t<_Ip>>> &&
+  (is_pointer_v<_Ip> || requires { sizeof(__pointer_traits_element_type<_Ip>); }) &&
+  requires(const _Ip& __i) {
+    { _VSTD::to_address(__i) } -> same_as<add_pointer_t<iter_reference_t<_Ip>>>;
+  };
+
+
+template<class _Ip>
+concept __has_arrow = input_iterator<_Ip> && (is_pointer_v<_Ip> || requires(_Ip __i) { __i.operator->(); });
+
+// clang-format on
 
 #endif // !defined(_LIBCPP_HAS_NO_RANGES)
 

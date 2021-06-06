@@ -62,13 +62,19 @@ Improvements to Clang's diagnostics
 Non-comprehensive list of changes in this release
 -------------------------------------------------
 
-- ...
+- The default value of _MSC_VER was raised from 1911 to 1914. MSVC 19.14 has the
+  support to overaligned objects on x86_32 which is required for some LLVM 
+  passes.
 
 New Compiler Flags
 ------------------
 
 - ``-Wreserved-identifier`` emits warning when user code uses reserved
   identifiers.
+
+- ``-fstack-usage`` generates an extra .su file per input source file. The .su
+  file contains frame size information for each function defined in the source
+  file.
 
 Deprecated Compiler Flags
 -------------------------
@@ -106,6 +112,9 @@ Attribute Changes in Clang
 --------------------------
 
 - ...
+
+- Added support for C++11-style ``[[]]`` attributes on using-declarations, as a
+  clang extension.
 
 Windows Support
 ---------------
@@ -224,6 +233,9 @@ clang-format
 - Option ``IndentAccessModifiers`` has been added to be able to give access
   modifiers their own indentation level inside records.
 
+- Option ``PPIndentWidth`` has been added to be able to configure pre-processor
+  indentation independent from regular code.
+
 - Option ``ShortNamespaceLines`` has been added to give better control
   over ``FixNamespaceComments`` when determining a namespace length.
 
@@ -243,6 +255,15 @@ clang-format
 - Option ``AllowShortIfStatementsOnASingleLine`` has been improved, it now
   accepts ``AllIfsAndElse`` value that allows to put "else if" and "else" short
   statements on a single line. (Fixes https://llvm.org/PR50019.)
+
+- Option ``BreakInheritanceList`` gets a new style, ``AfterComma``. It breaks
+  only after the commas that separate the base-specifiers.
+
+- ``git-clang-format`` no longer formats changes to symbolic links. (Fixes
+  https://llvm.org/PR46992.)
+
+- Makes ``PointerAligment: Right`` working with ``AlignConsecutiveDeclarations``.
+  (Fixes https://llvm.org/PR27353)
 
 libclang
 --------

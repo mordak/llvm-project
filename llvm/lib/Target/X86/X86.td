@@ -326,10 +326,15 @@ def FeatureSaveArgs
                        "Save register arguments on the stack.">;
 // On recent X86 (port bound) processors, its preferable to combine to a single shuffle
 // using a variable mask over multiple fixed shuffles.
-def FeatureFastVariableShuffle
-    : SubtargetFeature<"fast-variable-shuffle",
-                       "HasFastVariableShuffle",
-                       "true", "Shuffles with variable masks are fast">;
+def FeatureFastVariableCrossLaneShuffle
+    : SubtargetFeature<"fast-variable-crosslane-shuffle",
+                       "HasFastVariableCrossLaneShuffle",
+                       "true", "Cross-lane shuffles with variable masks are fast">;
+def FeatureFastVariablePerLaneShuffle
+    : SubtargetFeature<"fast-variable-perlane-shuffle",
+                       "HasFastVariablePerLaneShuffle",
+                       "true", "Per-lane shuffles with variable masks are fast">;
+
 // On some X86 processors, a vzeroupper instruction should be inserted after
 // using ymm/zmm registers before executing code that may use SSE instructions.
 def FeatureInsertVZEROUPPER
@@ -517,6 +522,10 @@ def FeatureFastVectorShiftMasks
         "fast-vector-shift-masks", "HasFastVectorShiftMasks", "true",
         "Prefer a left/right vector logical shift pair over a shift+and pair">;
 
+def FeatureFastMOVBE
+    : SubtargetFeature<"fast-movbe", "HasFastMOVBE", "true",
+    "Prefer a movbe over a single-use load + bswap / single-use bswap + store">;
+
 def FeatureUseGLMDivSqrtCosts
     : SubtargetFeature<"use-glm-div-sqrt-costs", "UseGLMDivSqrtCosts", "true",
         "Use Goldmont specific floating point div/sqrt costs">;
@@ -638,7 +647,8 @@ def ProcessorFeatures {
                                       FeatureFastScalarFSQRT,
                                       FeatureFastSHLDRotate,
                                       FeatureFast15ByteNOP,
-                                      FeatureFastVariableShuffle,
+                                      FeatureFastVariableCrossLaneShuffle,
+                                      FeatureFastVariablePerLaneShuffle,
                                       FeaturePOPCNTFalseDeps,
                                       FeatureLZCNTFalseDeps,
                                       FeatureInsertVZEROUPPER];
@@ -666,7 +676,8 @@ def ProcessorFeatures {
                                       FeatureFastVectorFSQRT,
                                       FeatureFastSHLDRotate,
                                       FeatureFast15ByteNOP,
-                                      FeatureFastVariableShuffle,
+                                      FeatureFastVariableCrossLaneShuffle,
+                                      FeatureFastVariablePerLaneShuffle,
                                       FeaturePOPCNTFalseDeps,
                                       FeatureInsertVZEROUPPER];
   list<SubtargetFeature> SKLFeatures =
@@ -692,7 +703,8 @@ def ProcessorFeatures {
                                       FeatureFastVectorFSQRT,
                                       FeatureFastSHLDRotate,
                                       FeatureFast15ByteNOP,
-                                      FeatureFastVariableShuffle,
+                                      FeatureFastVariableCrossLaneShuffle,
+                                      FeatureFastVariablePerLaneShuffle,
                                       FeaturePrefer256Bit,
                                       FeaturePOPCNTFalseDeps,
                                       FeatureInsertVZEROUPPER];
@@ -729,7 +741,8 @@ def ProcessorFeatures {
                                       FeatureFastVectorFSQRT,
                                       FeatureFastSHLDRotate,
                                       FeatureFast15ByteNOP,
-                                      FeatureFastVariableShuffle,
+                                      FeatureFastVariableCrossLaneShuffle,
+                                      FeatureFastVariablePerLaneShuffle,
                                       FeaturePrefer256Bit,
                                       FeatureInsertVZEROUPPER];
   list<SubtargetFeature> CNLFeatures =
@@ -823,6 +836,7 @@ def ProcessorFeatures {
                                       FeatureSlowDivide64,
                                       FeatureSlowPMULLD,
                                       FeatureFast7ByteNOP,
+                                      FeatureFastMOVBE,
                                       FeaturePOPCNTFalseDeps,
                                       FeatureInsertVZEROUPPER];
   list<SubtargetFeature> SLMFeatures =
@@ -842,6 +856,7 @@ def ProcessorFeatures {
                                       FeatureSlowTwoMemOps,
                                       FeatureSlowLEA,
                                       FeatureSlowIncDec,
+                                      FeatureFastMOVBE,
                                       FeaturePOPCNTFalseDeps,
                                       FeatureInsertVZEROUPPER];
   list<SubtargetFeature> GLMFeatures =
@@ -854,6 +869,7 @@ def ProcessorFeatures {
                                       FeatureSlowTwoMemOps,
                                       FeatureSlowLEA,
                                       FeatureSlowIncDec,
+                                      FeatureFastMOVBE,
                                       FeatureInsertVZEROUPPER];
   list<SubtargetFeature> GLPFeatures =
     !listconcat(GLMFeatures, GLPAdditionalFeatures);
@@ -927,6 +943,7 @@ def ProcessorFeatures {
                                       FeatureSlowTwoMemOps,
                                       FeaturePreferMaskRegisters,
                                       FeatureHasFastGather,
+                                      FeatureFastMOVBE,
                                       FeatureSlowPMADDWD];
   // TODO Add AVX5124FMAPS/AVX5124VNNIW features
   list<SubtargetFeature> KNMFeatures =
@@ -986,6 +1003,7 @@ def ProcessorFeatures {
                                          FeatureFast15ByteNOP,
                                          FeatureFastScalarShiftMasks,
                                          FeatureFastVectorShiftMasks,
+                                         FeatureFastMOVBE,
                                          FeatureSlowSHLD];
   list<SubtargetFeature> BtVer2Features =
     !listconcat(BtVer1Features, BtVer2AdditionalFeatures);
@@ -1020,7 +1038,9 @@ def ProcessorFeatures {
                                                      FeatureTBM,
                                                      FeatureFMA,
                                                      FeatureFastBEXTR];
-  list<SubtargetFeature> BdVer2Tuning = BdVer1Tuning;
+  list<SubtargetFeature> BdVer2AdditionalTuning = [FeatureFastMOVBE];
+  list<SubtargetFeature> BdVer2Tuning =
+    !listconcat(BdVer1Tuning, BdVer2AdditionalTuning);
   list<SubtargetFeature> BdVer2Features =
     !listconcat(BdVer1Features, BdVer2AdditionalFeatures);
 
@@ -1080,6 +1100,7 @@ def ProcessorFeatures {
                                      FeatureFast15ByteNOP,
                                      FeatureBranchFusion,
                                      FeatureFastScalarShiftMasks,
+                                     FeatureFastMOVBE,
                                      FeatureSlowSHLD,
                                      FeatureInsertVZEROUPPER];
   list<SubtargetFeature> ZN2AdditionalFeatures = [FeatureCLWB,
@@ -1093,7 +1114,9 @@ def ProcessorFeatures {
                                                   FeaturePKU,
                                                   FeatureVAES,
                                                   FeatureVPCLMULQDQ];
-  list<SubtargetFeature> ZN3AdditionalTuning = [FeatureMacroFusion];
+  list<SubtargetFeature> ZN3AdditionalTuning =
+    [FeatureMacroFusion,
+     FeatureFastVariablePerLaneShuffle];
   list<SubtargetFeature> ZN3Tuning =
     !listconcat(ZNTuning, ZN3AdditionalTuning);
   list<SubtargetFeature> ZN3Features =
@@ -1428,7 +1451,7 @@ def : ProcModel<"x86-64-v2", SandyBridgeModel, ProcessorFeatures.X86_64V2Feature
 def : ProcModel<"x86-64-v3", HaswellModel, ProcessorFeatures.X86_64V3Features,
                 ProcessorFeatures.HSWTuning>;
 // Close to the AVX-512 level implemented by Xeon Scalable Processors.
-def : ProcModel<"x86-64-v4", HaswellModel, ProcessorFeatures.X86_64V4Features,
+def : ProcModel<"x86-64-v4", SkylakeServerModel, ProcessorFeatures.X86_64V4Features,
                 ProcessorFeatures.SKXTuning>;
 
 //===----------------------------------------------------------------------===//

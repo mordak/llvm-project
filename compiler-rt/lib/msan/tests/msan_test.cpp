@@ -976,8 +976,8 @@ std::vector<int> GetAvailableIpSocketFamilies() {
   return result;
 }
 
-INSTANTIATE_TEST_CASE_P(IpTests, MemorySanitizerIpTest,
-                        ::testing::ValuesIn(GetAvailableIpSocketFamilies()));
+INSTANTIATE_TEST_SUITE_P(IpTests, MemorySanitizerIpTest,
+                         ::testing::ValuesIn(GetAvailableIpSocketFamilies()));
 
 TEST_P(MemorySanitizerIpTest, accept) {
   int listen_socket = CreateSocket(SOCK_STREAM);
@@ -1873,20 +1873,20 @@ TEST_STRTO_FLOAT_LOC(__wcstold_l, wchar_t, L)
 #endif  // __GLIBC__
 
 TEST(MemorySanitizer, modf) {
-  double x, y;
-  x = modf(2.1, &y);
+  double y;
+  modf(2.1, &y);
   EXPECT_NOT_POISONED(y);
 }
 
 TEST(MemorySanitizer, modff) {
-  float x, y;
-  x = modff(2.1, &y);
+  float y;
+  modff(2.1, &y);
   EXPECT_NOT_POISONED(y);
 }
 
 TEST(MemorySanitizer, modfl) {
-  long double x, y;
-  x = modfl(2.1, &y);
+  long double y;
+  modfl(2.1, &y);
   EXPECT_NOT_POISONED(y);
 }
 

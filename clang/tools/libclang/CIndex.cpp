@@ -5185,8 +5185,9 @@ CXString clang_getCursorDisplayName(CXCursor C) {
     SmallString<128> Str;
     llvm::raw_svector_ostream OS(Str);
     OS << *ClassSpec;
-    printTemplateArgumentList(OS, ClassSpec->getTemplateArgs().asArray(),
-                              Policy);
+    printTemplateArgumentList(
+        OS, ClassSpec->getTemplateArgs().asArray(), Policy,
+        ClassSpec->getSpecializedTemplate()->getTemplateParameters());
     return cxstring::createDup(OS.str());
   }
 
@@ -6465,6 +6466,7 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::Concept:
   case Decl::LifetimeExtendedTemporary:
   case Decl::RequiresExprBody:
+  case Decl::UnresolvedUsingIfExists:
     return C;
 
   // Declaration kinds that don't make any sense here, but are

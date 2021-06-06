@@ -1178,6 +1178,8 @@ def IsNotISA3_1 : Predicate<"!Subtarget->isISA3_1()">;
 // AIX assembler may not be modern enough to support some extended mne.
 def ModernAs: Predicate<"!Subtarget->isAIXABI() || Subtarget->HasModernAIXAs">, 
                  AssemblerPredicate<(any_of (not AIXOS), FeatureModernAIXAs)>;
+def IsAIX : Predicate<"Subtarget->isAIXABI()">;
+def NotAIX : Predicate<"!Subtarget->isAIXABI()">;
 
 //===----------------------------------------------------------------------===//
 // PowerPC Multiclass Definitions.
@@ -2044,6 +2046,8 @@ def : Pat<(int_ppc_dcbtst xoaddr:$dst),
           (DCBTST 0, xoaddr:$dst)>;
 def : Pat<(int_ppc_dcbf xoaddr:$dst),
           (DCBF 0, xoaddr:$dst)>;
+def : Pat<(int_ppc_icbt xoaddr:$dst),
+          (ICBT 0, xoaddr:$dst)>;
 
 def : Pat<(prefetch xoaddr:$dst, (i32 0), imm, (i32 1)),
           (DCBT 0, xoaddr:$dst)>;   // data prefetch for loads
@@ -2565,11 +2569,19 @@ let isCodeGenOnly = 1 in {
 def EnforceIEIO : XForm_24_eieio<31, 854, (outs), (ins),
                                  "eieio", IIC_LdStLoad, []>;
 
+def PseudoEIEIO : PPCEmitTimePseudo<(outs), (ins), "#PPCEIEIO",
+                  [(int_ppc_eieio)]>;
+
 def : Pat<(int_ppc_sync),   (SYNC 0)>, Requires<[HasSYNC]>;
+def : Pat<(int_ppc_iospace_sync),   (SYNC 0)>, Requires<[HasSYNC]>;
 def : Pat<(int_ppc_lwsync), (SYNC 1)>, Requires<[HasSYNC]>;
+def : Pat<(int_ppc_iospace_lwsync), (SYNC 1)>, Requires<[HasSYNC]>;
 def : Pat<(int_ppc_sync),   (MSYNC)>, Requires<[HasOnlyMSYNC]>;
+def : Pat<(int_ppc_iospace_sync),   (MSYNC)>, Requires<[HasOnlyMSYNC]>;
 def : Pat<(int_ppc_lwsync), (MSYNC)>, Requires<[HasOnlyMSYNC]>;
-def : Pat<(int_ppc_eieio),  (EnforceIEIO)>;
+def : Pat<(int_ppc_iospace_lwsync), (MSYNC)>, Requires<[HasOnlyMSYNC]>;
+def : Pat<(int_ppc_eieio),  (PseudoEIEIO)>;
+def : Pat<(int_ppc_iospace_eieio),  (PseudoEIEIO)>;
 
 //===----------------------------------------------------------------------===//
 // PPC32 Arithmetic Instructions.
@@ -2658,8 +2670,8 @@ let isCompare = 1, hasSideEffects = 0 in {
                           "cmpwi $crD, $rA, $imm", IIC_IntCompare>;
   def CMPLWI : DForm_6_ext<10, (outs crrc:$dst), (ins gprc:$src1, u16imm:$src2),
                            "cmplwi $dst, $src1, $src2", IIC_IntCompare>;
-  def CMPRB  : X_BF3_L1_RS5_RS5<31, 192, (outs crbitrc:$BF),
-                                (ins u1imm:$L, g8rc:$rA, g8rc:$rB),
+  def CMPRB  : X_BF3_L1_RS5_RS5<31, 192, (outs crrc:$BF),
+                                (ins u1imm:$L, gprc:$rA, gprc:$rB),
                                 "cmprb $BF, $L, $rA, $rB", IIC_IntCompare, []>,
                Requires<[IsISA3_0]>;
 }
@@ -5262,6 +5274,8 @@ def MSGSYNC : XForm_0<31, 886, (outs), (ins), "msgsync", IIC_SprMSGSYNC, []>;
 // Power-Saving Mode Instruction:
 def STOP : XForm_0<19, 370, (outs), (ins), "stop", IIC_SprSTOP, []>;
 
+def SETB : XForm_44<31, 128, (outs gprc:$RT), (ins crrc:$BFA),
+                       "setb $RT, $BFA", IIC_IntGeneral>;
 } // IsISA3_0
 
 // Fast 32-bit reverse bits algorithm:

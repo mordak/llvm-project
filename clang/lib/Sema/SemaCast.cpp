@@ -1445,6 +1445,14 @@ static TryCastResult TryStaticCast(Sema &Self, ExprResult &SrcExpr,
           DestPointer->getPointeeType()->getAs<RecordType>())
        msg = diag::err_bad_cxx_cast_unrelated_class;
 
+  if (SrcType->isMatrixType() && DestType->isMatrixType()) {
+    if (Self.CheckMatrixCast(OpRange, DestType, SrcType, Kind)) {
+      SrcExpr = ExprError();
+      return TC_Failed;
+    }
+    return TC_Success;
+  }
+
   // We tried everything. Everything! Nothing works! :-(
   return TC_NotApplicable;
 }
@@ -2328,6 +2336,16 @@ static TryCastResult TryReinterpretCast(Sema &Self, ExprResult &SrcExpr,
       return TC_Success;
     }
 
+    if (Self.LangOpts.OpenCL && !CStyle) {
+      if (DestType->isExtVectorType() || SrcType->isExtVectorType()) {
+        // FIXME: Allow for reinterpret cast between 3 and 4 element vectors
+        if (Self.areVectorTypesSameSize(SrcType, DestType)) {
+          Kind = CK_BitCast;
+          return TC_Success;
+        }
+      }
+    }
+
     // Otherwise, pick a reasonable diagnostic.
     if (!destIsVector)
       msg = diag::err_bad_cxx_cast_vector_to_scalar_different_size;
@@ -2646,13 +2664,6 @@ void CastOperation::CheckCXXCStyleCast(bool FunctionalStyle,
     SrcExpr = Self.DefaultFunctionArrayLvalueConversion(SrcExpr.get());
     if (SrcExpr.isInvalid())
       return;
-  }
-
-  if (DestType->getAs<MatrixType>() ||
-      SrcExpr.get()->getType()->getAs<MatrixType>()) {
-    if (Self.CheckMatrixCast(OpRange, DestType, SrcExpr.get()->getType(), Kind))
-      SrcExpr = ExprError();
-    return;
   }
 
   // AltiVec vector initialization with a single literal.

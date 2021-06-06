@@ -64,6 +64,12 @@ public:
     return getABIMap().find(Name) != getABIMap().end();
   }
 
+  // Return true if this target should use the relative vtables C++ ABI by
+  // default.
+  static bool usesRelativeVTables(const llvm::Triple &T) {
+    return T.isOSFuchsia();
+  }
+
   /// A bogus initialization of the platform ABI.
   TargetCXXABI() : TheKind(GenericItanium) {}
 
@@ -111,6 +117,7 @@ public:
     case Microsoft:
       return T.isKnownWindowsMSVCEnvironment();
     }
+    llvm_unreachable("invalid CXXABI kind");
   };
 
   /// Does this ABI generally fall into the Itanium family of ABIs?

@@ -427,7 +427,8 @@ static void assignCalleeSavedSpillSlots(MachineFunction &F,
   if (TFI->getReturnProtector())
       TFI->getReturnProtector()->saveReturnProtectorRegister(F, CSI);
 
-  if (!TFI->assignCalleeSavedSpillSlots(F, RegInfo, CSI)) {
+  if (!TFI->assignCalleeSavedSpillSlots(F, RegInfo, CSI, MinCSFrameIndex,
+                                        MaxCSFrameIndex)) {
     // If target doesn't implement this, use generic code.
 
     if (CSI.empty())
@@ -464,7 +465,7 @@ static void assignCalleeSavedSpillSlots(MachineFunction &F,
       unsigned Size = RegInfo->getSpillSize(*RC);
       if (FixedSlot == FixedSpillSlots + NumFixedSpillSlots) {
         // Nope, just spill it anywhere convenient.
-        Align Alignment(RegInfo->getSpillAlignment(*RC));
+        Align Alignment = RegInfo->getSpillAlign(*RC);
         // We may not be able to satisfy the desired alignment specification of
         // the TargetRegisterClass if the stack alignment is smaller. Use the
         // min.
@@ -705,10 +706,12 @@ computeFreeStackSlots(MachineFrameInfo &MFI, bool StackGrowsDown,
     // StackSlot scavenging is only implemented for the default stack.
     if (MFI.getStackID(i) == TargetStackID::Default)
       AllocatedFrameSlots.push_back(i);
-  // Add callee-save objects.
-  for (int i = MinCSFrameIndex; i <= (int)MaxCSFrameIndex; ++i)
-    if (MFI.getStackID(i) == TargetStackID::Default)
-      AllocatedFrameSlots.push_back(i);
+  // Add callee-save objects if there are any.
+  if (MinCSFrameIndex <= MaxCSFrameIndex) {
+    for (int i = MinCSFrameIndex; i <= (int)MaxCSFrameIndex; ++i)
+      if (MFI.getStackID(i) == TargetStackID::Default)
+        AllocatedFrameSlots.push_back(i);
+  }
 
   for (int i : AllocatedFrameSlots) {
     // These are converted from int64_t, but they should always fit in int
@@ -861,7 +864,7 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &MF) {
 
   // First assign frame offsets to stack objects that are used to spill
   // callee saved registers.
-  if (StackGrowsDown) {
+  if (StackGrowsDown && MaxCSFrameIndex >= MinCSFrameIndex) {
     for (unsigned i = MinCSFrameIndex; i <= MaxCSFrameIndex; ++i) {
       if (MFI.getStackID(i) !=
           TargetStackID::Default) // Only allocate objects on the default stack.
@@ -1293,6 +1296,9 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &MF,
           DIExpr = DIExpression::appendOpsToArg(DIExpr, Ops, DebugOpIndex);
         }
         MI.getDebugExpressionOp().setMetadata(DIExpr);
+        continue;
+      } else if (MI.isDebugPHI()) {
+        // Allow stack ref to continue onwards.
         continue;
       }
 
