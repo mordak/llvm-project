@@ -365,13 +365,13 @@ Status NativeProcessOpenBSD::PopulateMemoryRegionCache() {
   return Status("Unimplemented");
 }
 
-Status NativeProcessOpenBSD::AllocateMemory(size_t size, uint32_t permissions,
-                                           lldb::addr_t &addr) {
-  return Status("Unimplemented");
+llvm::Expected<lldb::addr_t> NativeProcessOpenBSD::AllocateMemory(size_t size,
+                                                                 uint32_t permissions) {
+  return llvm::make_error<UnimplementedError>();
 }
 
-Status NativeProcessOpenBSD::DeallocateMemory(lldb::addr_t addr) {
-  return Status("Unimplemented");
+llvm::Error NativeProcessOpenBSD::DeallocateMemory(lldb::addr_t addr) {
+  return llvm::make_error<UnimplementedError>();
 }
 
 lldb::addr_t NativeProcessOpenBSD::GetSharedLibraryInfoAddress() {

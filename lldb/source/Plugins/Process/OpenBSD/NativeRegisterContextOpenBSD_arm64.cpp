@@ -7,6 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if defined(__arm64__) || defined(__aarch64__)
+
 #include <elf.h>
 #include <err.h>
 #include <stdint.h>
@@ -556,3 +558,4 @@ int NativeRegisterContextOpenBSD_arm64::WriteRegisterSet(uint32_t set) {
   }
   return -1;
 }
+#endif
