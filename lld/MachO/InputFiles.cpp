@@ -141,19 +141,6 @@ static std::vector<PlatformInfo> getPlatformInfos(const InputFile *input) {
   return platformInfos;
 }
 
-static PlatformKind removeSimulator(PlatformKind platform) {
-  // Mapping of platform to simulator and vice-versa.
-  static const std::map<PlatformKind, PlatformKind> platformMap = {
-      {PlatformKind::iOSSimulator, PlatformKind::iOS},
-      {PlatformKind::tvOSSimulator, PlatformKind::tvOS},
-      {PlatformKind::watchOSSimulator, PlatformKind::watchOS}};
-
-  auto iter = platformMap.find(platform);
-  if (iter == platformMap.end())
-    return platform;
-  return iter->second;
-}
-
 static bool checkCompatibility(const InputFile *input) {
   std::vector<PlatformInfo> platformInfos = getPlatformInfos(input);
   if (platformInfos.empty())
@@ -366,6 +353,7 @@ void ObjFile::parseRelocations(ArrayRef<Section> sectionHeaders,
   ArrayRef<relocation_info> relInfos(
       reinterpret_cast<const relocation_info *>(buf + sec.reloff), sec.nreloc);
 
+  auto subsecIt = subsecMap.rbegin();
   for (size_t i = 0; i < relInfos.size(); i++) {
     // Paired relocations serve as Mach-O's method for attaching a
     // supplemental datum to a primary relocation record. ELF does not
@@ -440,7 +428,24 @@ void ObjFile::parseRelocations(ArrayRef<Section> sectionHeaders,
       r.addend = referentOffset;
     }
 
-    InputSection *subsec = findContainingSubsection(subsecMap, &r.offset);
+    // Find the subsection that this relocation belongs to.
+    // Though not required by the Mach-O format, clang and gcc seem to emit
+    // relocations in order, so let's take advantage of it. However, ld64 emits
+    // unsorted relocations (in `-r` mode), so we have a fallback for that
+    // uncommon case.
+    InputSection *subsec;
+    while (subsecIt != subsecMap.rend() && subsecIt->offset > r.offset)
+      ++subsecIt;
+    if (subsecIt == subsecMap.rend() ||
+        subsecIt->offset + subsecIt->isec->getSize() <= r.offset) {
+      subsec = findContainingSubsection(subsecMap, &r.offset);
+      // Now that we know the relocs are unsorted, avoid trying the 'fast path'
+      // for the other relocations.
+      subsecIt = subsecMap.rend();
+    } else {
+      subsec = subsecIt->isec;
+      r.offset -= subsecIt->offset;
+    }
     subsec->relocs.push_back(r);
 
     if (isSubtrahend) {
@@ -542,11 +547,10 @@ template <class NList>
 static macho::Symbol *createAbsolute(const NList &sym, InputFile *file,
                                      StringRef name) {
   if (sym.n_type & N_EXT) {
-    return symtab->addDefined(name, file, nullptr, sym.n_value, /*size=*/0,
-                              /*isWeakDef=*/false, sym.n_type & N_PEXT,
-                              sym.n_desc & N_ARM_THUMB_DEF,
-                              /*isReferencedDynamically=*/false,
-                              sym.n_desc & N_NO_DEAD_STRIP);
+    return symtab->addDefined(
+        name, file, nullptr, sym.n_value, /*size=*/0,
+        /*isWeakDef=*/false, sym.n_type & N_PEXT, sym.n_desc & N_ARM_THUMB_DEF,
+        /*isReferencedDynamically=*/false, sym.n_desc & N_NO_DEAD_STRIP);
   }
   return make<Defined>(name, file, nullptr, sym.n_value, /*size=*/0,
                        /*isWeakDef=*/false,
@@ -581,6 +585,11 @@ macho::Symbol *ObjFile::parseNonSectionSymbol(const NList &sym,
   }
 }
 
+template <class NList>
+static bool isUndef(const NList &sym) {
+  return (sym.n_type & N_TYPE) == N_UNDF && sym.n_value == 0;
+}
+
 template <class LP>
 void ObjFile::parseSymbols(ArrayRef<typename LP::section> sectionHeaders,
                            ArrayRef<typename LP::nlist> nList,
@@ -590,6 +599,7 @@ void ObjFile::parseSymbols(ArrayRef<typename LP::section> sectionHeaders,
   // Groups indices of the symbols by the sections that contain them.
   std::vector<std::vector<uint32_t>> symbolsBySection(subsections.size());
   symbols.resize(nList.size());
+  SmallVector<unsigned, 32> undefineds;
   for (uint32_t i = 0; i < nList.size(); ++i) {
     const NList &sym = nList[i];
 
@@ -605,6 +615,8 @@ void ObjFile::parseSymbols(ArrayRef<typename LP::section> sectionHeaders,
       if (subsecMap.empty())
         continue;
       symbolsBySection[sym.n_sect - 1].push_back(i);
+    } else if (isUndef(sym)) {
+      undefineds.push_back(i);
     } else {
       symbols[i] = parseNonSectionSymbol(sym, name);
     }
@@ -698,6 +710,18 @@ void ObjFile::parseSymbols(ArrayRef<typename LP::section> sectionHeaders,
       subsecMap.push_back({sym.n_value - sectionAddr, nextIsec});
       subsecEntry = subsecMap.back();
     }
+  }
+
+  // Undefined symbols can trigger recursive fetch from Archives due to
+  // LazySymbols. Process defined symbols first so that the relative order
+  // between a defined symbol and an undefined symbol does not change the
+  // symbol resolution behavior. In addition, a set of interconnected symbols
+  // will all be resolved to the same file, instead of being resolved to
+  // different files.
+  for (unsigned i : undefineds) {
+    const NList &sym = nList[i];
+    StringRef name = strtab + sym.n_strx;
+    symbols[i] = parseNonSectionSymbol(sym, name);
   }
 }
 
@@ -849,6 +873,7 @@ static DylibFile *findDylib(StringRef path, DylibFile *umbrella,
       path.consume_front("@executable_path/")) {
     // ld64 allows overriding this with the undocumented flag -executable_path.
     // lld doesn't currently implement that flag.
+    // FIXME: Consider using finalOutput instead of outputFile.
     path::append(newPath, path::parent_path(config->outputFile), path);
     path = newPath;
   } else if (path.consume_front("@loader_path/")) {
@@ -949,6 +974,8 @@ DylibFile::DylibFile(MemoryBufferRef mb, DylibFile *umbrella,
   if (!checkCompatibility(this))
     return;
 
+  checkAppExtensionSafety(hdr->flags & MH_APP_EXTENSION_SAFE);
+
   for (auto *cmd : findCommands<rpath_command>(hdr, LC_RPATH)) {
     StringRef rpath{reinterpret_cast<const char *>(cmd) + cmd->path};
     rpaths.push_back(rpath);
@@ -1037,6 +1064,8 @@ DylibFile::DylibFile(const InterfaceFile &interface, DylibFile *umbrella,
           std::string(config->platformInfo.target));
     return;
   }
+
+  checkAppExtensionSafety(interface.isApplicationExtensionSafe());
 
   exportingFile = isImplicitlyLinked(installName) ? this : umbrella;
   auto addSymbol = [&](const Twine &name) -> void {
@@ -1166,6 +1195,11 @@ void DylibFile::handleLDInstallNameSymbol(StringRef name,
     this->installName = saver.save(installName);
 }
 
+void DylibFile::checkAppExtensionSafety(bool dylibIsAppExtensionSafe) const {
+  if (config->applicationExtension && !dylibIsAppExtensionSafe)
+    warn("using '-application_extension' with unsafe dylib: " + toString(this));
+}
+
 ArchiveFile::ArchiveFile(std::unique_ptr<object::Archive> &&f)
     : InputFile(ArchiveKind, f->getMemoryBufferRef()), file(std::move(f)) {
   for (const object::Archive::Symbol &sym : file->symbols())
@@ -1201,8 +1235,8 @@ void ArchiveFile::fetch(const object::Archive::Symbol &sym) {
   // to it later.
   const object::Archive::Symbol symCopy = sym;
 
-  if (Optional<InputFile *> file =
-          loadArchiveMember(mb, modTime, getName(), /*objCOnly=*/false)) {
+  if (Optional<InputFile *> file = loadArchiveMember(
+          mb, modTime, getName(), /*objCOnly=*/false, c.getChildOffset())) {
     inputFiles.insert(*file);
     // ld64 doesn't demangle sym here even with -demangle.
     // Match that: intentionally don't call toMachOString().
@@ -1241,8 +1275,22 @@ static macho::Symbol *createBitcodeSymbol(const lto::InputFile::Symbol &objSym,
                             /*noDeadStrip=*/false);
 }
 
-BitcodeFile::BitcodeFile(MemoryBufferRef mbref)
-    : InputFile(BitcodeKind, mbref) {
+BitcodeFile::BitcodeFile(MemoryBufferRef mb, StringRef archiveName,
+                         uint64_t offsetInArchive)
+    : InputFile(BitcodeKind, mb) {
+  std::string path = mb.getBufferIdentifier().str();
+  // ThinLTO assumes that all MemoryBufferRefs given to it have a unique
+  // name. If two members with the same name are provided, this causes a
+  // collision and ThinLTO can't proceed.
+  // So, we append the archive name to disambiguate two members with the same
+  // name from multiple different archives, and offset within the archive to
+  // disambiguate two members of the same name from a single archive.
+  MemoryBufferRef mbref(
+      mb.getBuffer(),
+      saver.save(archiveName.empty() ? path
+                                     : archiveName + sys::path::filename(path) +
+                                           utostr(offsetInArchive)));
+
   obj = check(lto::InputFile::create(mbref));
 
   // Convert LTO Symbols to LLD Symbols in order to perform resolution. The

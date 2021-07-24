@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MLIR_ANALYSIS_AFFINE_STRUCTURES_H
-#define MLIR_ANALYSIS_AFFINE_STRUCTURES_H
+#ifndef MLIR_ANALYSIS_AFFINESTRUCTURES_H
+#define MLIR_ANALYSIS_AFFINESTRUCTURES_H
 
 #include "mlir/Analysis/Presburger/Matrix.h"
 #include "mlir/IR/AffineExpr.h"
@@ -491,18 +491,19 @@ public:
   /// Returns the smallest known constant bound for the extent of the specified
   /// identifier (pos^th), i.e., the smallest known constant that is greater
   /// than or equal to 'exclusive upper bound' - 'lower bound' of the
-  /// identifier. Returns None if it's not a constant. This method employs
-  /// trivial (low complexity / cost) checks and detection. Symbolic identifiers
-  /// are treated specially, i.e., it looks for constant differences between
-  /// affine expressions involving only the symbolic identifiers. `lb` and
-  /// `ub` (along with the `boundFloorDivisor`) are set to represent the lower
-  /// and upper bound associated with the constant difference: `lb`, `ub` have
-  /// the coefficients, and boundFloorDivisor, their divisor. `minLbPos` and
-  /// `minUbPos` if non-null are set to the position of the constant lower bound
-  /// and upper bound respectively (to the same if they are from an equality).
-  /// Ex: if the lower bound is [(s0 + s2 - 1) floordiv 32] for a system with
-  /// three symbolic identifiers, *lb = [1, 0, 1], lbDivisor = 32. See comments
-  /// at function definition for examples.
+  /// identifier. This constant bound is guaranteed to be non-negative. Returns
+  /// None if it's not a constant. This method employs trivial (low complexity /
+  /// cost) checks and detection. Symbolic identifiers are treated specially,
+  /// i.e., it looks for constant differences between affine expressions
+  /// involving only the symbolic identifiers. `lb` and `ub` (along with the
+  /// `boundFloorDivisor`) are set to represent the lower and upper bound
+  /// associated with the constant difference: `lb`, `ub` have the coefficients,
+  /// and boundFloorDivisor, their divisor. `minLbPos` and `minUbPos` if
+  /// non-null are set to the position of the constant lower bound and upper
+  /// bound respectively (to the same if they are from an equality). Ex: if the
+  /// lower bound is [(s0 + s2 - 1) floordiv 32] for a system with three
+  /// symbolic identifiers, *lb = [1, 0, 1], lbDivisor = 32. See comments at
+  /// function definition for examples.
   Optional<int64_t> getConstantBoundOnDimSize(
       unsigned pos, SmallVectorImpl<int64_t> *lb = nullptr,
       int64_t *boundFloorDivisor = nullptr,
@@ -608,7 +609,7 @@ private:
   /// set to true, a potential under approximation (subset) of the rational
   /// shadow / exact integer shadow is computed.
   // See implementation comments for more details.
-  void FourierMotzkinEliminate(unsigned pos, bool darkShadow = false,
+  void fourierMotzkinEliminate(unsigned pos, bool darkShadow = false,
                                bool *isResultIntegerExact = nullptr);
 
   /// Tightens inequalities given that we are dealing with integer spaces. This
@@ -617,7 +618,7 @@ private:
   /// i.e.,
   ///  64*i - 100 >= 0  =>  64*i - 128 >= 0 (since 'i' is an integer). This is a
   /// fast method (linear in the number of coefficients).
-  void GCDTightenInequalities();
+  void gcdTightenInequalities();
 
   /// Normalized each constraints by the GCD of its coefficients.
   void normalizeConstraintsByGCD();
@@ -695,4 +696,4 @@ getFlattenedAffineExprs(IntegerSet set,
 
 } // end namespace mlir.
 
-#endif // MLIR_ANALYSIS_AFFINE_STRUCTURES_H
+#endif // MLIR_ANALYSIS_AFFINESTRUCTURES_H
