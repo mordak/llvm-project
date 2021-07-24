@@ -5675,7 +5675,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         options::OPT__param); // ssp-buffer-size
   } else {
     // If we're not using retguard, then do the usual stack protector
-    RenderSSPOptions(TC, Args, CmdArgs, KernelOrKext);
+    RenderSSPOptions(D, TC, Args, CmdArgs, KernelOrKext);
   }
 
   // -fixup-gadgets
