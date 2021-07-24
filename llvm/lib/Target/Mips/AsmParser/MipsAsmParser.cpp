@@ -2116,6 +2116,7 @@ bool MipsAsmParser::processInstruction(MCInst &Inst, SMLoc IDLoc,
     case Mips::JalTwoReg:
       if (emitLoongson2FBTBFlush(Inst, TOut, IDLoc, STI))
         return true;
+      LLVM_FALLTHROUGH;
     default:
       break;
     }
