@@ -249,12 +249,12 @@ PlatformOpenBSD::DebugProcess(ProcessLaunchInfo &launch_info, Debugger &debugger
   }
 
   // Mark target as currently selected target.
-  debugger.GetTargetList().SetSelectedTarget(target);
+  //debugger.GetTargetList().SetSelectedTarget(target);
 
   // Now create the gdb-remote process.
   LLDB_LOG(log, "having target create process with gdb-remote plugin");
   process_sp = target->CreateProcess(
-      launch_info.GetListener(), "gdb-remote", nullptr);
+      launch_info.GetListener(), "gdb-remote", nullptr, true);
 
   if (!process_sp) {
     error.SetErrorString("CreateProcess() failed for gdb-remote process");
