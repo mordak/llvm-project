@@ -574,6 +574,7 @@ let usesCustomInserter = 1, hasNoSchedulingInfo = 1, Uses = [EFLAGS] in {
   let Predicates = [HasMMX] in
     defm _VR64   : CMOVrr_PSEUDO<VR64, x86mmx>;
 
+  defm _FR16X    : CMOVrr_PSEUDO<FR16X, f16>;
   let Predicates = [HasSSE1,NoAVX512] in
     defm _FR32   : CMOVrr_PSEUDO<FR32, f32>;
   let Predicates = [HasSSE2,NoAVX512] in
@@ -631,6 +632,8 @@ let Predicates = [HasVLX] in {
             (CMOV_VR128X VR128X:$t, VR128X:$f, timm:$cond)>;
   def : Pat<(v8i16 (X86cmov VR128X:$t, VR128X:$f, timm:$cond, EFLAGS)),
             (CMOV_VR128X VR128X:$t, VR128X:$f, timm:$cond)>;
+  def : Pat<(v8f16 (X86cmov VR128X:$t, VR128X:$f, timm:$cond, EFLAGS)),
+            (CMOV_VR128X VR128X:$t, VR128X:$f, timm:$cond)>;
   def : Pat<(v4i32 (X86cmov VR128X:$t, VR128X:$f, timm:$cond, EFLAGS)),
             (CMOV_VR128X VR128X:$t, VR128X:$f, timm:$cond)>;
   def : Pat<(v4f32 (X86cmov VR128X:$t, VR128X:$f, timm:$cond, EFLAGS)),
@@ -641,6 +644,8 @@ let Predicates = [HasVLX] in {
   def : Pat<(v32i8 (X86cmov VR256X:$t, VR256X:$f, timm:$cond, EFLAGS)),
             (CMOV_VR256X VR256X:$t, VR256X:$f, timm:$cond)>;
   def : Pat<(v16i16 (X86cmov VR256X:$t, VR256X:$f, timm:$cond, EFLAGS)),
+            (CMOV_VR256X VR256X:$t, VR256X:$f, timm:$cond)>;
+  def : Pat<(v16f16 (X86cmov VR256X:$t, VR256X:$f, timm:$cond, EFLAGS)),
             (CMOV_VR256X VR256X:$t, VR256X:$f, timm:$cond)>;
   def : Pat<(v8i32 (X86cmov VR256X:$t, VR256X:$f, timm:$cond, EFLAGS)),
             (CMOV_VR256X VR256X:$t, VR256X:$f, timm:$cond)>;
@@ -653,6 +658,8 @@ let Predicates = [HasVLX] in {
 def : Pat<(v64i8 (X86cmov VR512:$t, VR512:$f, timm:$cond, EFLAGS)),
           (CMOV_VR512 VR512:$t, VR512:$f, timm:$cond)>;
 def : Pat<(v32i16 (X86cmov VR512:$t, VR512:$f, timm:$cond, EFLAGS)),
+          (CMOV_VR512 VR512:$t, VR512:$f, timm:$cond)>;
+def : Pat<(v32f16 (X86cmov VR512:$t, VR512:$f, timm:$cond, EFLAGS)),
           (CMOV_VR512 VR512:$t, VR512:$f, timm:$cond)>;
 def : Pat<(v16i32 (X86cmov VR512:$t, VR512:$f, timm:$cond, EFLAGS)),
           (CMOV_VR512 VR512:$t, VR512:$f, timm:$cond)>;

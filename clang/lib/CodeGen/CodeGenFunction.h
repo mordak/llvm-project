@@ -2286,6 +2286,10 @@ public:
   /// instrumented with __cyg_profile_func_* calls
   bool ShouldInstrumentFunction();
 
+  /// ShouldSkipSanitizerInstrumentation - Return true if the current function
+  /// should not be instrumented with sanitizers.
+  bool ShouldSkipSanitizerInstrumentation();
+
   /// ShouldXRayInstrument - Return true if the current function should be
   /// instrumented with XRay nop sleds.
   bool ShouldXRayInstrumentFunction() const;
@@ -4587,9 +4591,6 @@ public:
   /// SetFPAccuracy - Set the minimum required accuracy of the given floating
   /// point operation, expressed as the maximum relative error in ulp.
   void SetFPAccuracy(llvm::Value *Val, float Accuracy);
-
-  /// SetFPModel - Control floating point behavior via fp-model settings.
-  void SetFPModel();
 
   /// Set the codegen fast-math flags.
   void SetFastMathFlags(FPOptions FPFeatures);

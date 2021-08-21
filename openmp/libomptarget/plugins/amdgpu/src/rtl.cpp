@@ -39,7 +39,7 @@
 #include "llvm/Frontend/OpenMP/OMPGridValues.h"
 
 #ifndef TARGET_NAME
-#define TARGET_NAME AMDHSA
+#error "Missing TARGET_NAME macro"
 #endif
 #define DEBUG_PREFIX "Target " GETNAME(TARGET_NAME) " RTL"
 
@@ -436,13 +436,14 @@ struct EnvironmentVariables {
 /// Class containing all the device information
 class RTLDeviceInfoTy {
   std::vector<std::list<FuncOrGblEntryTy>> FuncGblEntries;
+  bool HSAInitializeSucceeded = false;
 
 public:
   // load binary populates symbol tables and mutates various global state
   // run uses those symbol tables
   std::shared_timed_mutex load_run_lock;
 
-  int NumberOfDevices;
+  int NumberOfDevices = 0;
 
   // GPU devices
   std::vector<hsa_agent_t> HSAAgents;
@@ -500,14 +501,11 @@ public:
   static const unsigned HardTeamLimit =
       (1 << 16) - 1; // 64K needed to fit in uint16
   static const int DefaultNumTeams = 128;
-  static const int Max_Teams =
-      llvm::omp::AMDGPUGpuGridValues[llvm::omp::GVIDX::GV_Max_Teams];
-  static const int Warp_Size =
-      llvm::omp::AMDGPUGpuGridValues[llvm::omp::GVIDX::GV_Warp_Size];
-  static const int Max_WG_Size =
-      llvm::omp::AMDGPUGpuGridValues[llvm::omp::GVIDX::GV_Max_WG_Size];
+  static const int Max_Teams = llvm::omp::AMDGPUGridValues.GV_Max_Teams;
+  static const int Warp_Size = llvm::omp::AMDGPUGridValues.GV_Warp_Size;
+  static const int Max_WG_Size = llvm::omp::AMDGPUGridValues.GV_Max_WG_Size;
   static const int Default_WG_Size =
-      llvm::omp::AMDGPUGpuGridValues[llvm::omp::GVIDX::GV_Default_WG_Size];
+      llvm::omp::AMDGPUGridValues.GV_Default_WG_Size;
 
   using MemcpyFunc = hsa_status_t (*)(hsa_signal_t, void *, const void *,
                                       size_t size, hsa_agent_t);
@@ -686,10 +684,12 @@ public:
     else
       print_kernel_trace = 0;
 
-    DP("Start initializing HSA-ATMI\n");
+    DP("Start initializing " GETNAME(TARGET_NAME) "\n");
     hsa_status_t err = core::atl_init_gpu_context();
-    if (err != HSA_STATUS_SUCCESS) {
-      DP("Error when initializing HSA-ATMI\n");
+    if (err == HSA_STATUS_SUCCESS) {
+      HSAInitializeSucceeded = true;
+    } else {
+      DP("Error when initializing " GETNAME(TARGET_NAME) "\n");
       return;
     }
 
@@ -790,7 +790,11 @@ public:
   }
 
   ~RTLDeviceInfoTy() {
-    DP("Finalizing the HSA-ATMI DeviceInfo.\n");
+    DP("Finalizing the " GETNAME(TARGET_NAME) " DeviceInfo.\n");
+    if (!HSAInitializeSucceeded) {
+      // Then none of these can have been set up and they can't be torn down
+      return;
+    }
     // Run destructors on types that use HSA before
     // atmi_finalize removes access to it
     deviceStateStore.clear();
@@ -1051,9 +1055,8 @@ int32_t __tgt_rtl_init_device(int device_id) {
     DeviceInfo.WarpSize[device_id] = wavefront_size;
   } else {
     DP("Default wavefront size: %d\n",
-       llvm::omp::AMDGPUGpuGridValues[llvm::omp::GVIDX::GV_Warp_Size]);
-    DeviceInfo.WarpSize[device_id] =
-        llvm::omp::AMDGPUGpuGridValues[llvm::omp::GVIDX::GV_Warp_Size];
+       llvm::omp::AMDGPUGridValues.GV_Warp_Size);
+    DeviceInfo.WarpSize[device_id] = llvm::omp::AMDGPUGridValues.GV_Warp_Size;
   }
 
   // Adjust teams to the env variables

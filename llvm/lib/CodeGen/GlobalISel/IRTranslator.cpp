@@ -566,7 +566,7 @@ bool IRTranslator::translateBr(const User &U, MachineIRBuilder &MIRBuilder) {
 
   if (BrInst.isUnconditional()) {
     // If the unconditional target is the layout successor, fallthrough.
-    if (!CurMBB.isLayoutSuccessor(Succ0MBB))
+    if (OptLevel == CodeGenOpt::None || !CurMBB.isLayoutSuccessor(Succ0MBB))
       MIRBuilder.buildBr(*Succ0MBB);
 
     // Link successors.
@@ -1763,6 +1763,8 @@ unsigned IRTranslator::getSimpleIntrinsicOpcode(Intrinsic::ID ID) {
       return TargetOpcode::G_VECREDUCE_UMAX;
     case Intrinsic::vector_reduce_umin:
       return TargetOpcode::G_VECREDUCE_UMIN;
+    case Intrinsic::lround:
+      return TargetOpcode::G_LROUND;
   }
   return Intrinsic::not_intrinsic;
 }
@@ -2226,6 +2228,14 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
     MIRBuilder.buildInstr(ScalarOpc, {Dst}, {ScalarSrc, Rdx},
                           MachineInstr::copyFlagsFromInstruction(CI));
 
+    return true;
+  }
+  case Intrinsic::isnan: {
+    Register Src = getOrCreateVReg(*CI.getArgOperand(0));
+    unsigned Flags = MachineInstr::copyFlagsFromInstruction(CI);
+    if (!CI.getFunction()->getAttributes().hasFnAttr(llvm::Attribute::StrictFP))
+      Flags |= MachineInstr::NoFPExcept;
+    MIRBuilder.buildIsNaN(getOrCreateVReg(CI), Src, Flags);
     return true;
   }
 #define INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC)  \

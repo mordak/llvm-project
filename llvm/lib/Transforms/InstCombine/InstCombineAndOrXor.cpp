@@ -367,9 +367,9 @@ getMaskedTypeForICmpPair(Value *&A, Value *&B, Value *&C,
     } else {
       return None;
     }
+
+    assert(Ok && "Failed to find AND on the right side of the RHS icmp.");
   }
-  if (!Ok)
-    return None;
 
   if (L11 == A) {
     B = L12;
@@ -3576,13 +3576,17 @@ Instruction *InstCombinerImpl::visitXor(BinaryOperator &I) {
   // ~min(~X, ~Y) --> max(X, Y)
   // ~max(~X, Y) --> min(X, ~Y)
   auto *II = dyn_cast<IntrinsicInst>(Op0);
-  if (II && match(Op1, m_AllOnes())) {
-    if (match(Op0, m_MaxOrMin(m_Not(m_Value(X)), m_Not(m_Value(Y))))) {
+  if (II && II->hasOneUse() && match(Op1, m_AllOnes())) {
+    if (match(Op0, m_MaxOrMin(m_Value(X), m_Value(Y))) &&
+        isFreeToInvert(X, X->hasOneUse()) &&
+        isFreeToInvert(Y, Y->hasOneUse())) {
       Intrinsic::ID InvID = getInverseMinMaxIntrinsic(II->getIntrinsicID());
-      Value *InvMaxMin = Builder.CreateBinaryIntrinsic(InvID, X, Y);
+      Value *NotX = Builder.CreateNot(X);
+      Value *NotY = Builder.CreateNot(Y);
+      Value *InvMaxMin = Builder.CreateBinaryIntrinsic(InvID, NotX, NotY);
       return replaceInstUsesWith(I, InvMaxMin);
     }
-    if (match(Op0, m_OneUse(m_c_MaxOrMin(m_Not(m_Value(X)), m_Value(Y))))) {
+    if (match(Op0, m_c_MaxOrMin(m_Not(m_Value(X)), m_Value(Y)))) {
       Intrinsic::ID InvID = getInverseMinMaxIntrinsic(II->getIntrinsicID());
       Value *NotY = Builder.CreateNot(Y);
       Value *InvMaxMin = Builder.CreateBinaryIntrinsic(InvID, X, NotY);

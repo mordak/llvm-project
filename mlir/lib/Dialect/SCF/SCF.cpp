@@ -115,8 +115,7 @@ static ParseResult parseExecuteRegionOp(OpAsmParser &parser,
 
 static void print(OpAsmPrinter &p, ExecuteRegionOp op) {
   p << ExecuteRegionOp::getOperationName();
-  if (op.getNumResults() > 0)
-    p << " -> " << op.getResultTypes();
+  p.printOptionalArrowTypeList(op.getResultTypes());
 
   p.printRegion(op.region(),
                 /*printEntryBlockArgs=*/false,
@@ -233,6 +232,16 @@ struct MultiBlockExecuteInliner : public OpRewritePattern<ExecuteRegionOp> {
 void ExecuteRegionOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                                   MLIRContext *context) {
   results.add<SingleBlockExecuteInliner, MultiBlockExecuteInliner>(context);
+}
+
+//===----------------------------------------------------------------------===//
+// ConditionOp
+//===----------------------------------------------------------------------===//
+
+MutableOperandRange
+ConditionOp::getMutableSuccessorOperands(Optional<unsigned> index) {
+  // Pass all operands except the condition to the successor region.
+  return argsMutable();
 }
 
 //===----------------------------------------------------------------------===//
@@ -2171,18 +2180,6 @@ static LogicalResult verify(scf::WhileOp op) {
       op, op.before(),
       "expects the 'before' region to terminate with 'scf.condition'");
   if (!beforeTerminator)
-    return failure();
-
-  TypeRange trailingTerminatorOperands = beforeTerminator.args().getTypes();
-  if (failed(verifyTypeRangesMatch(op, trailingTerminatorOperands,
-                                   op.after().getArgumentTypes(),
-                                   "trailing operands of the 'before' block "
-                                   "terminator and 'after' region arguments")))
-    return failure();
-
-  if (failed(verifyTypeRangesMatch(
-          op, trailingTerminatorOperands, op.getResultTypes(),
-          "trailing operands of the 'before' block terminator and op results")))
     return failure();
 
   auto afterTerminator = verifyAndGetTerminator<scf::YieldOp>(

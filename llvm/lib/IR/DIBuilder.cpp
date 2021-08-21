@@ -243,11 +243,16 @@ DIMacroFile *DIBuilder::createTempMacroFile(DIMacroFile *Parent,
   return MF;
 }
 
-DIEnumerator *DIBuilder::createEnumerator(StringRef Name, int64_t Val,
+DIEnumerator *DIBuilder::createEnumerator(StringRef Name, uint64_t Val,
                                           bool IsUnsigned) {
   assert(!Name.empty() && "Unable to create enumerator without name");
   return DIEnumerator::get(VMContext, APInt(64, Val, !IsUnsigned), IsUnsigned,
                            Name);
+}
+
+DIEnumerator *DIBuilder::createEnumerator(StringRef Name, APSInt Value) {
+  assert(!Name.empty() && "Unable to create enumerator without name");
+  return DIEnumerator::get(VMContext, APInt(Value), Value.isUnsigned(), Name);
 }
 
 DIBasicType *DIBuilder::createUnspecifiedType(StringRef Name) {
@@ -340,15 +345,14 @@ DIDerivedType *DIBuilder::createInheritance(DIType *Ty, DIType *BaseTy,
                             Flags, ExtraData);
 }
 
-DIDerivedType *DIBuilder::createMemberType(DIScope *Scope, StringRef Name,
-                                           DIFile *File, unsigned LineNumber,
-                                           uint64_t SizeInBits,
-                                           uint32_t AlignInBits,
-                                           uint64_t OffsetInBits,
-                                           DINode::DIFlags Flags, DIType *Ty) {
+DIDerivedType *DIBuilder::createMemberType(
+    DIScope *Scope, StringRef Name, DIFile *File, unsigned LineNumber,
+    uint64_t SizeInBits, uint32_t AlignInBits, uint64_t OffsetInBits,
+    DINode::DIFlags Flags, DIType *Ty, DINodeArray Annotations) {
   return DIDerivedType::get(VMContext, dwarf::DW_TAG_member, Name, File,
                             LineNumber, getNonCompileUnitScope(Scope), Ty,
-                            SizeInBits, AlignInBits, OffsetInBits, None, Flags);
+                            SizeInBits, AlignInBits, OffsetInBits, None, Flags,
+                            nullptr, Annotations);
 }
 
 static ConstantAsMetadata *getConstantOrNull(Constant *C) {
@@ -370,14 +374,15 @@ DIDerivedType *DIBuilder::createVariantMemberType(
 DIDerivedType *DIBuilder::createBitFieldMemberType(
     DIScope *Scope, StringRef Name, DIFile *File, unsigned LineNumber,
     uint64_t SizeInBits, uint64_t OffsetInBits, uint64_t StorageOffsetInBits,
-    DINode::DIFlags Flags, DIType *Ty) {
+    DINode::DIFlags Flags, DIType *Ty, DINodeArray Annotations) {
   Flags |= DINode::FlagBitField;
   return DIDerivedType::get(
       VMContext, dwarf::DW_TAG_member, Name, File, LineNumber,
       getNonCompileUnitScope(Scope), Ty, SizeInBits, /* AlignInBits */ 0,
       OffsetInBits, None, Flags,
       ConstantAsMetadata::get(ConstantInt::get(IntegerType::get(VMContext, 64),
-                                               StorageOffsetInBits)));
+                                               StorageOffsetInBits)),
+      Annotations);
 }
 
 DIDerivedType *
@@ -623,12 +628,14 @@ DIBuilder::createForwardDecl(unsigned Tag, StringRef Name, DIScope *Scope,
 DICompositeType *DIBuilder::createReplaceableCompositeType(
     unsigned Tag, StringRef Name, DIScope *Scope, DIFile *F, unsigned Line,
     unsigned RuntimeLang, uint64_t SizeInBits, uint32_t AlignInBits,
-    DINode::DIFlags Flags, StringRef UniqueIdentifier) {
+    DINode::DIFlags Flags, StringRef UniqueIdentifier,
+    DINodeArray Annotations) {
   auto *RetTy =
       DICompositeType::getTemporary(
           VMContext, Tag, Name, F, Line, getNonCompileUnitScope(Scope), nullptr,
           SizeInBits, AlignInBits, 0, Flags, nullptr, RuntimeLang, nullptr,
-          nullptr, UniqueIdentifier)
+          nullptr, UniqueIdentifier, nullptr, nullptr, nullptr, nullptr, nullptr,
+          Annotations)
           .release();
   trackIfUnresolved(RetTy);
   return RetTy;

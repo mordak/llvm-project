@@ -210,8 +210,8 @@ protected:
   unsigned char RegParmMax, SSERegParmMax;
   TargetCXXABI TheCXXABI;
   const LangASMap *AddrSpaceMap;
-  const unsigned *GridValues =
-      nullptr; // Array of target-specific GPU grid values that must be
+  const llvm::omp::GV *GridValues =
+      nullptr; // target-specific GPU grid values that must be
                // consistent between host RTL (plugin), device RTL, and clang.
 
   mutable StringRef PlatformName;
@@ -687,7 +687,8 @@ public:
   }
 
   /// Return the value for the C99 FLT_EVAL_METHOD macro.
-  virtual unsigned getFloatEvalMethod() const { return 0; }
+  //  Note: implementation defined values may be negative.
+  virtual int getFPEvalMethod() const { return 0; }
 
   // getLargeArrayMinWidth/Align - Return the minimum array size that is
   // 'large' and its alignment.
@@ -870,6 +871,11 @@ public:
   /// across the current set of primary and secondary targets.
   virtual ArrayRef<Builtin::Info> getTargetBuiltins() const = 0;
 
+  /// Returns target-specific min and max values VScale_Range.
+  virtual Optional<std::pair<unsigned, unsigned>>
+  getVScaleRange(const LangOptions &LangOpts) const {
+    return None;
+  }
   /// The __builtin_clz* and __builtin_ctz* built-in
   /// functions are specified to have undefined results for zero inputs, but
   /// on targets that support these operations in a way that provides
@@ -1404,10 +1410,10 @@ public:
     return LangAS::Default;
   }
 
-  /// Return a target-specific GPU grid value based on the GVIDX enum \p gv
-  unsigned getGridValue(llvm::omp::GVIDX gv) const {
+  /// Return a target-specific GPU grid values
+  const llvm::omp::GV &getGridValue() const {
     assert(GridValues != nullptr && "GridValues not initialized");
-    return GridValues[gv];
+    return *GridValues;
   }
 
   /// Retrieve the name of the platform as it is used in the

@@ -279,19 +279,27 @@ void ObjFile::parseSections(ArrayRef<Section> sections) {
             {off, make<ConcatInputSection>(segname, name, this,
                                            data.slice(off, literalSize), align,
                                            flags)});
+    } else if (segname == segment_names::llvm) {
+      // ld64 does not appear to emit contents from sections within the __LLVM
+      // segment. Symbols within those sections point to bitcode metadata
+      // instead of actual symbols. Global symbols within those sections could
+      // have the same name without causing duplicate symbol errors. Push an
+      // empty map to ensure indices line up for the remaining sections.
+      // TODO: Evaluate whether the bitcode metadata is needed.
+      subsections.push_back({});
     } else {
       auto *isec =
           make<ConcatInputSection>(segname, name, this, data, align, flags);
-      if (!(isDebugSection(isec->getFlags()) &&
-            isec->getSegName() == segment_names::dwarf)) {
-        subsections.push_back({{0, isec}});
-      } else {
+      if (isDebugSection(isec->getFlags()) &&
+          isec->getSegName() == segment_names::dwarf) {
         // Instead of emitting DWARF sections, we emit STABS symbols to the
         // object files that contain them. We filter them out early to avoid
         // parsing their relocations unnecessarily. But we must still push an
         // empty map to ensure the indices line up for the remaining sections.
         subsections.push_back({});
         debugSections.push_back(isec);
+      } else {
+        subsections.push_back({{0, isec}});
       }
     }
   }
@@ -860,14 +868,37 @@ static DylibFile *loadDylib(StringRef path, DylibFile *umbrella) {
 // files.
 static DylibFile *findDylib(StringRef path, DylibFile *umbrella,
                             const InterfaceFile *currentTopLevelTapi) {
+  // Search order:
+  // 1. Install name basename in -F / -L directories.
+  {
+    StringRef stem = path::stem(path);
+    SmallString<128> frameworkName;
+    path::append(frameworkName, path::Style::posix, stem + ".framework", stem);
+    bool isFramework = path.endswith(frameworkName);
+    if (isFramework) {
+      for (StringRef dir : config->frameworkSearchPaths) {
+        SmallString<128> candidate = dir;
+        path::append(candidate, frameworkName);
+        if (Optional<std::string> dylibPath = resolveDylibPath(candidate))
+          return loadDylib(*dylibPath, umbrella);
+      }
+    } else if (Optional<StringRef> dylibPath = findPathCombination(
+                   stem, config->librarySearchPaths, {".tbd", ".dylib"}))
+      return loadDylib(*dylibPath, umbrella);
+  }
+
+  // 2. As absolute path.
   if (path::is_absolute(path, path::Style::posix))
     for (StringRef root : config->systemLibraryRoots)
       if (Optional<std::string> dylibPath =
               resolveDylibPath((root + path).str()))
         return loadDylib(*dylibPath, umbrella);
 
+  // 3. As relative path.
+
   // TODO: Handle -dylib_file
 
+  // Replace @executable_path, @loader_path, @rpath prefixes in install name.
   SmallString<128> newPath;
   if (config->outputType == MH_EXECUTE &&
       path.consume_front("@executable_path/")) {
@@ -894,6 +925,7 @@ static DylibFile *findDylib(StringRef path, DylibFile *umbrella,
     }
   }
 
+  // FIXME: Should this be further up?
   if (currentTopLevelTapi) {
     for (InterfaceFile &child :
          make_pointee_range(currentTopLevelTapi->documents())) {
@@ -1252,8 +1284,6 @@ static macho::Symbol *createBitcodeSymbol(const lto::InputFile::Symbol &objSym,
   if (objSym.isUndefined())
     return symtab->addUndefined(name, &file, /*isWeakRef=*/false);
 
-  assert(!objSym.isCommon() && "TODO: support common symbols in LTO");
-
   // TODO: Write a test demonstrating why computing isPrivateExtern before
   // LTO compilation is important.
   bool isPrivateExtern = false;
@@ -1267,6 +1297,10 @@ static macho::Symbol *createBitcodeSymbol(const lto::InputFile::Symbol &objSym,
   case GlobalValue::DefaultVisibility:
     break;
   }
+
+  if (objSym.isCommon())
+    return symtab->addCommon(name, &file, objSym.getCommonSize(),
+                             objSym.getCommonAlignment(), isPrivateExtern);
 
   return symtab->addDefined(name, &file, /*isec=*/nullptr, /*value=*/0,
                             /*size=*/0, objSym.isWeak(), isPrivateExtern,

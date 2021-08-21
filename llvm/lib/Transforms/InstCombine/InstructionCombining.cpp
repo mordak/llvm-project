@@ -359,7 +359,8 @@ Value *InstCombinerImpl::simplifyIntToPtrRoundTripCast(Value *Val) {
             PtrToInt->getSrcTy()->getPointerAddressSpace() &&
         DL.getPointerTypeSizeInBits(PtrToInt->getSrcTy()) ==
             DL.getTypeSizeInBits(PtrToInt->getDestTy())) {
-      return Builder.CreateBitCast(PtrToInt->getOperand(0), CastTy);
+      return CastInst::CreateBitOrPointerCast(PtrToInt->getOperand(0), CastTy,
+                                              "", PtrToInt);
     }
   }
   return nullptr;
@@ -2117,10 +2118,12 @@ Instruction *InstCombinerImpl::visitGetElementPtrInst(GetElementPtrInst &GEP) {
               // -- have to recreate %src & %gep
               // put NewSrc at same location as %src
               Builder.SetInsertPoint(cast<Instruction>(PtrOp));
-              auto *NewSrc = cast<GetElementPtrInst>(
-                  Builder.CreateGEP(GEPEltType, SO0, GO1, Src->getName()));
-              NewSrc->setIsInBounds(Src->isInBounds());
-              auto *NewGEP =
+              Value *NewSrc =
+                  Builder.CreateGEP(GEPEltType, SO0, GO1, Src->getName());
+              // Propagate 'inbounds' if the new source was not constant-folded.
+              if (auto *NewSrcGEPI = dyn_cast<GetElementPtrInst>(NewSrc))
+                NewSrcGEPI->setIsInBounds(Src->isInBounds());
+              GetElementPtrInst *NewGEP =
                   GetElementPtrInst::Create(GEPEltType, NewSrc, {SO1});
               NewGEP->setIsInBounds(GEP.isInBounds());
               return NewGEP;
@@ -2129,8 +2132,17 @@ Instruction *InstCombinerImpl::visitGetElementPtrInst(GetElementPtrInst &GEP) {
         }
       }
 
+      // Guard the gep(gep) fold so we don't create an add inside a loop
+      // when there wasn't an equivalent instruction there before.
+      bool DifferentLoops = false;
+      if (LI)
+        if (auto *GEPLoop = LI->getLoopFor(GEP.getParent()))
+          if (auto *SrcOpI = dyn_cast<Instruction>(Src))
+            if (LI->getLoopFor(SrcOpI->getParent()) != GEPLoop)
+              DifferentLoops = true;
+
       // Fold (gep(gep(Ptr,Idx0),Idx1) -> gep(Ptr,add(Idx0,Idx1))
-      if (GO1->getType() == SO1->getType()) {
+      if (!DifferentLoops && GO1->getType() == SO1->getType()) {
         bool NewInBounds = GEP.isInBounds() && Src->isInBounds();
         auto *NewIdx =
             Builder.CreateAdd(GO1, SO1, GEP.getName() + ".idx",
@@ -2927,14 +2939,6 @@ Instruction *InstCombinerImpl::visitUnreachableInst(UnreachableInst &I) {
       return nullptr; // Can not drop any more instructions. We're done here.
     // Otherwise, this instruction can be freely erased,
     // even if it is not side-effect free.
-
-    // Temporarily disable removal of volatile stores preceding unreachable,
-    // pending a potential LangRef change permitting volatile stores to trap.
-    // TODO: Either remove this code, or properly integrate the check into
-    // isGuaranteedToTransferExecutionToSuccessor().
-    if (auto *SI = dyn_cast<StoreInst>(Prev))
-      if (SI->isVolatile())
-        return nullptr; // Can not drop this instruction. We're done here.
 
     // A value may still have uses before we process it here (for example, in
     // another unreachable block), so convert those to poison.

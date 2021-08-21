@@ -11,7 +11,7 @@ endif()
 set(CMAKE_BUILD_WITH_INSTALL_NAME_DIR ON)
 
 if(NOT DEFINED LLVM_VERSION_MAJOR)
-  set(LLVM_VERSION_MAJOR 13)
+  set(LLVM_VERSION_MAJOR 14)
 endif()
 if(NOT DEFINED LLVM_VERSION_MINOR)
   set(LLVM_VERSION_MINOR 0)
@@ -81,9 +81,8 @@ if ("flang" IN_LIST LLVM_ENABLE_PROJECTS)
     list(APPEND LLVM_ENABLE_PROJECTS "mlir")
   endif()
 
-  option(FLANG_BUILD_NEW_DRIVER "Build the flang compiler driver" ON)
-  if (FLANG_BUILD_NEW_DRIVER AND NOT "clang" IN_LIST LLVM_ENABLE_PROJECTS)
-    message(FATAL_ERROR "Clang is not enabled, but it's required by the new Flang driver")
+  if (NOT "clang" IN_LIST LLVM_ENABLE_PROJECTS)
+    message(FATAL_ERROR "Clang is not enabled, but is required for the Flang driver")
   endif()
 endif()
 
@@ -718,6 +717,7 @@ set(LLVM_ENUM_TARGETS "")
 set(LLVM_ENUM_ASM_PRINTERS "")
 set(LLVM_ENUM_ASM_PARSERS "")
 set(LLVM_ENUM_DISASSEMBLERS "")
+set(LLVM_ENUM_TARGETMCAS "")
 foreach(t ${LLVM_TARGETS_TO_BUILD})
   set( td ${LLVM_MAIN_SRC_DIR}/lib/Target/${t} )
 
@@ -747,6 +747,10 @@ foreach(t ${LLVM_TARGETS_TO_BUILD})
     set(LLVM_ENUM_DISASSEMBLERS
       "${LLVM_ENUM_DISASSEMBLERS}LLVM_DISASSEMBLER(${t})\n")
   endif()
+    if( EXISTS ${td}/MCA/CMakeLists.txt )
+    set(LLVM_ENUM_TARGETMCAS
+      "${LLVM_ENUM_TARGETMCAS}LLVM_TARGETMCA(${t})\n")
+  endif()
 endforeach(t)
 
 # Produce the target definition files, which provide a way for clients to easily
@@ -766,6 +770,10 @@ configure_file(
 configure_file(
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Config/Targets.def.in
   ${LLVM_INCLUDE_DIR}/llvm/Config/Targets.def
+  )
+configure_file(
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/Config/TargetMCAs.def.in
+  ${LLVM_INCLUDE_DIR}/llvm/Config/TargetMCAs.def
   )
 
 # They are not referenced. See set_output_directory().
@@ -795,8 +803,8 @@ if (TENSORFLOW_C_LIB_PATH)
   include_directories(${TENSORFLOW_C_LIB_PATH}/include)
   if (NOT TF_PROTO_HEADERS)
     message(STATUS "TF_PROTO_HEADERS not defined. Looking for tensorflow pip package.")
-    execute_process(COMMAND 
-      ${Python3_EXECUTABLE} "-m" "pip" "show" "tensorflow" 
+    execute_process(COMMAND
+      ${Python3_EXECUTABLE} "-m" "pip" "show" "tensorflow"
       OUTPUT_VARIABLE TF_PIP_OUT)
     if ("${TF_PIP_OUT}" STREQUAL "")
       message(FATAL ERROR "Tensorflow pip package is also required for 'development' mode (protobuf headers)")
@@ -828,7 +836,7 @@ if (NOT TENSORFLOW_AOT_PATH STREQUAL "")
   include_directories(${TENSORFLOW_AOT_PATH}/include)
   add_subdirectory(${TENSORFLOW_AOT_PATH}/xla_aot_runtime_src
     ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}/tf_runtime)
-  install(TARGETS tf_xla_runtime EXPORT LLVMExports 
+  install(TARGETS tf_xla_runtime EXPORT LLVMExports
     ARCHIVE DESTINATION lib${LLVM_LIBDIR_SUFFIX} COMPONENT tf_xla_runtime)
   set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS tf_xla_runtime)
 endif()

@@ -30,6 +30,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/DAGCombine.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
+#include "llvm/CodeGen/LowLevelType.h"
 #include "llvm/CodeGen/RuntimeLibcalls.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
@@ -591,7 +592,7 @@ public:
 
   /// Returns if it's reasonable to merge stores to MemVT size.
   virtual bool canMergeStoresTo(unsigned AS, EVT MemVT,
-                                const SelectionDAG &DAG) const {
+                                const MachineFunction &MF) const {
     return true;
   }
 
@@ -1396,6 +1397,11 @@ public:
     return NVT;
   }
 
+  virtual EVT getAsmOperandValueType(const DataLayout &DL, Type *Ty,
+                                     bool AllowUnknown = false) const {
+    return getValueType(DL, Ty, AllowUnknown);
+  }
+
   /// Return the EVT corresponding to this LLVM type.  This is fixed by the LLVM
   /// operations except for the pointer size.  If AllowUnknown is true, this
   /// will return MVT::Other for types with no EVT counterpart (e.g. structs),
@@ -1763,9 +1769,7 @@ public:
   Align getPrefFunctionAlignment() const { return PrefFunctionAlignment; }
 
   /// Return the preferred loop alignment.
-  virtual Align getPrefLoopAlignment(MachineLoop *ML = nullptr) const {
-    return PrefLoopAlignment;
-  }
+  virtual Align getPrefLoopAlignment(MachineLoop *ML = nullptr) const;
 
   /// Should loops be aligned even when the function is marked OptSize (but not
   /// MinSize).
@@ -2506,8 +2510,11 @@ public:
     return false;
   }
 
-  virtual bool isTruncateFree(EVT FromVT, EVT ToVT) const {
-    return false;
+  virtual bool isTruncateFree(EVT FromVT, EVT ToVT) const { return false; }
+  virtual bool isTruncateFree(LLT FromTy, LLT ToTy, const DataLayout &DL,
+                              LLVMContext &Ctx) const {
+    return isTruncateFree(getApproximateEVTForLLT(FromTy, DL, Ctx),
+                          getApproximateEVTForLLT(ToTy, DL, Ctx));
   }
 
   virtual bool isProfitableToHoist(Instruction *I) const { return true; }
@@ -2583,8 +2590,11 @@ public:
     return false;
   }
 
-  virtual bool isZExtFree(EVT FromTy, EVT ToTy) const {
-    return false;
+  virtual bool isZExtFree(EVT FromTy, EVT ToTy) const { return false; }
+  virtual bool isZExtFree(LLT FromTy, LLT ToTy, const DataLayout &DL,
+                          LLVMContext &Ctx) const {
+    return isZExtFree(getApproximateEVTForLLT(FromTy, DL, Ctx),
+                      getApproximateEVTForLLT(ToTy, DL, Ctx));
   }
 
   /// Return true if sign-extension from FromTy to ToTy is cheaper than
@@ -4420,6 +4430,10 @@ public:
   /// \param N Node to expand
   /// \returns The expansion result
   SDValue expandFP_TO_INT_SAT(SDNode *N, SelectionDAG &DAG) const;
+
+  /// Expand isnan depending on function attributes.
+  SDValue expandISNAN(EVT ResultVT, SDValue Op, SDNodeFlags Flags,
+                      const SDLoc &DL, SelectionDAG &DAG) const;
 
   /// Expand CTPOP nodes. Expands vector/scalar CTPOP nodes,
   /// vector nodes can only succeed if all operations are legal/custom.

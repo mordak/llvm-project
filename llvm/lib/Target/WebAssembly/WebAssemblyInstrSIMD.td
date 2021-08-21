@@ -267,6 +267,16 @@ multiclass SIMDLoadZero<Vec vec, bits<32> simdop> {
 defm "" : SIMDLoadZero<I32x4, 0x5c>;
 defm "" : SIMDLoadZero<I64x2, 0x5d>;
 
+// Use load_zero to load scalars into vectors as well where possible.
+// TODO: i32, i16, and i8 scalars
+def load_scalar :
+  PatFrag<(ops node:$addr), (scalar_to_vector (i64 (load $addr)))>;
+defm : LoadPatNoOffset<v2i64, load_scalar, "LOAD_ZERO_I64x2">;
+defm : LoadPatImmOff<v2i64, load_scalar, regPlusImm, "LOAD_ZERO_I64x2">;
+defm : LoadPatImmOff<v2i64, load_scalar, or_is_add, "LOAD_ZERO_I64x2">;
+defm : LoadPatOffsetOnly<v2i64, load_scalar, "LOAD_ZERO_I64x2">;
+defm : LoadPatGlobalAddrOffOnly<v2i64, load_scalar, "LOAD_ZERO_I64x2">;
+
 // TODO: f32x4 and f64x2 as well
 foreach vec = [I32x4, I64x2] in {
   defvar inst = "LOAD_ZERO_"#vec;
@@ -1028,7 +1038,14 @@ defm DOT : SIMD_I<(outs V128:$dst), (ins V128:$lhs, V128:$rhs), (outs), (ins),
                   186>;
 
 // Extending multiplication: extmul_{low,high}_P, extmul_high
-multiclass SIMDExtBinary<Vec vec, Intrinsic node, string name, bits<32> simdop> {
+def extend_t : SDTypeProfile<1, 1, [SDTCisVec<0>, SDTCisVec<1>]>;
+def extend_low_s : SDNode<"WebAssemblyISD::EXTEND_LOW_S", extend_t>;
+def extend_high_s : SDNode<"WebAssemblyISD::EXTEND_HIGH_S", extend_t>;
+def extend_low_u : SDNode<"WebAssemblyISD::EXTEND_LOW_U", extend_t>;
+def extend_high_u : SDNode<"WebAssemblyISD::EXTEND_HIGH_U", extend_t>;
+
+multiclass SIMDExtBinary<Vec vec, SDPatternOperator node, string name,
+                         bits<32> simdop> {
   defm _#vec : SIMD_I<(outs V128:$dst), (ins V128:$lhs, V128:$rhs),
                       (outs), (ins),
                       [(set (vec.vt V128:$dst), (node
@@ -1037,32 +1054,41 @@ multiclass SIMDExtBinary<Vec vec, Intrinsic node, string name, bits<32> simdop> 
                       vec.prefix#"."#name, simdop>;
 }
 
-defm EXTMUL_LOW_S :
-  SIMDExtBinary<I16x8, int_wasm_extmul_low_signed, "extmul_low_i8x16_s", 0x9c>;
-defm EXTMUL_HIGH_S :
-  SIMDExtBinary<I16x8, int_wasm_extmul_high_signed, "extmul_high_i8x16_s", 0x9d>;
-defm EXTMUL_LOW_U :
-  SIMDExtBinary<I16x8, int_wasm_extmul_low_unsigned, "extmul_low_i8x16_u", 0x9e>;
-defm EXTMUL_HIGH_U :
-  SIMDExtBinary<I16x8, int_wasm_extmul_high_unsigned, "extmul_high_i8x16_u", 0x9f>;
+class ExtMulPat<SDNode extend> :
+  PatFrag<(ops node:$lhs, node:$rhs),
+          (mul (extend $lhs), (extend $rhs))> {}
+
+def extmul_low_s : ExtMulPat<extend_low_s>;
+def extmul_high_s : ExtMulPat<extend_high_s>;
+def extmul_low_u : ExtMulPat<extend_low_u>;
+def extmul_high_u : ExtMulPat<extend_high_u>;
 
 defm EXTMUL_LOW_S :
-  SIMDExtBinary<I32x4, int_wasm_extmul_low_signed, "extmul_low_i16x8_s", 0xbc>;
+  SIMDExtBinary<I16x8, extmul_low_s, "extmul_low_i8x16_s", 0x9c>;
 defm EXTMUL_HIGH_S :
-  SIMDExtBinary<I32x4, int_wasm_extmul_high_signed, "extmul_high_i16x8_s", 0xbd>;
+  SIMDExtBinary<I16x8, extmul_high_s, "extmul_high_i8x16_s", 0x9d>;
 defm EXTMUL_LOW_U :
-  SIMDExtBinary<I32x4, int_wasm_extmul_low_unsigned, "extmul_low_i16x8_u", 0xbe>;
+  SIMDExtBinary<I16x8, extmul_low_u, "extmul_low_i8x16_u", 0x9e>;
 defm EXTMUL_HIGH_U :
-  SIMDExtBinary<I32x4, int_wasm_extmul_high_unsigned, "extmul_high_i16x8_u", 0xbf>;
+  SIMDExtBinary<I16x8, extmul_high_u, "extmul_high_i8x16_u", 0x9f>;
 
 defm EXTMUL_LOW_S :
-  SIMDExtBinary<I64x2, int_wasm_extmul_low_signed, "extmul_low_i32x4_s", 0xdc>;
+  SIMDExtBinary<I32x4, extmul_low_s, "extmul_low_i16x8_s", 0xbc>;
 defm EXTMUL_HIGH_S :
-  SIMDExtBinary<I64x2, int_wasm_extmul_high_signed, "extmul_high_i32x4_s", 0xdd>;
+  SIMDExtBinary<I32x4, extmul_high_s, "extmul_high_i16x8_s", 0xbd>;
 defm EXTMUL_LOW_U :
-  SIMDExtBinary<I64x2, int_wasm_extmul_low_unsigned, "extmul_low_i32x4_u", 0xde>;
+  SIMDExtBinary<I32x4, extmul_low_u, "extmul_low_i16x8_u", 0xbe>;
 defm EXTMUL_HIGH_U :
-  SIMDExtBinary<I64x2, int_wasm_extmul_high_unsigned, "extmul_high_i32x4_u", 0xdf>;
+  SIMDExtBinary<I32x4, extmul_high_u, "extmul_high_i16x8_u", 0xbf>;
+
+defm EXTMUL_LOW_S :
+  SIMDExtBinary<I64x2, extmul_low_s, "extmul_low_i32x4_s", 0xdc>;
+defm EXTMUL_HIGH_S :
+  SIMDExtBinary<I64x2, extmul_high_s, "extmul_high_i32x4_s", 0xdd>;
+defm EXTMUL_LOW_U :
+  SIMDExtBinary<I64x2, extmul_low_u, "extmul_low_i32x4_u", 0xde>;
+defm EXTMUL_HIGH_U :
+  SIMDExtBinary<I64x2, extmul_high_u, "extmul_high_i32x4_u", 0xdf>;
 
 //===----------------------------------------------------------------------===//
 // Floating-point unary arithmetic
@@ -1149,6 +1175,16 @@ def : Pat<(vec.int_vt (vselect
           (pmax $lhs, $rhs)>;
 }
 
+// And match the pmin/pmax LLVM intrinsics as well
+def : Pat<(v4f32 (int_wasm_pmin (v4f32 V128:$lhs), (v4f32 V128:$rhs))),
+          (PMIN_F32x4 V128:$lhs, V128:$rhs)>;
+def : Pat<(v4f32 (int_wasm_pmax (v4f32 V128:$lhs), (v4f32 V128:$rhs))),
+          (PMAX_F32x4 V128:$lhs, V128:$rhs)>;
+def : Pat<(v2f64 (int_wasm_pmin (v2f64 V128:$lhs), (v2f64 V128:$rhs))),
+          (PMIN_F64x2 V128:$lhs, V128:$rhs)>;
+def : Pat<(v2f64 (int_wasm_pmax (v2f64 V128:$lhs), (v2f64 V128:$rhs))),
+          (PMAX_F64x2 V128:$lhs, V128:$rhs)>;
+
 //===----------------------------------------------------------------------===//
 // Conversions
 //===----------------------------------------------------------------------===//
@@ -1191,12 +1227,6 @@ defm "" : SIMDConvert<F64x2, I32x4, convert_low_s, "convert_low_i32x4_s", 0xfe>;
 defm "" : SIMDConvert<F64x2, I32x4, convert_low_u, "convert_low_i32x4_u", 0xff>;
 
 // Extending operations
-def extend_t : SDTypeProfile<1, 1, [SDTCisVec<0>, SDTCisVec<1>]>;
-def extend_low_s : SDNode<"WebAssemblyISD::EXTEND_LOW_S", extend_t>;
-def extend_high_s : SDNode<"WebAssemblyISD::EXTEND_HIGH_S", extend_t>;
-def extend_low_u : SDNode<"WebAssemblyISD::EXTEND_LOW_U", extend_t>;
-def extend_high_u : SDNode<"WebAssemblyISD::EXTEND_HIGH_U", extend_t>;
-
 // TODO: refactor this to be uniform for i64x2 if the numbering is not changed.
 multiclass SIMDExtend<Vec vec, bits<32> baseInst> {
   defm "" : SIMDConvert<vec, vec.split, extend_low_s,
@@ -1230,87 +1260,6 @@ multiclass SIMDNarrow<Vec vec, bits<32> baseInst> {
 
 defm "" : SIMDNarrow<I16x8, 101>;
 defm "" : SIMDNarrow<I32x4, 133>;
-
-// Use narrowing operations for truncating stores. Since the narrowing
-// operations are saturating instead of truncating, we need to mask
-// the stored values first.
-def store_v8i8_trunc_v8i16 :
-  OutPatFrag<(ops node:$val),
-             (EXTRACT_LANE_I64x2
-               (NARROW_U_I8x16
-                 (AND
-                   (CONST_V128_I16x8
-                     0x00ff, 0x00ff, 0x00ff, 0x00ff,
-                     0x00ff, 0x00ff, 0x00ff, 0x00ff),
-                   node:$val),
-                 $val), // Unused input
-               0)>;
-
-def store_v4i16_trunc_v4i32 :
-  OutPatFrag<(ops node:$val),
-             (EXTRACT_LANE_I64x2
-               (NARROW_U_I16x8
-                 (AND
-                  (CONST_V128_I32x4
-                    0x0000ffff, 0x0000ffff, 0x0000ffff, 0x0000ffff),
-                  node:$val),
-                 $val), // Unused input
-               0)>;
-
-// Store patterns adapted from WebAssemblyInstrMemory.td
-multiclass NarrowingStorePatNoOffset<Vec vec, OutPatFrag out> {
-  defvar node = !cast<PatFrag>("truncstorevi"#vec.split.lane_bits);
-  def : Pat<(node vec.vt:$val, I32:$addr),
-            (STORE_I64_A32 0, 0, $addr, (out $val))>,
-        Requires<[HasAddr32]>;
-  def : Pat<(node vec.vt:$val, I64:$addr),
-            (STORE_I64_A64 0, 0, $addr, (out $val))>,
-        Requires<[HasAddr64]>;
-}
-
-defm : NarrowingStorePatNoOffset<I16x8, store_v8i8_trunc_v8i16>;
-defm : NarrowingStorePatNoOffset<I32x4, store_v4i16_trunc_v4i32>;
-
-multiclass NarrowingStorePatImmOff<Vec vec, PatFrag operand, OutPatFrag out> {
-  defvar node = !cast<PatFrag>("truncstorevi"#vec.split.lane_bits);
-  def : Pat<(node vec.vt:$val, (operand I32:$addr, imm:$off)),
-            (STORE_I64_A32 0, imm:$off, $addr, (out $val))>,
-        Requires<[HasAddr32]>;
-  def : Pat<(node vec.vt:$val, (operand I64:$addr, imm:$off)),
-            (STORE_I64_A64 0, imm:$off, $addr, (out $val))>,
-        Requires<[HasAddr64]>;
-}
-
-defm : NarrowingStorePatImmOff<I16x8, regPlusImm, store_v8i8_trunc_v8i16>;
-defm : NarrowingStorePatImmOff<I32x4, regPlusImm, store_v4i16_trunc_v4i32>;
-defm : NarrowingStorePatImmOff<I16x8, or_is_add, store_v8i8_trunc_v8i16>;
-defm : NarrowingStorePatImmOff<I32x4, or_is_add, store_v4i16_trunc_v4i32>;
-
-multiclass NarrowingStorePatOffsetOnly<Vec vec, OutPatFrag out> {
-  defvar node = !cast<PatFrag>("truncstorevi"#vec.split.lane_bits);
-  def : Pat<(node vec.vt:$val, imm:$off),
-            (STORE_I64_A32 0, imm:$off, (CONST_I32 0), (out $val))>,
-        Requires<[HasAddr32]>;
-  def : Pat<(node vec.vt:$val, imm:$off),
-            (STORE_I64_A64 0, imm:$off, (CONST_I64 0), (out $val))>,
-        Requires<[HasAddr64]>;
-}
-
-defm : NarrowingStorePatOffsetOnly<I16x8, store_v8i8_trunc_v8i16>;
-defm : NarrowingStorePatOffsetOnly<I32x4, store_v4i16_trunc_v4i32>;
-
-multiclass NarrowingStorePatGlobalAddrOffOnly<Vec vec, OutPatFrag out> {
-  defvar node = !cast<PatFrag>("truncstorevi"#vec.split.lane_bits);
-  def : Pat<(node vec.vt:$val, (WebAssemblywrapper tglobaladdr:$off)),
-            (STORE_I64_A32 0, tglobaladdr:$off, (CONST_I32 0), (out $val))>,
-        Requires<[IsNotPIC, HasAddr32]>;
-  def : Pat<(node vec.vt:$val, (WebAssemblywrapper tglobaladdr:$off)),
-            (STORE_I64_A64  0, tglobaladdr:$off, (CONST_I64 0), (out $val))>,
-        Requires<[IsNotPIC, HasAddr64]>;
-}
-
-defm : NarrowingStorePatGlobalAddrOffOnly<I16x8, store_v8i8_trunc_v8i16>;
-defm : NarrowingStorePatGlobalAddrOffOnly<I32x4, store_v4i16_trunc_v4i32>;
 
 // Bitcasts are nops
 // Matching bitcast t1 to t1 causes strange errors, so avoid repeating types

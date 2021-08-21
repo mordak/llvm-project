@@ -350,13 +350,10 @@ bool ExternalFileUnit::SetSequentialVariableFormattedRecordLength() {
       if (*recordLength > 0 && record[*recordLength - 1] == '\r') {
         --*recordLength;
       }
-    } else {
-      recordLength = bytes; // final record w/o \n
+      return true;
     }
-    return true;
-  } else {
-    return false;
   }
+  return false;
 }
 
 void ExternalFileUnit::SetLeftTabLimit() {
@@ -421,7 +418,10 @@ void ExternalFileUnit::FinishReadingRecord(IoErrorHandler &handler) {
             Frame()[recordOffsetInFrame_ + *recordLength] == '\n') {
           ++recordOffsetInFrame_;
         }
-        recordOffsetInFrame_ += *recordLength;
+        if (!resumptionRecordNumber || mayPosition()) {
+          frameOffsetInFile_ += recordOffsetInFrame_ + *recordLength;
+          recordOffsetInFrame_ = 0;
+        }
         recordLength.reset();
       }
     }
@@ -612,10 +612,17 @@ void ExternalFileUnit::BeginSequentialVariableFormattedInputRecord(
   }
   std::size_t length{0};
   do {
-    std::size_t need{recordOffsetInFrame_ + length + 1};
-    length = ReadFrame(frameOffsetInFile_, need, handler);
+    std::size_t need{length + 1};
+    length =
+        ReadFrame(frameOffsetInFile_, recordOffsetInFrame_ + need, handler) -
+        recordOffsetInFrame_;
     if (length < need) {
-      handler.SignalEnd();
+      if (length > 0) {
+        // final record w/o \n
+        recordLength = length;
+      } else {
+        handler.SignalEnd();
+      }
       break;
     }
   } while (!SetSequentialVariableFormattedRecordLength());
@@ -687,13 +694,13 @@ void ExternalFileUnit::BackspaceVariableFormattedRecord(
       if (const char *p{
               FindLastNewline(Frame(), prevNL - 1 - frameOffsetInFile_)}) {
         recordOffsetInFrame_ = p - Frame() + 1;
-        *recordLength = prevNL - (frameOffsetInFile_ + recordOffsetInFrame_);
+        recordLength = prevNL - (frameOffsetInFile_ + recordOffsetInFrame_);
         break;
       }
     }
     if (frameOffsetInFile_ == 0) {
       recordOffsetInFrame_ = 0;
-      *recordLength = prevNL;
+      recordLength = prevNL;
       break;
     }
     frameOffsetInFile_ -= std::min<std::int64_t>(frameOffsetInFile_, 1024);
