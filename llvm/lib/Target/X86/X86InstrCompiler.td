@@ -287,11 +287,11 @@ def MORESTACK_RET_RESTORE_R10 : I<0, Pseudo, (outs), (ins), "", []>;
 // used as a return value. When emitted as a split BB, the single byte
 // register would sometimes be widened to 4 bytes, which would corrupt
 // the return value (ie mov %ecx, %eax instead of mov %cl, %al).
-let isCodeGenOnly = 1, Uses = [EFLAGS] in {
+let isCodeGenOnly = 1, hasNoSchedulingInfo = 1, Uses = [EFLAGS] in {
 def RETGUARD_JMP_TRAP: I<0, Pseudo, (outs), (ins), "", []>;
 }
 
-let isCodeGenOnly = 1 in {
+let isCodeGenOnly = 1, hasNoSchedulingInfo = 1 in {
 def JMP_TRAP: I<0, Pseudo, (outs), (ins), "", []>;
 }
 
