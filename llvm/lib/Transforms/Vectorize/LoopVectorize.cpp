@@ -4049,19 +4049,17 @@ void InnerLoopVectorizer::truncateToMinimalBitwidths(VPTransformState &State) {
         // Don't do anything with the operands, just extend the result.
         continue;
       } else if (auto *IE = dyn_cast<InsertElementInst>(I)) {
-        auto Elements = cast<FixedVectorType>(IE->getOperand(0)->getType())
-                            ->getNumElements();
+        auto Elements =
+            cast<VectorType>(IE->getOperand(0)->getType())->getElementCount();
         auto *O0 = B.CreateZExtOrTrunc(
-            IE->getOperand(0),
-            FixedVectorType::get(ScalarTruncatedTy, Elements));
+            IE->getOperand(0), VectorType::get(ScalarTruncatedTy, Elements));
         auto *O1 = B.CreateZExtOrTrunc(IE->getOperand(1), ScalarTruncatedTy);
         NewI = B.CreateInsertElement(O0, O1, IE->getOperand(2));
       } else if (auto *EE = dyn_cast<ExtractElementInst>(I)) {
-        auto Elements = cast<FixedVectorType>(EE->getOperand(0)->getType())
-                            ->getNumElements();
+        auto Elements =
+            cast<VectorType>(EE->getOperand(0)->getType())->getElementCount();
         auto *O0 = B.CreateZExtOrTrunc(
-            EE->getOperand(0),
-            FixedVectorType::get(ScalarTruncatedTy, Elements));
+            EE->getOperand(0), VectorType::get(ScalarTruncatedTy, Elements));
         NewI = B.CreateExtractElement(O0, EE->getOperand(2));
       } else {
         // If we don't know what to do, be conservative and don't do anything.
@@ -5125,13 +5123,12 @@ void LoopVectorizationCostModel::collectLoopScalars(ElementCount VF) {
   auto evaluatePtrUse = [&](Instruction *MemAccess, Value *Ptr) {
     if (isScalarPtrInduction(MemAccess, Ptr)) {
       Worklist.insert(cast<Instruction>(Ptr));
-      Instruction *Update = cast<Instruction>(
-          cast<PHINode>(Ptr)->getIncomingValueForBlock(Latch));
-      Worklist.insert(Update);
       LLVM_DEBUG(dbgs() << "LV: Found new scalar instruction: " << *Ptr
                         << "\n");
-      LLVM_DEBUG(dbgs() << "LV: Found new scalar instruction: " << *Update
-                        << "\n");
+
+      Instruction *Update = cast<Instruction>(
+          cast<PHINode>(Ptr)->getIncomingValueForBlock(Latch));
+      ScalarPtrs.insert(Update);
       return;
     }
     // We only care about bitcast and getelementptr instructions contained in
@@ -5145,11 +5142,12 @@ void LoopVectorizationCostModel::collectLoopScalars(ElementCount VF) {
     if (Worklist.count(I))
       return;
 
-    // If the use of the pointer will be a scalar use, and all users of the
-    // pointer are memory accesses, place the pointer in ScalarPtrs. Otherwise,
-    // place the pointer in PossibleNonScalarPtrs.
-    if (isScalarUse(MemAccess, Ptr) && llvm::all_of(I->users(), [&](User *U) {
-          return isa<LoadInst>(U) || isa<StoreInst>(U);
+    // If all users of the pointer will be memory accesses and scalar, place the
+    // pointer in ScalarPtrs. Otherwise, place the pointer in
+    // PossibleNonScalarPtrs.
+    if (llvm::all_of(I->users(), [&](User *U) {
+          return (isa<LoadInst>(U) || isa<StoreInst>(U)) &&
+                 isScalarUse(cast<Instruction>(U), Ptr);
         }))
       ScalarPtrs.insert(I);
     else
@@ -5435,6 +5433,21 @@ void LoopVectorizationCostModel::collectLoopUniforms(ElementCount VF) {
   // lane 0 demanded or b) are uses which demand only lane 0 of their operand.
   for (auto *BB : TheLoop->blocks())
     for (auto &I : *BB) {
+      if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(&I)) {
+        switch (II->getIntrinsicID()) {
+        case Intrinsic::sideeffect:
+        case Intrinsic::experimental_noalias_scope_decl:
+        case Intrinsic::assume:
+        case Intrinsic::lifetime_start:
+        case Intrinsic::lifetime_end:
+          if (TheLoop->hasLoopInvariantOperands(&I))
+            addToWorklistIfAllowed(&I);
+          break;
+        default:
+          break;
+        }
+      }
+
       // If there's no pointer operand, there's nothing to do.
       auto *Ptr = getLoadStorePointerOperand(&I);
       if (!Ptr)
@@ -5818,6 +5831,12 @@ LoopVectorizationCostModel::computeMaxVF(ElementCount UserVF, unsigned UserIC) {
       return MaxFactors;
     }
   }
+
+  // For scalable vectors, don't use tail folding as this is currently not yet
+  // supported. The code is likely to have ended up here if the tripcount is
+  // low, in which case it makes sense not to use scalable vectors.
+  if (MaxFactors.ScalableVF.isVector())
+    MaxFactors.ScalableVF = ElementCount::getScalable(0);
 
   // If we don't know the precise trip count, or if the trip count that we
   // found modulo the vectorization factor is not zero, try to fold the tail
@@ -6469,9 +6488,21 @@ unsigned LoopVectorizationCostModel::selectInterleaveCount(ElementCount VF,
 
     // If we have a scalar reduction (vector reductions are already dealt with
     // by this point), we can increase the critical path length if the loop
-    // we're interleaving is inside another loop. Limit, by default to 2, so the
-    // critical path only gets increased by one reduction operation.
+    // we're interleaving is inside another loop. For tree-wise reductions
+    // set the limit to 2, and for ordered reductions it's best to disable
+    // interleaving entirely.
     if (HasReductions && TheLoop->getLoopDepth() > 1) {
+      bool HasOrderedReductions =
+          any_of(Legal->getReductionVars(), [&](auto &Reduction) -> bool {
+            const RecurrenceDescriptor &RdxDesc = Reduction.second;
+            return RdxDesc.isOrdered();
+          });
+      if (HasOrderedReductions) {
+        LLVM_DEBUG(
+            dbgs() << "LV: Not interleaving scalar ordered reductions.\n");
+        return 1;
+      }
+
       unsigned F = static_cast<unsigned>(MaxNestedScalarReductionIC);
       SmallIC = std::min(SmallIC, F);
       StoresIC = std::min(StoresIC, F);
@@ -6889,7 +6920,8 @@ LoopVectorizationCostModel::expectedCost(
       VectorizationCostTy C = getInstructionCost(&I, VF);
 
       // Check if we should override the cost.
-      if (ForceTargetInstructionCost.getNumOccurrences() > 0)
+      if (C.first.isValid() &&
+          ForceTargetInstructionCost.getNumOccurrences() > 0)
         C.first = InstructionCost(ForceTargetInstructionCost);
 
       // Keep a list of instructions with invalid costs.
@@ -7174,8 +7206,15 @@ Optional<InstructionCost> LoopVectorizationCostModel::getReductionPatternCost(
 
   const RecurrenceDescriptor &RdxDesc =
       Legal->getReductionVars()[cast<PHINode>(ReductionPhi)];
-  InstructionCost BaseCost =
-      TTI.getArithmeticReductionCost(RdxDesc.getOpcode(), VectorTy, CostKind);
+
+  InstructionCost BaseCost = TTI.getArithmeticReductionCost(
+      RdxDesc.getOpcode(), VectorTy, RdxDesc.getFastMathFlags(), CostKind);
+
+  // If we're using ordered reductions then we can just return the base cost
+  // here, since getArithmeticReductionCost calculates the full ordered
+  // reduction cost when FP reassociation is not allowed.
+  if (useOrderedReductions(RdxDesc))
+    return BaseCost;
 
   // Get the operand that was not the reduction chain and match it to one of the
   // patterns, returning the better cost if it is found.
@@ -7413,8 +7452,6 @@ void LoopVectorizationCostModel::setCostBasedWideningDecision(ElementCount VF) {
         Decision = CM_GatherScatter;
         Cost = GatherScatterCost;
       } else {
-        assert(!VF.isScalable() &&
-               "We cannot yet scalarise for scalable vectors");
         Decision = CM_Scalarize;
         Cost = ScalarizationCost;
       }
@@ -8894,6 +8931,37 @@ VPBasicBlock *VPRecipeBuilder::handleReplication(
   bool IsPredicated = LoopVectorizationPlanner::getDecisionAndClampRange(
       [&](ElementCount VF) { return CM.isPredicatedInst(I); }, Range);
 
+  // Even if the instruction is not marked as uniform, there are certain
+  // intrinsic calls that can be effectively treated as such, so we check for
+  // them here. Conservatively, we only do this for scalable vectors, since
+  // for fixed-width VFs we can always fall back on full scalarization.
+  if (!IsUniform && Range.Start.isScalable() && isa<IntrinsicInst>(I)) {
+    switch (cast<IntrinsicInst>(I)->getIntrinsicID()) {
+    case Intrinsic::assume:
+    case Intrinsic::lifetime_start:
+    case Intrinsic::lifetime_end:
+      // For scalable vectors if one of the operands is variant then we still
+      // want to mark as uniform, which will generate one instruction for just
+      // the first lane of the vector. We can't scalarize the call in the same
+      // way as for fixed-width vectors because we don't know how many lanes
+      // there are.
+      //
+      // The reasons for doing it this way for scalable vectors are:
+      //   1. For the assume intrinsic generating the instruction for the first
+      //      lane is still be better than not generating any at all. For
+      //      example, the input may be a splat across all lanes.
+      //   2. For the lifetime start/end intrinsics the pointer operand only
+      //      does anything useful when the input comes from a stack object,
+      //      which suggests it should always be uniform. For non-stack objects
+      //      the effect is to poison the object, which still allows us to
+      //      remove the call.
+      IsUniform = true;
+      break;
+    default:
+      break;
+    }
+  }
+
   auto *Recipe = new VPReplicateRecipe(I, Plan->mapToVPValues(I->operands()),
                                        IsUniform, IsPredicated);
   setRecipe(I, Recipe);
@@ -9327,8 +9395,11 @@ VPlanPtr LoopVectorizationPlanner::buildVPlanWithVPRecipes(
         RecipeBuilder.getRecipe(IG->getInsertPos()));
     SmallVector<VPValue *, 4> StoredValues;
     for (unsigned i = 0; i < IG->getFactor(); ++i)
-      if (auto *SI = dyn_cast_or_null<StoreInst>(IG->getMember(i)))
-        StoredValues.push_back(Plan->getOrAddVPValue(SI->getOperand(0)));
+      if (auto *SI = dyn_cast_or_null<StoreInst>(IG->getMember(i))) {
+        auto *StoreR =
+            cast<VPWidenMemoryInstructionRecipe>(RecipeBuilder.getRecipe(SI));
+        StoredValues.push_back(StoreR->getStoredValue());
+      }
 
     auto *VPIG = new VPInterleaveRecipe(IG, Recipe->getAddr(), StoredValues,
                                         Recipe->getMask());
