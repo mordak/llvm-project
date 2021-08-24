@@ -5896,10 +5896,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    options::OPT_mno_speculative_load_hardening, false))
     CmdArgs.push_back(Args.MakeArgString("-mspeculative-load-hardening"));
 
-  RenderSSPOptions(D, TC, Args, CmdArgs, KernelOrKext);
-  RenderSCPOptions(TC, Args, CmdArgs);
-  RenderTrivialAutoVarInitOptions(D, TC, Args, CmdArgs);
-
   // -ret-protector
   unsigned RetProtector = 1;
   if (Arg *A = Args.getLastArg(options::OPT_fno_ret_protector,
@@ -5941,6 +5937,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     else if (A->getOption().matches(options::OPT_ffixup_gadgets))
       CmdArgs.push_back(Args.MakeArgString(Twine("-x86-fixup-gadgets=true")));
   }
+
+  RenderSCPOptions(TC, Args, CmdArgs);
+  RenderTrivialAutoVarInitOptions(D, TC, Args, CmdArgs);
 
   // Translate -mstackrealign
   if (Args.hasFlag(options::OPT_mstackrealign, options::OPT_mno_stackrealign,
