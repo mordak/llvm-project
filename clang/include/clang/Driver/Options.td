@@ -3733,7 +3733,7 @@ defm pthread : BoolOption<"", "pthread",
   LangOpts<"POSIXThreads">, DefaultFalse,
   PosFlag<SetTrue, [], "Support POSIX threads in generated code">,
   NegFlag<SetFalse>, BothFlags<[CC1Option]>>;
-def p : Flag<["-"], "p">;
+def p : Flag<["-"], "p">, Alias<pg>;
 def pie : Flag<["-"], "pie">, Group<Link_Group>;
 def static_pie : Flag<["-"], "static-pie">, Group<Link_Group>;
 def read__only__relocs : Separate<["-"], "read_only_relocs">;
