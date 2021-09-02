@@ -101,14 +101,14 @@ static inline uint32_t my_rand() {
 #endif
 
 #if !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__ANDROID__) && \
-    !defined(__NetBSD__) && !defined(_WIN32)
+  !defined(__NetBSD__) && !defined(_WIN32) && !defined(__OpenBSD__)
 # define SANITIZER_TEST_HAS_MEMALIGN 1
 #else
 # define SANITIZER_TEST_HAS_MEMALIGN 0
 #endif
 
 #if !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__ANDROID__) && \
-    !defined(__NetBSD__) && !defined(_WIN32) && \
+    !defined(__NetBSD__) && !defined(__OpenBSD__) && !defined(_WIN32) && \
     !(defined(__sun__) && defined(__svr4__))
 # define SANITIZER_TEST_HAS_PVALLOC 1
 # define SANITIZER_TEST_HAS_MALLOC_USABLE_SIZE 1
