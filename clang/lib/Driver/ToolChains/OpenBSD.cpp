@@ -309,7 +309,7 @@ std::string OpenBSD::getCompilerRT(const ArgList &Args,
   } else {
     SmallString<128> P(getDriver().ResourceDir);
     std::string CRTBasename =
-        getCompilerRTBasename(Args, Component, Type, /*AddArch=*/false);
+        buildCompilerRTBasename(Args, Component, Type, /*AddArch=*/false);
     llvm::sys::path::append(P, "lib", CRTBasename);
     return std::string(P.str());
   }
