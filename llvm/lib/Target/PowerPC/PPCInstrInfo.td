@@ -1649,7 +1649,7 @@ def RESTORE_CRBIT : PPCEmitTimePseudo<(outs crbitrc:$cond), (ins memri:$F),
                            "#RESTORE_CRBIT", []>;
 }
 
-let isTerminator = 1, isBarrier = 1, PPC970_Unit = 7 in {
+let isTerminator = 1, isBarrier = 1, PPC970_Unit = 7, hasSideEffects = 0 in {
   let isPredicable = 1, isReturn = 1, Uses = [LR, RM] in
     def BLR : XLForm_2_ext<19, 16, 20, 0, 0, (outs), (ins), "blr", IIC_BrB,
                            [(retflag)]>, Requires<[In32BitMode]>;
@@ -1715,7 +1715,8 @@ def RETGUARD_LOAD_COOKIE : PPCEmitTimePseudo<(outs gprc:$dest),
                         (ins calltarget:$sym), "RGLoadCookie", []>;
 }
 
-let isBranch = 1, isTerminator = 1, hasCtrlDep = 1, PPC970_Unit = 7 in {
+let isBranch = 1, isTerminator = 1, hasCtrlDep = 1, PPC970_Unit = 7,
+    hasSideEffects = 0 in {
   let isBarrier = 1 in {
     let isPredicable = 1 in
       def B : IForm<18, 0, 0, (outs), (ins directbrtarget:$dst),
@@ -1807,7 +1808,8 @@ let isBranch = 1, isTerminator = 1, hasCtrlDep = 1, PPC970_Unit = 7 in {
 }
 
 // The unconditional BCL used by the SjLj setjmp code.
-let isCall = 1, hasCtrlDep = 1, isCodeGenOnly = 1, PPC970_Unit = 7 in {
+let isCall = 1, hasCtrlDep = 1, isCodeGenOnly = 1, PPC970_Unit = 7,
+    hasSideEffects = 0 in {
   let Defs = [LR], Uses = [RM] in {
     def BCLalways  : BForm_2<16, 20, 31, 0, 1, (outs), (ins condbrtarget:$dst),
                             "bcl 20, 31, $dst">;
@@ -1942,7 +1944,7 @@ let isCall = 1, PPC970_Unit = 7, isCodeGenOnly = 1,
 }
 
 
-let isCodeGenOnly = 1 in {
+let isCodeGenOnly = 1, hasSideEffects = 0 in {
 
 let isTerminator = 1, isBarrier = 1, PPC970_Unit = 7, isBranch = 1,
     isIndirectBranch = 1, isCall = 1, isReturn = 1, Uses = [CTR, RM]  in
@@ -5084,7 +5086,7 @@ def RLWNMbm_rec : PPCAsmPseudo<"rlwnm. $rA, $rS, $n, $b",
 
 // These generic branch instruction forms are used for the assembler parser only.
 // Defs and Uses are conservative, since we don't know the BO value.
-let PPC970_Unit = 7, isBranch = 1 in {
+let PPC970_Unit = 7, isBranch = 1, hasSideEffects = 0 in {
   let Defs = [CTR], Uses = [CTR, RM] in {
     def gBC : BForm_3<16, 0, 0, (outs),
                       (ins u5imm:$bo, crbitrc:$bi, condbrtarget:$dst),

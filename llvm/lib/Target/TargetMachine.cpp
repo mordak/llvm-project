@@ -101,15 +101,11 @@ bool TargetMachine::shouldAssumeDSOLocal(const Module &M,
   // dso_preemptable.  At this point in time, the various IR producers
   // have not been transitioned to always produce a dso_local when it
   // is possible to do so.
-  // In the case of ExternalSymbolSDNode, GV is null and we should just return
-  // false. However, COFF currently relies on this to be true
   //
   // As a result we still have some logic in here to improve the quality of the
   // generated code.
-  // FIXME: Add a module level metadata for whether intrinsics should be assumed
-  // local.
   if (!GV)
-    return TT.isOSBinFormatCOFF();
+    return false;
 
   // If the IR producer requested that this GV be treated as dso local, obey.
   if (GV->isDSOLocal())
@@ -140,12 +136,6 @@ bool TargetMachine::shouldAssumeDSOLocal(const Module &M,
   }
 
   if (TT.isOSBinFormatMachO()) {
-    // Make an exception for windows OS in the triple: Some firmware builds use
-    // *-win32-macho triples. This (accidentally?) produced windows relocations
-    // without GOT tables in older clang versions; Keep this behaviour.
-    if (TT.isOSWindows())
-      return true;
-
     if (RM == Reloc::Static)
       return true;
     return GV->isStrongDefinitionForLinker();

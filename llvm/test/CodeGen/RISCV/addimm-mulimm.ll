@@ -146,20 +146,16 @@ define i64 @add_mul_combine_accept_b3(i64 %x) {
 define i32 @add_mul_combine_reject_a1(i32 %x) {
 ; RV32IMB-LABEL: add_mul_combine_reject_a1:
 ; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a0, a0, 1971
 ; RV32IMB-NEXT:    addi a1, zero, 29
 ; RV32IMB-NEXT:    mul a0, a0, a1
-; RV32IMB-NEXT:    lui a1, 14
-; RV32IMB-NEXT:    addi a1, a1, -185
-; RV32IMB-NEXT:    add a0, a0, a1
 ; RV32IMB-NEXT:    ret
 ;
 ; RV64IMB-LABEL: add_mul_combine_reject_a1:
 ; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addiw a0, a0, 1971
 ; RV64IMB-NEXT:    addi a1, zero, 29
 ; RV64IMB-NEXT:    mulw a0, a0, a1
-; RV64IMB-NEXT:    lui a1, 14
-; RV64IMB-NEXT:    addiw a1, a1, -185
-; RV64IMB-NEXT:    addw a0, a0, a1
 ; RV64IMB-NEXT:    ret
   %tmp0 = add i32 %x, 1971
   %tmp1 = mul i32 %tmp0, 29
@@ -169,20 +165,16 @@ define i32 @add_mul_combine_reject_a1(i32 %x) {
 define signext i32 @add_mul_combine_reject_a2(i32 signext %x) {
 ; RV32IMB-LABEL: add_mul_combine_reject_a2:
 ; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a0, a0, 1971
 ; RV32IMB-NEXT:    addi a1, zero, 29
 ; RV32IMB-NEXT:    mul a0, a0, a1
-; RV32IMB-NEXT:    lui a1, 14
-; RV32IMB-NEXT:    addi a1, a1, -185
-; RV32IMB-NEXT:    add a0, a0, a1
 ; RV32IMB-NEXT:    ret
 ;
 ; RV64IMB-LABEL: add_mul_combine_reject_a2:
 ; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addiw a0, a0, 1971
 ; RV64IMB-NEXT:    addi a1, zero, 29
 ; RV64IMB-NEXT:    mulw a0, a0, a1
-; RV64IMB-NEXT:    lui a1, 14
-; RV64IMB-NEXT:    addiw a1, a1, -185
-; RV64IMB-NEXT:    addw a0, a0, a1
 ; RV64IMB-NEXT:    ret
   %tmp0 = add i32 %x, 1971
   %tmp1 = mul i32 %tmp0, 29
@@ -206,11 +198,9 @@ define i64 @add_mul_combine_reject_a3(i64 %x) {
 ;
 ; RV64IMB-LABEL: add_mul_combine_reject_a3:
 ; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a0, a0, 1971
 ; RV64IMB-NEXT:    addi a1, zero, 29
 ; RV64IMB-NEXT:    mul a0, a0, a1
-; RV64IMB-NEXT:    lui a1, 14
-; RV64IMB-NEXT:    addiw a1, a1, -185
-; RV64IMB-NEXT:    add a0, a0, a1
 ; RV64IMB-NEXT:    ret
   %tmp0 = add i64 %x, 1971
   %tmp1 = mul i64 %tmp0, 29
@@ -220,20 +210,17 @@ define i64 @add_mul_combine_reject_a3(i64 %x) {
 define i32 @add_mul_combine_reject_c1(i32 %x) {
 ; RV32IMB-LABEL: add_mul_combine_reject_c1:
 ; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a0, a0, 1000
 ; RV32IMB-NEXT:    sh3add a1, a0, a0
 ; RV32IMB-NEXT:    sh3add a0, a1, a0
-; RV32IMB-NEXT:    lui a1, 18
-; RV32IMB-NEXT:    addi a1, a1, -728
-; RV32IMB-NEXT:    add a0, a0, a1
 ; RV32IMB-NEXT:    ret
 ;
 ; RV64IMB-LABEL: add_mul_combine_reject_c1:
 ; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a0, a0, 1000
 ; RV64IMB-NEXT:    sh3add a1, a0, a0
 ; RV64IMB-NEXT:    sh3add a0, a1, a0
-; RV64IMB-NEXT:    lui a1, 18
-; RV64IMB-NEXT:    addiw a1, a1, -728
-; RV64IMB-NEXT:    addw a0, a0, a1
+; RV64IMB-NEXT:    sext.w a0, a0
 ; RV64IMB-NEXT:    ret
   %tmp0 = add i32 %x, 1000
   %tmp1 = mul i32 %tmp0, 73
@@ -243,20 +230,17 @@ define i32 @add_mul_combine_reject_c1(i32 %x) {
 define signext i32 @add_mul_combine_reject_c2(i32 signext %x) {
 ; RV32IMB-LABEL: add_mul_combine_reject_c2:
 ; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a0, a0, 1000
 ; RV32IMB-NEXT:    sh3add a1, a0, a0
 ; RV32IMB-NEXT:    sh3add a0, a1, a0
-; RV32IMB-NEXT:    lui a1, 18
-; RV32IMB-NEXT:    addi a1, a1, -728
-; RV32IMB-NEXT:    add a0, a0, a1
 ; RV32IMB-NEXT:    ret
 ;
 ; RV64IMB-LABEL: add_mul_combine_reject_c2:
 ; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a0, a0, 1000
 ; RV64IMB-NEXT:    sh3add a1, a0, a0
 ; RV64IMB-NEXT:    sh3add a0, a1, a0
-; RV64IMB-NEXT:    lui a1, 18
-; RV64IMB-NEXT:    addiw a1, a1, -728
-; RV64IMB-NEXT:    addw a0, a0, a1
+; RV64IMB-NEXT:    sext.w a0, a0
 ; RV64IMB-NEXT:    ret
   %tmp0 = add i32 %x, 1000
   %tmp1 = mul i32 %tmp0, 73
@@ -280,11 +264,9 @@ define i64 @add_mul_combine_reject_c3(i64 %x) {
 ;
 ; RV64IMB-LABEL: add_mul_combine_reject_c3:
 ; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a0, a0, 1000
 ; RV64IMB-NEXT:    sh3add a1, a0, a0
 ; RV64IMB-NEXT:    sh3add a0, a1, a0
-; RV64IMB-NEXT:    lui a1, 18
-; RV64IMB-NEXT:    addiw a1, a1, -728
-; RV64IMB-NEXT:    add a0, a0, a1
 ; RV64IMB-NEXT:    ret
   %tmp0 = add i64 %x, 1000
   %tmp1 = mul i64 %tmp0, 73
@@ -294,20 +276,16 @@ define i64 @add_mul_combine_reject_c3(i64 %x) {
 define i32 @add_mul_combine_reject_d1(i32 %x) {
 ; RV32IMB-LABEL: add_mul_combine_reject_d1:
 ; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a0, a0, 1000
 ; RV32IMB-NEXT:    sh1add a0, a0, a0
 ; RV32IMB-NEXT:    slli a0, a0, 6
-; RV32IMB-NEXT:    lui a1, 47
-; RV32IMB-NEXT:    addi a1, a1, -512
-; RV32IMB-NEXT:    add a0, a0, a1
 ; RV32IMB-NEXT:    ret
 ;
 ; RV64IMB-LABEL: add_mul_combine_reject_d1:
 ; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a0, a0, 1000
 ; RV64IMB-NEXT:    sh1add a0, a0, a0
-; RV64IMB-NEXT:    slli a0, a0, 6
-; RV64IMB-NEXT:    lui a1, 47
-; RV64IMB-NEXT:    addiw a1, a1, -512
-; RV64IMB-NEXT:    addw a0, a0, a1
+; RV64IMB-NEXT:    slliw a0, a0, 6
 ; RV64IMB-NEXT:    ret
   %tmp0 = add i32 %x, 1000
   %tmp1 = mul i32 %tmp0, 192
@@ -317,20 +295,16 @@ define i32 @add_mul_combine_reject_d1(i32 %x) {
 define signext i32 @add_mul_combine_reject_d2(i32 signext %x) {
 ; RV32IMB-LABEL: add_mul_combine_reject_d2:
 ; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a0, a0, 1000
 ; RV32IMB-NEXT:    sh1add a0, a0, a0
 ; RV32IMB-NEXT:    slli a0, a0, 6
-; RV32IMB-NEXT:    lui a1, 47
-; RV32IMB-NEXT:    addi a1, a1, -512
-; RV32IMB-NEXT:    add a0, a0, a1
 ; RV32IMB-NEXT:    ret
 ;
 ; RV64IMB-LABEL: add_mul_combine_reject_d2:
 ; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a0, a0, 1000
 ; RV64IMB-NEXT:    sh1add a0, a0, a0
-; RV64IMB-NEXT:    slli a0, a0, 6
-; RV64IMB-NEXT:    lui a1, 47
-; RV64IMB-NEXT:    addiw a1, a1, -512
-; RV64IMB-NEXT:    addw a0, a0, a1
+; RV64IMB-NEXT:    slliw a0, a0, 6
 ; RV64IMB-NEXT:    ret
   %tmp0 = add i32 %x, 1000
   %tmp1 = mul i32 %tmp0, 192
@@ -356,13 +330,233 @@ define i64 @add_mul_combine_reject_d3(i64 %x) {
 ;
 ; RV64IMB-LABEL: add_mul_combine_reject_d3:
 ; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a0, a0, 1000
 ; RV64IMB-NEXT:    sh1add a0, a0, a0
 ; RV64IMB-NEXT:    slli a0, a0, 6
-; RV64IMB-NEXT:    lui a1, 47
-; RV64IMB-NEXT:    addiw a1, a1, -512
-; RV64IMB-NEXT:    add a0, a0, a1
 ; RV64IMB-NEXT:    ret
   %tmp0 = add i64 %x, 1000
   %tmp1 = mul i64 %tmp0, 192
+  ret i64 %tmp1
+}
+
+define i32 @add_mul_combine_reject_e1(i32 %x) {
+; RV32IMB-LABEL: add_mul_combine_reject_e1:
+; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a1, zero, 29
+; RV32IMB-NEXT:    mul a0, a0, a1
+; RV32IMB-NEXT:    lui a1, 14
+; RV32IMB-NEXT:    addi a1, a1, -185
+; RV32IMB-NEXT:    add a0, a0, a1
+; RV32IMB-NEXT:    ret
+;
+; RV64IMB-LABEL: add_mul_combine_reject_e1:
+; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a1, zero, 29
+; RV64IMB-NEXT:    mulw a0, a0, a1
+; RV64IMB-NEXT:    lui a1, 14
+; RV64IMB-NEXT:    addiw a1, a1, -185
+; RV64IMB-NEXT:    addw a0, a0, a1
+; RV64IMB-NEXT:    ret
+  %tmp0 = mul i32 %x, 29
+  %tmp1 = add i32 %tmp0, 57159
+  ret i32 %tmp1
+}
+
+define signext i32 @add_mul_combine_reject_e2(i32 signext %x) {
+; RV32IMB-LABEL: add_mul_combine_reject_e2:
+; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a1, zero, 29
+; RV32IMB-NEXT:    mul a0, a0, a1
+; RV32IMB-NEXT:    lui a1, 14
+; RV32IMB-NEXT:    addi a1, a1, -185
+; RV32IMB-NEXT:    add a0, a0, a1
+; RV32IMB-NEXT:    ret
+;
+; RV64IMB-LABEL: add_mul_combine_reject_e2:
+; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a1, zero, 29
+; RV64IMB-NEXT:    mulw a0, a0, a1
+; RV64IMB-NEXT:    lui a1, 14
+; RV64IMB-NEXT:    addiw a1, a1, -185
+; RV64IMB-NEXT:    addw a0, a0, a1
+; RV64IMB-NEXT:    ret
+  %tmp0 = mul i32 %x, 29
+  %tmp1 = add i32 %tmp0, 57159
+  ret i32 %tmp1
+}
+
+define i64 @add_mul_combine_reject_e3(i64 %x) {
+; RV32IMB-LABEL: add_mul_combine_reject_e3:
+; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a2, zero, 29
+; RV32IMB-NEXT:    mul a1, a1, a2
+; RV32IMB-NEXT:    mulhu a3, a0, a2
+; RV32IMB-NEXT:    add a1, a3, a1
+; RV32IMB-NEXT:    mul a2, a0, a2
+; RV32IMB-NEXT:    lui a0, 14
+; RV32IMB-NEXT:    addi a0, a0, -185
+; RV32IMB-NEXT:    add a0, a2, a0
+; RV32IMB-NEXT:    sltu a2, a0, a2
+; RV32IMB-NEXT:    add a1, a1, a2
+; RV32IMB-NEXT:    ret
+;
+; RV64IMB-LABEL: add_mul_combine_reject_e3:
+; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a1, zero, 29
+; RV64IMB-NEXT:    mul a0, a0, a1
+; RV64IMB-NEXT:    lui a1, 14
+; RV64IMB-NEXT:    addiw a1, a1, -185
+; RV64IMB-NEXT:    add a0, a0, a1
+; RV64IMB-NEXT:    ret
+  %tmp0 = mul i64 %x, 29
+  %tmp1 = add i64 %tmp0, 57159
+  ret i64 %tmp1
+}
+
+define i32 @add_mul_combine_reject_f1(i32 %x) {
+; RV32IMB-LABEL: add_mul_combine_reject_f1:
+; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a1, zero, 29
+; RV32IMB-NEXT:    mul a0, a0, a1
+; RV32IMB-NEXT:    lui a1, 14
+; RV32IMB-NEXT:    addi a1, a1, -145
+; RV32IMB-NEXT:    add a0, a0, a1
+; RV32IMB-NEXT:    ret
+;
+; RV64IMB-LABEL: add_mul_combine_reject_f1:
+; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a1, zero, 29
+; RV64IMB-NEXT:    mulw a0, a0, a1
+; RV64IMB-NEXT:    lui a1, 14
+; RV64IMB-NEXT:    addiw a1, a1, -145
+; RV64IMB-NEXT:    addw a0, a0, a1
+; RV64IMB-NEXT:    ret
+  %tmp0 = mul i32 %x, 29
+  %tmp1 = add i32 %tmp0, 57199
+  ret i32 %tmp1
+}
+
+define signext i32 @add_mul_combine_reject_f2(i32 signext %x) {
+; RV32IMB-LABEL: add_mul_combine_reject_f2:
+; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a1, zero, 29
+; RV32IMB-NEXT:    mul a0, a0, a1
+; RV32IMB-NEXT:    lui a1, 14
+; RV32IMB-NEXT:    addi a1, a1, -145
+; RV32IMB-NEXT:    add a0, a0, a1
+; RV32IMB-NEXT:    ret
+;
+; RV64IMB-LABEL: add_mul_combine_reject_f2:
+; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a1, zero, 29
+; RV64IMB-NEXT:    mulw a0, a0, a1
+; RV64IMB-NEXT:    lui a1, 14
+; RV64IMB-NEXT:    addiw a1, a1, -145
+; RV64IMB-NEXT:    addw a0, a0, a1
+; RV64IMB-NEXT:    ret
+  %tmp0 = mul i32 %x, 29
+  %tmp1 = add i32 %tmp0, 57199
+  ret i32 %tmp1
+}
+
+define i64 @add_mul_combine_reject_f3(i64 %x) {
+; RV32IMB-LABEL: add_mul_combine_reject_f3:
+; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a2, zero, 29
+; RV32IMB-NEXT:    mul a1, a1, a2
+; RV32IMB-NEXT:    mulhu a3, a0, a2
+; RV32IMB-NEXT:    add a1, a3, a1
+; RV32IMB-NEXT:    mul a2, a0, a2
+; RV32IMB-NEXT:    lui a0, 14
+; RV32IMB-NEXT:    addi a0, a0, -145
+; RV32IMB-NEXT:    add a0, a2, a0
+; RV32IMB-NEXT:    sltu a2, a0, a2
+; RV32IMB-NEXT:    add a1, a1, a2
+; RV32IMB-NEXT:    ret
+;
+; RV64IMB-LABEL: add_mul_combine_reject_f3:
+; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    addi a1, zero, 29
+; RV64IMB-NEXT:    mul a0, a0, a1
+; RV64IMB-NEXT:    lui a1, 14
+; RV64IMB-NEXT:    addiw a1, a1, -145
+; RV64IMB-NEXT:    add a0, a0, a1
+; RV64IMB-NEXT:    ret
+  %tmp0 = mul i64 %x, 29
+  %tmp1 = add i64 %tmp0, 57199
+  ret i64 %tmp1
+}
+
+define i32 @add_mul_combine_reject_g1(i32 %x) {
+; RV32IMB-LABEL: add_mul_combine_reject_g1:
+; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    sh3add a1, a0, a0
+; RV32IMB-NEXT:    sh3add a0, a1, a0
+; RV32IMB-NEXT:    lui a1, 2
+; RV32IMB-NEXT:    addi a1, a1, -882
+; RV32IMB-NEXT:    add a0, a0, a1
+; RV32IMB-NEXT:    ret
+;
+; RV64IMB-LABEL: add_mul_combine_reject_g1:
+; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    sh3add a1, a0, a0
+; RV64IMB-NEXT:    sh3add a0, a1, a0
+; RV64IMB-NEXT:    lui a1, 2
+; RV64IMB-NEXT:    addiw a1, a1, -882
+; RV64IMB-NEXT:    addw a0, a0, a1
+; RV64IMB-NEXT:    ret
+  %tmp0 = mul i32 %x, 73
+  %tmp1 = add i32 %tmp0, 7310
+  ret i32 %tmp1
+}
+
+define signext i32 @add_mul_combine_reject_g2(i32 signext %x) {
+; RV32IMB-LABEL: add_mul_combine_reject_g2:
+; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    sh3add a1, a0, a0
+; RV32IMB-NEXT:    sh3add a0, a1, a0
+; RV32IMB-NEXT:    lui a1, 2
+; RV32IMB-NEXT:    addi a1, a1, -882
+; RV32IMB-NEXT:    add a0, a0, a1
+; RV32IMB-NEXT:    ret
+;
+; RV64IMB-LABEL: add_mul_combine_reject_g2:
+; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    sh3add a1, a0, a0
+; RV64IMB-NEXT:    sh3add a0, a1, a0
+; RV64IMB-NEXT:    lui a1, 2
+; RV64IMB-NEXT:    addiw a1, a1, -882
+; RV64IMB-NEXT:    addw a0, a0, a1
+; RV64IMB-NEXT:    ret
+  %tmp0 = mul i32 %x, 73
+  %tmp1 = add i32 %tmp0, 7310
+  ret i32 %tmp1
+}
+
+define i64 @add_mul_combine_reject_g3(i64 %x) {
+; RV32IMB-LABEL: add_mul_combine_reject_g3:
+; RV32IMB:       # %bb.0:
+; RV32IMB-NEXT:    addi a2, zero, 73
+; RV32IMB-NEXT:    mul a1, a1, a2
+; RV32IMB-NEXT:    mulhu a3, a0, a2
+; RV32IMB-NEXT:    add a1, a3, a1
+; RV32IMB-NEXT:    mul a2, a0, a2
+; RV32IMB-NEXT:    lui a0, 2
+; RV32IMB-NEXT:    addi a0, a0, -882
+; RV32IMB-NEXT:    add a0, a2, a0
+; RV32IMB-NEXT:    sltu a2, a0, a2
+; RV32IMB-NEXT:    add a1, a1, a2
+; RV32IMB-NEXT:    ret
+;
+; RV64IMB-LABEL: add_mul_combine_reject_g3:
+; RV64IMB:       # %bb.0:
+; RV64IMB-NEXT:    sh3add a1, a0, a0
+; RV64IMB-NEXT:    sh3add a0, a1, a0
+; RV64IMB-NEXT:    lui a1, 2
+; RV64IMB-NEXT:    addiw a1, a1, -882
+; RV64IMB-NEXT:    add a0, a0, a1
+; RV64IMB-NEXT:    ret
+  %tmp0 = mul i64 %x, 73
+  %tmp1 = add i64 %tmp0, 7310
   ret i64 %tmp1
 }

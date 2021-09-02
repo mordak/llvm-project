@@ -1320,6 +1320,11 @@ bool LoopIdiomRecognize::processLoopStoreOfLoopLoad(
       mayLoopAccessLocation(StoreBasePtr, ModRefInfo::ModRef, CurLoop, BECount,
                             StoreSizeSCEV, *AA, IgnoredInsts);
   if (UseMemMove) {
+    // For memmove case it's not enough to guarantee that loop doesn't access
+    // TheStore and TheLoad. Additionally we need to make sure that TheStore is
+    // the only user of TheLoad.
+    if (!TheLoad->hasOneUse())
+      return Changed;
     IgnoredInsts.insert(TheLoad);
     if (mayLoopAccessLocation(StoreBasePtr, ModRefInfo::ModRef, CurLoop,
                               BECount, StoreSizeSCEV, *AA, IgnoredInsts)) {
