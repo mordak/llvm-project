@@ -16,6 +16,7 @@
 #include "clang/Driver/SanitizerArgs.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/VirtualFileSystem.h"
 
 using namespace clang::driver;
 using namespace clang::driver::tools;
@@ -309,7 +310,9 @@ std::string OpenBSD::getCompilerRT(const ArgList &Args,
     std::string CRTBasename =
         getCompilerRTBasename(Args, Component, Type, /*AddArch=*/false);
     llvm::sys::path::append(P, "lib", CRTBasename);
-    return std::string(P.str());
+    if (getVFS().exists(P))
+      return std::string(P.str());
+    return ToolChain::getCompilerRT(Args, Component, Type);
   }
 }
 
