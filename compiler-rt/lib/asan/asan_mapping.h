@@ -170,6 +170,7 @@ static const u64 kFreeBSD_ShadowOffset32 = 1ULL << 30;  // 0x40000000
 static const u64 kFreeBSD_ShadowOffset64 = 1ULL << 46;  // 0x400000000000
 static const u64 kNetBSD_ShadowOffset32 = 1ULL << 30;  // 0x40000000
 static const u64 kNetBSD_ShadowOffset64 = 1ULL << 46;  // 0x400000000000
+static const u64 kOpenBSD_ShadowOffset64 = 0x100000000000ull;
 static const u64 kWindowsShadowOffset32 = 3ULL << 28;  // 0x30000000
 
 static const u64 kMyriadMemoryOffset32 = 0x80000000ULL;
@@ -216,6 +217,8 @@ static const u64 kMyriadCacheBitMask32 = 0x40000000ULL;
 #    define SHADOW_OFFSET kFreeBSD_ShadowOffset64
 #  elif SANITIZER_NETBSD
 #    define SHADOW_OFFSET kNetBSD_ShadowOffset64
+#  elif SANITIZER_OPENBSD
+#    define SHADOW_OFFSET kOpenBSD_ShadowOffset64
 #  elif SANITIZER_MAC
 #   define SHADOW_OFFSET kDefaultShadowOffset64
 #  elif defined(__mips64)
