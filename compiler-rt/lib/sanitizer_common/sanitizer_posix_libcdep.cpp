@@ -327,7 +327,10 @@ bool MmapFixedNoReserve(uptr fixed_addr, uptr size, const char *name) {
 }
 
 bool MmapFixedSuperNoReserve(uptr fixed_addr, uptr size, const char *name) {
-#if SANITIZER_FREEBSD
+#if SANITIZER_OPENBSD
+  // Shadow memory doesn't need to be dumped into core.
+  return MmapFixed(fixed_addr, size, MAP_CONCEAL, name);
+#elif SANITIZER_FREEBSD
   if (common_flags()->no_huge_pages_for_shadow)
     return MmapFixedNoReserve(fixed_addr, size, name);
   // MAP_NORESERVE is implicit with FreeBSD
