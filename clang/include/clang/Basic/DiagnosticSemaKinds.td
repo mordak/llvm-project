@@ -9531,6 +9531,9 @@ def err_os_log_argument_too_big : Error<
 def warn_os_log_format_narg : Error<
  "os_log() '%%n' format specifier is not allowed">, DefaultError;
 
+def warn_format_narg : Warning<
+  "'%%n' format specifier support is deactivated and will call abort(3)">;
+
 // Statements.
 def err_continue_not_in_loop : Error<
   "'continue' statement not in loop statement">;
