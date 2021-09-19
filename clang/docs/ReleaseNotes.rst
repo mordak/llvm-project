@@ -72,6 +72,9 @@ New Compiler Flags
 - ``-Wreserved-identifier`` emits warning when user code uses reserved
   identifiers.
 
+- ``Wunused-but-set-parameter`` and ``-Wunused-but-set-variable`` emit warnings
+  when a parameter or a variable is set but not used.
+
 - ``-fstack-usage`` generates an extra .su file per input source file. The .su
   file contains frame size information for each function defined in the source
   file.
@@ -150,10 +153,85 @@ C++2b Feature Support
 Objective-C Language Changes in Clang
 -------------------------------------
 
-OpenCL C Language Changes in Clang
-----------------------------------
+OpenCL Kernel Language Changes in Clang
+---------------------------------------
 
-...
+
+Command-line interface changes:
+
+- All builtin types, macros and function declarations are now added by default
+  without any command-line flags. A flag is provided ``-cl-no-stdinc`` to
+  suppress the default declarations non-native to the compiler.
+
+- Clang now compiles using OpenCL C version 1.2 by default if no version is
+  specified explicitly from the command line.
+
+- Clang now supports ``.clcpp`` file extension for sources written in
+  C++ for OpenCL.
+
+- Clang now accepts ``-cl-std=clc++1.0`` that sets C++ for OpenCL to
+  the version 1.0 explicitly.
+
+Misc common changes:
+
+- Added ``NULL`` definition in internal headers for standards prior to the
+  version 2.0.
+
+- Simplified use of pragma in extensions for ``double``, images, atomics,
+  subgroups, Arm dot product extension. There are less cases where extension
+  pragma is now required by clang to compile kernel sources.
+
+- Added missing ``as_size``/``as_ptrdiff``/``as_intptr``/``as_uintptr_t``
+  operators to internal headers.
+
+- Added new builtin function for ndrange, ``cl_khr_subgroup_extended_types``,
+  ``cl_khr_subgroup_non_uniform_vote``, ``cl_khr_subgroup_ballot``,
+  ``cl_khr_subgroup_non_uniform_arithmetic``, ``cl_khr_subgroup_shuffle``,
+  ``cl_khr_subgroup_shuffle_relative``, ``cl_khr_subgroup_clustered_reduce``
+  into the default Tablegen-based header.
+
+- Added online documentation for Tablegen-based header, OpenCL 3.0 support,
+  new clang extensions.
+
+- Fixed OpenCL C language version and SPIR address space reporting in DWARF.
+
+New extensions:
+
+- ``cl_khr_integer_dot_product`` for dedicated support of dot product.
+
+- ``cl_khr_extended_bit_ops`` for dedicated support of extra binary operations.
+
+- ``__cl_clang_bitfields`` for use of bit-fields in the kernel code.
+
+- ``__cl_clang_non_portable_kernel_param_types`` for relaxing some restrictions
+  to types of kernel parameters.
+
+OpenCL C 3.0 related changes:
+
+- Added parsing support for the optionality of generic address space, images 
+  (including 3d writes and ``read_write`` access qualifier), pipes, program
+  scope variables, double-precision floating-point support. 
+
+- Added optionality support for builtin functions (in ``opencl-c.h`` header)
+  for generic address space, C11 atomics.  
+
+- Added ``memory_scope_all_devices`` enum for the atomics in internal headers.
+
+- Enabled use of ``.rgba`` vector components.
+
+C++ for OpenCL related changes:
+
+- Added ``__remove_address_space`` metaprogramming utility in internal headers
+  to allow removing address spaces from types.
+
+- Improved overloads resolution logic for constructors wrt address spaces.
+
+- Improved diagnostics of OpenCL specific types and address space qualified
+  types in ``reinterpret_cast`` and template functions.
+
+- Fixed ``NULL`` macro in internal headers to be compatible with C++.
+
+- Fixed use of ``half`` type.
 
 ABI Changes in Clang
 --------------------
@@ -167,6 +245,7 @@ OpenMP Support in Clang
   other OpenMP loop associated constructs as in
 
   .. code-block:: c
+
     #pragma omp parallel for
     #pragma omp unroll partial(4)
     for (int i = 0; i < n; ++i)
@@ -175,6 +254,7 @@ OpenMP Support in Clang
   user-defined tile size.
 
   .. code-block:: c
+
     #pragma omp tile sizes(8,8)
     for (int i = 0; i < m; ++i)
       for (int j = 0; j < n; ++j)
