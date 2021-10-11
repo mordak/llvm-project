@@ -1281,7 +1281,6 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &MF,
         StackOffset Offset =
             TFI->getFrameIndexReference(MF, FrameIdx, Reg);
         Op.ChangeToRegister(Reg, false /*isDef*/);
-        Op.setIsDebug();
 
         const DIExpression *DIExpr = MI.getDebugExpression();
 

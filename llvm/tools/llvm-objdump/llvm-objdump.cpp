@@ -47,6 +47,7 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Object/COFFImportFile.h"
@@ -71,7 +72,6 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/StringSaver.h"
-#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
@@ -2092,7 +2092,7 @@ void objdump::printSymbol(const ObjectFile *O, const SymbolRef &Symbol,
   }
 
   if (Common)
-    outs() << '\t' << format(Fmt, Symbol.getAlignment());
+    outs() << '\t' << format(Fmt, static_cast<uint64_t>(Symbol.getAlignment()));
   else if (O->isXCOFF())
     outs() << '\t'
            << format(Fmt, dyn_cast<const XCOFFObjectFile>(O)->getSymbolSize(

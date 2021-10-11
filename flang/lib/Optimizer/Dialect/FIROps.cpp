@@ -24,6 +24,9 @@
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/TypeSwitch.h"
 
+namespace {
+#include "flang/Optimizer/Transforms/RewritePatterns.inc"
+} // namespace
 using namespace fir;
 
 /// Return true if a sequence type is of some incomplete size or a record type
@@ -497,6 +500,18 @@ static mlir::LogicalResult verify(fir::ArrayUpdateOp op) {
 }
 
 //===----------------------------------------------------------------------===//
+// ArrayModifyOp
+//===----------------------------------------------------------------------===//
+
+static mlir::LogicalResult verify(fir::ArrayModifyOp op) {
+  auto arrTy = op.sequence().getType().cast<fir::SequenceType>();
+  auto indSize = op.indices().size();
+  if (indSize < arrTy.getDimension())
+    return op.emitOpError("number of indices must match array dimension");
+  return mlir::success();
+}
+
+//===----------------------------------------------------------------------===//
 // BoxAddrOp
 //===----------------------------------------------------------------------===//
 
@@ -611,7 +626,8 @@ void fir::CallOp::build(mlir::OpBuilder &builder, mlir::OperationState &result,
                         llvm::ArrayRef<mlir::Type> results,
                         mlir::ValueRange operands) {
   result.addOperands(operands);
-  result.addAttribute(getCalleeAttrName(), callee);
+  if (callee)
+    result.addAttribute(getCalleeAttrName(), callee);
   result.addTypes(results);
 }
 
@@ -760,7 +776,11 @@ static mlir::LogicalResult verify(fir::ConstcOp &op) {
 //===----------------------------------------------------------------------===//
 
 void fir::ConvertOp::getCanonicalizationPatterns(
-    OwningRewritePatternList &results, MLIRContext *context) {}
+    OwningRewritePatternList &results, MLIRContext *context) {
+  results.insert<ConvertConvertOptPattern, RedundantConvertOptPattern,
+                 CombineConvertOptPattern, ForwardConstantConvertPattern>(
+      context);
+}
 
 mlir::OpFoldResult fir::ConvertOp::fold(llvm::ArrayRef<mlir::Attribute> opnds) {
   if (value().getType() == getType())

@@ -267,19 +267,6 @@ steps:
           limit: 2
     timeout_in_minutes: 120
 
-  - label: "Unified standalone build"
-    command: "libcxx/utils/ci/run-buildbot unified-standalone"
-    artifact_paths:
-      - "**/test-results.xml"
-    agents:
-      queue: "libcxx-builders"
-      os: "linux"
-    retry:
-      automatic:
-        - exit_status: -1  # Agent was lost
-          limit: 2
-    timeout_in_minutes: 120
-
   - label: "New standalone runtimes build"
     command: "libcxx/utils/ci/run-buildbot new-standalone"
     artifact_paths:
@@ -563,19 +550,6 @@ steps:
   # Build with the configuration we use to generate libc++.dylib on Apple platforms
   - label: "Apple system"
     command: "libcxx/utils/ci/run-buildbot x86_64-apple-system"
-    artifact_paths:
-      - "**/test-results.xml"
-    agents:
-      queue: "libcxx-builders"
-      os: "macos"
-    retry:
-      automatic:
-        - exit_status: -1  # Agent was lost
-          limit: 2
-    timeout_in_minutes: 120
-
-  - label: "Apple system -fno-exceptions"
-    command: "libcxx/utils/ci/run-buildbot x86_64-apple-system-noexceptions"
     artifact_paths:
       - "**/test-results.xml"
     agents:

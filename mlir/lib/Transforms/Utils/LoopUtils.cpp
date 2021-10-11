@@ -68,7 +68,7 @@ static void getCleanupLoopLowerBound(AffineForOp forOp, unsigned unrollFactor,
 
   AffineMap tripCountMap;
   SmallVector<Value, 4> tripCountOperands;
-  buildTripCountMapAndOperands(forOp, &tripCountMap, &tripCountOperands);
+  getTripCountMapAndOperands(forOp, &tripCountMap, &tripCountOperands);
 
   // Sometimes the trip count cannot be expressed as an affine expression.
   if (!tripCountMap) {
@@ -1052,6 +1052,8 @@ LogicalResult mlir::loopUnrollFull(AffineForOp forOp) {
   Optional<uint64_t> mayBeConstantTripCount = getConstantTripCount(forOp);
   if (mayBeConstantTripCount.hasValue()) {
     uint64_t tripCount = mayBeConstantTripCount.getValue();
+    if (tripCount == 0)
+      return success();
     if (tripCount == 1)
       return promoteIfSingleIteration(forOp);
     return loopUnrollByFactor(forOp, tripCount);
