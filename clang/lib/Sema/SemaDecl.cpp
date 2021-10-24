@@ -2679,8 +2679,8 @@ static bool mergeDeclAttribute(Sema &S, NamedDecl *D,
     NewAttr = S.mergeEnforceTCBAttr(D, *TCBA);
   else if (const auto *TCBLA = dyn_cast<EnforceTCBLeafAttr>(Attr))
     NewAttr = S.mergeEnforceTCBLeafAttr(D, *TCBLA);
-  else if (const auto *BTFA = dyn_cast<BTFTagAttr>(Attr))
-    NewAttr = S.mergeBTFTagAttr(D, *BTFA);
+  else if (const auto *BTFA = dyn_cast<BTFDeclTagAttr>(Attr))
+    NewAttr = S.mergeBTFDeclTagAttr(D, *BTFA);
   else if (Attr->shouldInheritEvenIfAlreadyPresent() || !DeclHasAttr(D, Attr))
     NewAttr = cast<InheritableAttr>(Attr->clone(S.Context));
 
@@ -9570,8 +9570,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     }
   }
 
-  if (LangOpts.SYCLIsDevice || (LangOpts.OpenMP && LangOpts.OpenMPIsDevice))
-    checkDeviceDecl(NewFD, D.getBeginLoc());
+  checkTypeSupport(NewFD->getType(), D.getBeginLoc(), NewFD);
 
   if (!getLangOpts().CPlusPlus) {
     // Perform semantic checking on the function declaration.

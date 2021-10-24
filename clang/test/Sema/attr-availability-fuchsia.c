@@ -1,3 +1,6 @@
+// Test availability attributes are enforced for Fuchsia targets.
+
+// REQUIRES: x86-registered-target
 // RUN: %clang_cc1 "-triple" "x86_64-unknown-fuchsia" -ffuchsia-api-level=16 -fsyntax-only -verify %s
 // RUN: %clang_cc1 "-triple" "x86_64-unknown-fuchsia" -fsyntax-only %s 2>&1 | FileCheck %s
 
