@@ -1021,7 +1021,7 @@ mayLoopAccessLocation(Value *Ptr, ModRefInfo Access, Loop *L,
 
   for (BasicBlock *B : L->blocks())
     for (Instruction &I : *B)
-      if (IgnoredInsts.count(&I) == 0 &&
+      if (!IgnoredInsts.contains(&I) &&
           isModOrRefSet(
               intersectModRef(AA.getModRefInfo(&I, StoreLoc), Access)))
         return true;
