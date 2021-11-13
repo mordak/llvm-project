@@ -39,7 +39,7 @@ static bool acceptBitWidth(unsigned bitWidth) {
   }
 }
 
-Attribute SparseTensorEncodingAttr::parse(DialectAsmParser &parser, Type type) {
+Attribute SparseTensorEncodingAttr::parse(AsmParser &parser, Type type) {
   if (failed(parser.parseLess()))
     return {};
   // Parse the data as a dictionary.
@@ -117,9 +117,9 @@ Attribute SparseTensorEncodingAttr::parse(DialectAsmParser &parser, Type type) {
                                                      map, ptr, ind);
 }
 
-void SparseTensorEncodingAttr::print(DialectAsmPrinter &printer) const {
+void SparseTensorEncodingAttr::print(AsmPrinter &printer) const {
   // Print the struct-like storage in dictionary fashion.
-  printer << "encoding<{ dimLevelType = [ ";
+  printer << "<{ dimLevelType = [ ";
   for (unsigned i = 0, e = getDimLevelType().size(); i < e; i++) {
     switch (getDimLevelType()[i]) {
     case DimLevelType::Dense:
@@ -171,6 +171,8 @@ LogicalResult SparseTensorEncodingAttr::verifyEncoding(
   // Check integrity with tensor type specifics. Dimension ordering is optional,
   // but we always should have dimension level types for the full rank.
   unsigned size = shape.size();
+  if (size == 0)
+    return emitError() << "expected non-scalar sparse tensor";
   if (getDimOrdering() && getDimOrdering().getNumResults() != size)
     return emitError() << "expected an affine map of size " << size
                        << " for dimension ordering";
