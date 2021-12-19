@@ -455,6 +455,9 @@ def FeatureEL2VMSA : SubtargetFeature<"el2vmsa", "HasEL2VMSA", "true",
 def FeatureEL3 : SubtargetFeature<"el3", "HasEL3", "true",
   "Enable Exception Level 3">;
 
+def FeatureFixCortexA53_835769 : SubtargetFeature<"fix-cortex-a53-835769",
+  "FixCortexA53_835769", "true", "Mitigate Cortex-A53 Erratum 835769">;
+
 //===----------------------------------------------------------------------===//
 // Architectures.
 //
@@ -679,6 +682,12 @@ def TuneA78C : SubtargetFeature<"a78c", "ARMProcFamily",
                                 FeatureCmpBccFusion,
                                 FeatureFuseAES,
                                 FeaturePostRAScheduler]>;
+
+def TuneA710    : SubtargetFeature<"a710", "ARMProcFamily", "CortexA710",
+                                   "Cortex-A710 ARM processors", [
+                                   FeatureFuseAES,
+                                   FeaturePostRAScheduler,
+                                   FeatureCmpBccFusion]>;
 
 def TuneR82 : SubtargetFeature<"cortex-r82", "ARMProcFamily",
                                "CortexR82",
@@ -943,6 +952,9 @@ def ProcessorFeatures {
                                  FeatureFlagM, FeatureFP16FML, FeaturePAuth,
                                  FeaturePerfMon, FeatureRCPC, FeatureSPE,
                                  FeatureSSBS];
+  list<SubtargetFeature> A710 = [HasV9_0aOps, FeatureNEON, FeaturePerfMon,
+                                 FeatureETE, FeatureMTE, FeatureFP16FML,
+                                 FeatureSVE2BitPerm, FeatureBF16, FeatureMatMulInt8];
   list<SubtargetFeature> R82  = [HasV8_0rOps];
   list<SubtargetFeature> X1   = [HasV8_2aOps, FeatureCrypto, FeatureFPARMv8,
                                  FeatureNEON, FeatureRCPC, FeaturePerfMon,
@@ -1055,6 +1067,8 @@ def : ProcessorModel<"cortex-a78", CortexA57Model, ProcessorFeatures.A78,
                      [TuneA78]>;
 def : ProcessorModel<"cortex-a78c", CortexA57Model, ProcessorFeatures.A78C,
                      [TuneA78C]>;
+def : ProcessorModel<"cortex-a710", CortexA57Model, ProcessorFeatures.A710,
+                     [TuneA710]>;
 def : ProcessorModel<"cortex-r82", CortexA55Model, ProcessorFeatures.R82,
                      [TuneR82]>;
 def : ProcessorModel<"cortex-x1", CortexA57Model, ProcessorFeatures.X1,

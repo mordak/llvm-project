@@ -580,9 +580,9 @@ FuncOpConversion::matchAndRewrite(FuncOp funcOp, OpAdaptor adaptor,
 
   // Copy over all attributes other than the function name and type.
   for (const auto &namedAttr : funcOp->getAttrs()) {
-    if (namedAttr.first != function_like_impl::getTypeAttrName() &&
-        namedAttr.first != SymbolTable::getSymbolAttrName())
-      newFuncOp->setAttr(namedAttr.first, namedAttr.second);
+    if (namedAttr.getName() != function_like_impl::getTypeAttrName() &&
+        namedAttr.getName() != SymbolTable::getSymbolAttrName())
+      newFuncOp->setAttr(namedAttr.getName(), namedAttr.getValue());
   }
 
   rewriter.inlineRegionBefore(funcOp.getBody(), newFuncOp.getBody(),
@@ -843,22 +843,24 @@ bool SPIRVConversionTarget::isLegalOp(Operation *op) {
   // Make sure this op is available at the given version. Ops not implementing
   // QueryMinVersionInterface/QueryMaxVersionInterface are available to all
   // SPIR-V versions.
-  if (auto minVersion = dyn_cast<spirv::QueryMinVersionInterface>(op))
-    if (minVersion.getMinVersion() > this->targetEnv.getVersion()) {
+  if (auto minVersionIfx = dyn_cast<spirv::QueryMinVersionInterface>(op)) {
+    Optional<spirv::Version> minVersion = minVersionIfx.getMinVersion();
+    if (minVersion && *minVersion > this->targetEnv.getVersion()) {
       LLVM_DEBUG(llvm::dbgs()
                  << op->getName() << " illegal: requiring min version "
-                 << spirv::stringifyVersion(minVersion.getMinVersion())
-                 << "\n");
+                 << spirv::stringifyVersion(*minVersion) << "\n");
       return false;
     }
-  if (auto maxVersion = dyn_cast<spirv::QueryMaxVersionInterface>(op))
-    if (maxVersion.getMaxVersion() < this->targetEnv.getVersion()) {
+  }
+  if (auto maxVersionIfx = dyn_cast<spirv::QueryMaxVersionInterface>(op)) {
+    Optional<spirv::Version> maxVersion = maxVersionIfx.getMaxVersion();
+    if (maxVersion && *maxVersion < this->targetEnv.getVersion()) {
       LLVM_DEBUG(llvm::dbgs()
                  << op->getName() << " illegal: requiring max version "
-                 << spirv::stringifyVersion(maxVersion.getMaxVersion())
-                 << "\n");
+                 << spirv::stringifyVersion(*maxVersion) << "\n");
       return false;
     }
+  }
 
   // Make sure this op's required extensions are allowed to use. Ops not
   // implementing QueryExtensionInterface do not require extensions to be
@@ -879,6 +881,11 @@ bool SPIRVConversionTarget::isLegalOp(Operation *op) {
   SmallVector<Type, 4> valueTypes;
   valueTypes.append(op->operand_type_begin(), op->operand_type_end());
   valueTypes.append(op->result_type_begin(), op->result_type_end());
+
+  // Ensure that all types have been converted to SPIRV types.
+  if (llvm::any_of(valueTypes,
+                   [](Type t) { return !t.isa<spirv::SPIRVType>(); }))
+    return false;
 
   // Special treatment for global variables, whose type requirements are
   // conveyed by type attributes.

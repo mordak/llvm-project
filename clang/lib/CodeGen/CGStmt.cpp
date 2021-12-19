@@ -2454,7 +2454,7 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
     const ABIArgInfo &RetAI = CurFnInfo->getReturnInfo();
     if (RetAI.isDirect() || RetAI.isExtend()) {
       // Make a fake lvalue for the return value slot.
-      LValue ReturnSlot = MakeAddrLValue(ReturnValue, FnRetTy);
+      LValue ReturnSlot = MakeAddrLValueWithoutTBAA(ReturnValue, FnRetTy);
       CGM.getTargetCodeGenInfo().addReturnRegisterOutputs(
           *this, ReturnSlot, Constraints, ResultRegTypes, ResultTruncRegTypes,
           ResultRegDests, AsmString, S.getNumOutputs());
@@ -2629,8 +2629,14 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
     llvm::FunctionType::get(ResultType, ArgTypes, false);
 
   bool HasSideEffect = S.isVolatile() || S.getNumOutputs() == 0;
+
+  llvm::InlineAsm::AsmDialect GnuAsmDialect =
+      CGM.getCodeGenOpts().getInlineAsmDialect() == CodeGenOptions::IAD_ATT
+          ? llvm::InlineAsm::AD_ATT
+          : llvm::InlineAsm::AD_Intel;
   llvm::InlineAsm::AsmDialect AsmDialect = isa<MSAsmStmt>(&S) ?
-    llvm::InlineAsm::AD_Intel : llvm::InlineAsm::AD_ATT;
+    llvm::InlineAsm::AD_Intel : GnuAsmDialect;
+
   llvm::InlineAsm *IA = llvm::InlineAsm::get(
       FTy, AsmString, Constraints, HasSideEffect,
       /* IsAlignStack */ false, AsmDialect, HasUnwindClobber);

@@ -197,6 +197,14 @@ module m
   logical, parameter :: test_tiny10 = tiny10 == ztiny10
   logical, parameter :: test_tiny16 = tiny16 == ztiny16
 
+  logical, parameter :: test_exponent_0 = exponent(0.0) == 0
+  logical, parameter :: test_exponent_r8 = exponent(0.125) == -2
+  logical, parameter :: test_exponent_r4 = exponent(0.25) == -1
+  logical, parameter :: test_exponent_r2 = exponent(0.5) == 0
+  logical, parameter :: test_exponent_1 = exponent(1.0) == 1
+  logical, parameter :: test_exponent_4 = exponent(4.1) == 3
+  logical, parameter :: test_exponent_12 = exponent(12.9) == 4
+
   integer, parameter :: &
     max2 = maxexponent(0._2), &
     max3 = maxexponent(0._3), &
@@ -204,12 +212,12 @@ module m
     max8 = maxexponent(0._8), &
     max10 = maxexponent(0._10), &
     max16 = maxexponent(0._16)
-  logical, parameter :: test_max2 = max2 == 15
-  logical, parameter :: test_max3 = max3 == 127
-  logical, parameter :: test_max4 = max4 == 127
-  logical, parameter :: test_max8 = max8 == 1023
-  logical, parameter :: test_max10 = max10 == 16383
-  logical, parameter :: test_max16 = max16 == 16383
+  logical, parameter :: test_max2 = max2 == 16
+  logical, parameter :: test_max3 = max3 == 128
+  logical, parameter :: test_max4 = max4 == 128
+  logical, parameter :: test_max8 = max8 == 1024
+  logical, parameter :: test_max10 = max10 == 16384
+  logical, parameter :: test_max16 = max16 == 16384
 
   integer, parameter :: &
     min2 = minexponent(0._2), &
@@ -218,12 +226,12 @@ module m
     min8 = minexponent(0._8), &
     min10 = minexponent(0._10), &
     min16 = minexponent(0._16)
-  logical, parameter :: test_min2 = min2 == -14
-  logical, parameter :: test_min3 = min3 == -126
-  logical, parameter :: test_min4 = min4 == -126
-  logical, parameter :: test_min8 = min8 == -1022
-  logical, parameter :: test_min10 = min10 == -16382
-  logical, parameter :: test_min16 = min16 == -16382
+  logical, parameter :: test_min2 = min2 == -13
+  logical, parameter :: test_min3 = min3 == -125
+  logical, parameter :: test_min4 = min4 == -125
+  logical, parameter :: test_min8 = min8 == -1021
+  logical, parameter :: test_min10 = min10 == -16381
+  logical, parameter :: test_min16 = min16 == -16381
 
   integer, parameter :: &
     irange1 = range(0_1), &

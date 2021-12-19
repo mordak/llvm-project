@@ -411,49 +411,15 @@ CloneLoopBlocks(Loop *L, Value *NewIter, const bool UseEpilogRemainder,
   return NewLoop;
 }
 
-/// Returns true if we can safely unroll a multi-exit/exiting loop. OtherExits
-/// is populated with all the loop exit blocks other than the LatchExit block.
-static bool canSafelyUnrollMultiExitLoop(Loop *L, BasicBlock *LatchExit,
-                                         bool PreserveLCSSA,
-                                         bool UseEpilogRemainder) {
-
-  // We currently have some correctness constrains in unrolling a multi-exit
-  // loop. Check for these below.
-
-  // We rely on LCSSA form being preserved when the exit blocks are transformed.
-  // (Note that only an off-by-default mode of the old PM disables PreserveLCCA.)
-  if (!PreserveLCSSA)
-    return false;
-
-  // All constraints have been satisfied.
-  return true;
-}
-
 /// Returns true if we can profitably unroll the multi-exit loop L. Currently,
 /// we return true only if UnrollRuntimeMultiExit is set to true.
 static bool canProfitablyUnrollMultiExitLoop(
     Loop *L, SmallVectorImpl<BasicBlock *> &OtherExits, BasicBlock *LatchExit,
-    bool PreserveLCSSA, bool UseEpilogRemainder) {
-
-#if !defined(NDEBUG)
-  assert(canSafelyUnrollMultiExitLoop(L, LatchExit, PreserveLCSSA,
-                                      UseEpilogRemainder) &&
-         "Should be safe to unroll before checking profitability!");
-#endif
+    bool UseEpilogRemainder) {
 
   // Priority goes to UnrollRuntimeMultiExit if it's supplied.
   if (UnrollRuntimeMultiExit.getNumOccurrences())
     return UnrollRuntimeMultiExit;
-
-  // TODO: We used to bail out for correctness (now fixed).  Under what
-  // circumstances is this case profitable to allow?
-  if (!LatchExit->getSinglePredecessor())
-    return false;
-
-  // TODO: We used to bail out for correctness (now fixed).  Under what
-  // circumstances is this case profitable to allow?
-  if (UseEpilogRemainder && L->getParentLoop())
-    return false;
 
   // The main pain point with multi-exit loop unrolling is that once unrolled,
   // we will not be able to merge all blocks into a straight line code.
@@ -635,34 +601,35 @@ bool llvm::UnrollRuntimeLoopRemainder(
   // These are exit blocks other than the target of the latch exiting block.
   SmallVector<BasicBlock *, 4> OtherExits;
   L->getUniqueNonLatchExitBlocks(OtherExits);
-  bool isMultiExitUnrollingEnabled =
-      canSafelyUnrollMultiExitLoop(L, LatchExit, PreserveLCSSA,
-                                   UseEpilogRemainder) &&
-      canProfitablyUnrollMultiExitLoop(L, OtherExits, LatchExit, PreserveLCSSA,
-                                       UseEpilogRemainder);
-  // Support only single exit and exiting block unless multi-exit loop unrolling is enabled.
-  if (!isMultiExitUnrollingEnabled &&
-      (!L->getExitingBlock() || OtherExits.size())) {
-    LLVM_DEBUG(
-        dbgs()
-        << "Multiple exit/exiting blocks in loop and multi-exit unrolling not "
-           "enabled!\n");
-    return false;
+  // Support only single exit and exiting block unless multi-exit loop
+  // unrolling is enabled.
+  if (!L->getExitingBlock() || OtherExits.size()) {
+    // We rely on LCSSA form being preserved when the exit blocks are transformed.
+    // (Note that only an off-by-default mode of the old PM disables PreserveLCCA.)
+    if (!PreserveLCSSA)
+      return false;
+
+    if (!canProfitablyUnrollMultiExitLoop(L, OtherExits, LatchExit,
+                                          UseEpilogRemainder)) {
+      LLVM_DEBUG(
+          dbgs()
+          << "Multiple exit/exiting blocks in loop and multi-exit unrolling not "
+             "enabled!\n");
+      return false;
+    }
   }
   // Use Scalar Evolution to compute the trip count. This allows more loops to
   // be unrolled than relying on induction var simplification.
   if (!SE)
     return false;
 
-  // Only unroll loops with a computable trip count, and the trip count needs
-  // to be an int value (allowing a pointer type is a TODO item).
+  // Only unroll loops with a computable trip count.
   // We calculate the backedge count by using getExitCount on the Latch block,
   // which is proven to be the only exiting block in this loop. This is same as
   // calculating getBackedgeTakenCount on the loop (which computes SCEV for all
   // exiting blocks).
   const SCEV *BECountSC = SE->getExitCount(L, Latch);
-  if (isa<SCEVCouldNotCompute>(BECountSC) ||
-      !BECountSC->getType()->isIntegerTy()) {
+  if (isa<SCEVCouldNotCompute>(BECountSC)) {
     LLVM_DEBUG(dbgs() << "Could not compute exit block SCEV\n");
     return false;
   }

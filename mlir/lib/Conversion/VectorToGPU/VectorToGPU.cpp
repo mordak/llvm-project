@@ -92,6 +92,10 @@ static bool transferReadSupportsMMAMatrixType(vector::TransferReadOp readOp) {
 // Return true if the transfer op can be converted to a MMA matrix store.
 static bool
 transferWriteSupportsMMAMatrixType(vector::TransferWriteOp writeOp) {
+  // TODO: support 0-d corner case.
+  if (writeOp.getTransferRank() == 0)
+    return false;
+
   if (writeOp.mask() || writeOp.hasOutOfBoundsDim() ||
       writeOp.getVectorType().getRank() != 2)
     return false;
@@ -126,9 +130,9 @@ convertElementwiseOpToMMA(Operation *op) {
     return gpu::MMAElementwiseOp::ADDF;
   if (isa<arith::MulFOp>(op))
     return gpu::MMAElementwiseOp::MULF;
-  if (isa<MaxFOp>(op))
+  if (isa<arith::MaxFOp>(op))
     return gpu::MMAElementwiseOp::MAXF;
-  if (isa<MinFOp>(op))
+  if (isa<arith::MinFOp>(op))
     return gpu::MMAElementwiseOp::MINF;
   if (isa<arith::DivFOp>(op))
     return gpu::MMAElementwiseOp::DIVF;
@@ -295,6 +299,11 @@ struct CombineTransferReadOpTranspose final
     auto transferReadOp = op.vector().getDefiningOp<vector::TransferReadOp>();
     if (!transferReadOp)
       return failure();
+
+    // TODO: support 0-d corner case.
+    if (transferReadOp.getTransferRank() == 0)
+      return failure();
+
     if (transferReadOp.mask() || transferReadOp.hasOutOfBoundsDim())
       return failure();
     SmallVector<int64_t, 2> perm;
@@ -307,8 +316,8 @@ struct CombineTransferReadOpTranspose final
     AffineMap newMap = permutationMap.compose(transferReadOp.permutation_map());
     rewriter.replaceOpWithNewOp<vector::TransferReadOp>(
         op, op.getType(), transferReadOp.source(), transferReadOp.indices(),
-        newMap, transferReadOp.padding(), transferReadOp.mask(),
-        transferReadOp.in_boundsAttr());
+        AffineMapAttr::get(newMap), transferReadOp.padding(),
+        transferReadOp.mask(), transferReadOp.in_boundsAttr());
     return success();
   }
 };
@@ -335,6 +344,7 @@ static const char *inferFragType(OpTy op) {
 
 static void convertTransferReadOp(vector::TransferReadOp op,
                                   llvm::DenseMap<Value, Value> &valueMapping) {
+  assert(op.getTransferRank() > 0 && "unexpected 0-d transfer");
   assert(transferReadSupportsMMAMatrixType(op));
   Optional<int64_t> stride =
       getMemrefConstantHorizontalStride(op.getShapedType());

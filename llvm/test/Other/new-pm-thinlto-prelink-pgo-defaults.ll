@@ -2,27 +2,27 @@
 ;
 ; RUN: llvm-profdata merge %S/Inputs/new-pm-thinlto-prelink-pgo-defaults.proftext -o %t.profdata
 ;
-; RUN: opt -disable-verify -verify-cfg-preserved=0 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=0 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -pgo-kind=pgo-instr-use-pipeline -profile-file='%t.profdata' \
 ; RUN:     -passes='thinlto-pre-link<O1>' -S %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-O1,CHECK-O123SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=0 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=0 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -pgo-kind=pgo-instr-use-pipeline -profile-file='%t.profdata' \
 ; RUN:     -passes='thinlto-pre-link<O2>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-O2,CHECK-O23SZ,CHECK-O123SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=0 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=0 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -pgo-kind=pgo-instr-use-pipeline -profile-file='%t.profdata' \
 ; RUN:     -passes='thinlto-pre-link<O3>' -S -passes-ep-pipeline-start='no-op-module' %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-O3,CHECK-O23SZ,CHECK-O123SZ,CHECK-EP-PIPELINE-START
-; RUN: opt -disable-verify -verify-cfg-preserved=0 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=0 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -pgo-kind=pgo-instr-use-pipeline -profile-file='%t.profdata' \
 ; RUN:     -passes='thinlto-pre-link<Os>' -S %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-O123SZ,CHECK-Os,CHECK-O23SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=0 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=0 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -pgo-kind=pgo-instr-use-pipeline -profile-file='%t.profdata' \
 ; RUN:     -passes='thinlto-pre-link<Oz>' -S %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-O123SZ,CHECK-Oz,CHECK-O23SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=0 -debug-pass-manager -new-pm-debug-info-for-profiling \
+; RUN: opt -disable-verify -verify-cfg-preserved=0 -eagerly-invalidate-analyses=0 -debug-pass-manager -new-pm-debug-info-for-profiling \
 ; RUN:     -pgo-kind=pgo-instr-use-pipeline -profile-file='%t.profdata' \
 ; RUN:     -passes='thinlto-pre-link<O2>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-O2,CHECK-O23SZ,CHECK-O123SZ
@@ -121,7 +121,6 @@
 ; CHECK-O23SZ-NEXT: Running pass: CorrelatedValuePropagationPass
 ; CHECK-O23SZ-NEXT: Invalidating analysis: LazyValueAnalysis
 ; CHECK-O-NEXT: Running pass: SimplifyCFGPass
-; CHECK-O3-NEXT: Running pass: AggressiveInstCombinePass
 ; CHECK-O-NEXT: Running pass: InstCombinePass
 ; CHECK-O-NEXT: Running analysis: BlockFrequencyAnalysis on foo
 ; These next two can appear in any order since they are accessed as parameters
@@ -129,6 +128,7 @@
 ; CHECK-O-DAG: Running analysis: LoopAnalysis on foo
 ; CHECK-O-DAG: Running analysis: BranchProbabilityAnalysis on foo
 ; CHECK-O-DAG: Running analysis: PostDominatorTreeAnalysis on foo
+; CHECK-O3-NEXT: Running pass: AggressiveInstCombinePass
 ; CHECK-O1-NEXT: Running pass: LibCallsShrinkWrapPass
 ; CHECK-O2-NEXT: Running pass: LibCallsShrinkWrapPass
 ; CHECK-O3-NEXT: Running pass: LibCallsShrinkWrapPass

@@ -315,6 +315,7 @@ public:
   bool isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const override;
   bool isCheapToSpeculateCttz() const override;
   bool isCheapToSpeculateCtlz() const override;
+  bool hasAndNot(SDValue Y) const override;
   bool shouldSinkOperands(Instruction *I,
                           SmallVectorImpl<Use *> &Ops) const override;
   bool isFPImmLegal(const APFloat &Imm, EVT VT,
@@ -381,6 +382,9 @@ public:
   MachineBasicBlock *
   EmitInstrWithCustomInserter(MachineInstr &MI,
                               MachineBasicBlock *BB) const override;
+
+  void AdjustInstrPostInstrSelection(MachineInstr &MI,
+                                     SDNode *Node) const override;
 
   EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                          EVT VT) const override;
@@ -513,6 +517,8 @@ public:
 
   bool isLegalElementTypeForRVV(Type *ScalarTy) const;
 
+  bool shouldConvertFpToSat(unsigned Op, EVT FPVT, EVT VT) const override;
+
 private:
   /// RISCVCCAssignFn - This target-specific function extends the default
   /// CCValAssign with additional information used to lower RISC-V calling
@@ -619,6 +625,14 @@ private:
   /// NOTE: Once BUILD_VECTOR can be custom lowered for all legal vector types,
   /// this override can be removed.
   bool mergeStoresAfterLegalization(EVT VT) const override;
+
+  /// Disable normalizing
+  /// select(N0&N1, X, Y) => select(N0, select(N1, X, Y), Y) and
+  /// select(N0|N1, X, Y) => select(N0, select(N1, X, Y, Y))
+  /// RISCV doesn't have flags so it's better to perform the and/or in a GPR.
+  bool shouldNormalizeToSelectSequence(LLVMContext &, EVT) const override {
+    return false;
+  };
 };
 
 namespace RISCV {

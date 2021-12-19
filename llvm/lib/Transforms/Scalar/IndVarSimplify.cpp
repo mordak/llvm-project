@@ -547,18 +547,18 @@ static void visitIVCast(CastInst *Cast, WideIVInfo &WI,
     return;
   }
 
-  if (!WI.WidestNativeType) {
+  if (!WI.WidestNativeType ||
+      Width > SE->getTypeSizeInBits(WI.WidestNativeType)) {
     WI.WidestNativeType = SE->getEffectiveSCEVType(Ty);
     WI.IsSigned = IsSigned;
     return;
   }
 
-  // We extend the IV to satisfy the sign of its first user, arbitrarily.
-  if (WI.IsSigned != IsSigned)
-    return;
-
-  if (Width > SE->getTypeSizeInBits(WI.WidestNativeType))
-    WI.WidestNativeType = SE->getEffectiveSCEVType(Ty);
+  // We extend the IV to satisfy the sign of its user(s), or 'signed'
+  // if there are multiple users with both sign- and zero extensions,
+  // in order not to introduce nondeterministic behaviour based on the
+  // unspecified order of a PHI nodes' users-iterator.
+  WI.IsSigned |= IsSigned;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1951,7 +1951,6 @@ bool IndVarSimplify::run(Loop *L) {
   // using it.
   if (!DisableLFTR) {
     BasicBlock *PreHeader = L->getLoopPreheader();
-    BranchInst *PreHeaderBR = cast<BranchInst>(PreHeader->getTerminator());
 
     SmallVector<BasicBlock*, 16> ExitingBlocks;
     L->getExitingBlocks(ExitingBlocks);
@@ -1987,7 +1986,7 @@ bool IndVarSimplify::run(Loop *L) {
       // Avoid high cost expansions.  Note: This heuristic is questionable in
       // that our definition of "high cost" is not exactly principled.
       if (Rewriter.isHighCostExpansion(ExitCount, L, SCEVCheapExpansionBudget,
-                                       TTI, PreHeaderBR))
+                                       TTI, PreHeader->getTerminator()))
         continue;
 
       // Check preconditions for proper SCEVExpander operation. SCEV does not

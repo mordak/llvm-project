@@ -24,6 +24,7 @@
 #include "support/Threading.h"
 #include "clang/Sema/CodeCompleteConsumer.h"
 #include "clang/Tooling/CompilationDatabase.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Testing/Support/Annotations.h"
@@ -1171,8 +1172,10 @@ TEST(CompletionTest, ASTSignals) {
                         MainFileRefs(0u), ScopeRefs(3u))));
 }
 
-SignatureHelp signatures(llvm::StringRef Text, Position Point,
-                         std::vector<Symbol> IndexSymbols = {}) {
+SignatureHelp
+signatures(llvm::StringRef Text, Position Point,
+           std::vector<Symbol> IndexSymbols = {},
+           MarkupKind DocumentationFormat = MarkupKind::PlainText) {
   std::unique_ptr<SymbolIndex> Index;
   if (!IndexSymbols.empty())
     Index = memIndex(IndexSymbols);
@@ -1193,13 +1196,16 @@ SignatureHelp signatures(llvm::StringRef Text, Position Point,
     ADD_FAILURE() << "Couldn't build Preamble";
     return {};
   }
-  return signatureHelp(testPath(TU.Filename), Point, *Preamble, Inputs);
+  return signatureHelp(testPath(TU.Filename), Point, *Preamble, Inputs,
+                       DocumentationFormat);
 }
 
-SignatureHelp signatures(llvm::StringRef Text,
-                         std::vector<Symbol> IndexSymbols = {}) {
+SignatureHelp
+signatures(llvm::StringRef Text, std::vector<Symbol> IndexSymbols = {},
+           MarkupKind DocumentationFormat = MarkupKind::PlainText) {
   Annotations Test(Text);
-  return signatures(Test.code(), Test.point(), std::move(IndexSymbols));
+  return signatures(Test.code(), Test.point(), std::move(IndexSymbols),
+                    DocumentationFormat);
 }
 
 struct ExpectedParameter {
@@ -1216,7 +1222,7 @@ MATCHER_P(ParamsAre, P, "") {
   }
   return true;
 }
-MATCHER_P(SigDoc, Doc, "") { return arg.documentation == Doc; }
+MATCHER_P(SigDoc, Doc, "") { return arg.documentation.value == Doc; }
 
 /// \p AnnotatedLabel is a signature label with ranges marking parameters, e.g.
 ///    foo([[int p1]], [[double p2]]) -> void
@@ -1388,8 +1394,9 @@ TEST(SignatureHelpTest, StalePreamble) {
     #include "a.h"
     void bar() { foo(^2); })cpp");
   TU.Code = Test.code().str();
-  auto Results = signatureHelp(testPath(TU.Filename), Test.point(),
-                               *EmptyPreamble, TU.inputs(FS));
+  auto Results =
+      signatureHelp(testPath(TU.Filename), Test.point(), *EmptyPreamble,
+                    TU.inputs(FS), MarkupKind::PlainText);
   EXPECT_THAT(Results.signatures, ElementsAre(Sig("foo([[int x]]) -> int")));
   EXPECT_EQ(0, Results.activeSignature);
   EXPECT_EQ(0, Results.activeParameter);
@@ -1662,6 +1669,9 @@ TEST(CompletionTest, OverloadBundling) {
       // Overload with bool
       int a(bool);
       int b(float);
+
+      X(int);
+      X(float);
     };
     int GFuncC(int);
     int GFuncD(int);
@@ -1670,6 +1680,10 @@ TEST(CompletionTest, OverloadBundling) {
   // Member completions are bundled.
   EXPECT_THAT(completions(Context + "int y = X().^", {}, Opts).Completions,
               UnorderedElementsAre(Labeled("a(…)"), Labeled("b(float)")));
+
+  // Constructor completions are bundled.
+  EXPECT_THAT(completions(Context + "X z = X^", {}, Opts).Completions,
+              UnorderedElementsAre(Labeled("X"), Labeled("X(…)")));
 
   // Non-member completions are bundled, including index+sema.
   Symbol NoArgsGFunc = func("GFuncC");
@@ -2254,10 +2268,10 @@ TEST(SignatureHelpTest, DynamicIndexDocumentation) {
   Server.addDocument(File, FileContent.code());
   // Wait for the dynamic index being built.
   ASSERT_TRUE(Server.blockUntilIdleForTest());
-  EXPECT_THAT(
-      llvm::cantFail(runSignatureHelp(Server, File, FileContent.point()))
-          .signatures,
-      ElementsAre(AllOf(Sig("foo() -> int"), SigDoc("Member doc"))));
+  EXPECT_THAT(llvm::cantFail(runSignatureHelp(Server, File, FileContent.point(),
+                                              MarkupKind::PlainText))
+                  .signatures,
+              ElementsAre(AllOf(Sig("foo() -> int"), SigDoc("Member doc"))));
 }
 
 TEST(CompletionTest, CompletionFunctionArgsDisabled) {
@@ -2322,6 +2336,15 @@ TEST(CompletionTest, CompletionFunctionArgsDisabled) {
         Results.Completions,
         UnorderedElementsAre(AllOf(Named("foo_class"), SnippetSuffix("<$0>")),
                              AllOf(Named("foo_alias"), SnippetSuffix("<$0>"))));
+  }
+  {
+    auto Results = completions(
+        R"cpp(
+      #define FOO(x, y) x##f
+      FO^ )cpp",
+        {}, Opts);
+    EXPECT_THAT(Results.Completions, UnorderedElementsAre(AllOf(
+                                         Named("FOO"), SnippetSuffix("($0)"))));
   }
 }
 
@@ -2603,6 +2626,104 @@ TEST(SignatureHelpTest, ConstructorInitializeFields) {
     EXPECT_THAT(Results.signatures,
                 UnorderedElementsAre(Sig("A([[int]])"), Sig("A([[A &&]])"),
                                      Sig("A([[const A &]])")));
+  }
+}
+
+TEST(SignatureHelpTest, Variadic) {
+  const std::string Header = R"cpp(
+    void fun(int x, ...) {}
+    void test() {)cpp";
+  const std::string ExpectedSig = "fun([[int x]], [[...]]) -> void";
+
+  {
+    const auto Result = signatures(Header + "fun(^);}");
+    EXPECT_EQ(0, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
+  }
+  {
+    const auto Result = signatures(Header + "fun(1, ^);}");
+    EXPECT_EQ(1, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
+  }
+  {
+    const auto Result = signatures(Header + "fun(1, 2, ^);}");
+    EXPECT_EQ(1, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
+  }
+}
+
+TEST(SignatureHelpTest, VariadicTemplate) {
+  const std::string Header = R"cpp(
+    template<typename T, typename ...Args>
+    void fun(T t, Args ...args) {}
+    void test() {)cpp";
+  const std::string ExpectedSig = "fun([[T t]], [[Args args...]]) -> void";
+
+  {
+    const auto Result = signatures(Header + "fun(^);}");
+    EXPECT_EQ(0, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
+  }
+  {
+    const auto Result = signatures(Header + "fun(1, ^);}");
+    EXPECT_EQ(1, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
+  }
+  {
+    const auto Result = signatures(Header + "fun(1, 2, ^);}");
+    EXPECT_EQ(1, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
+  }
+}
+
+TEST(SignatureHelpTest, VariadicMethod) {
+  const std::string Header = R"cpp(
+  class C {
+    template<typename T, typename ...Args>
+    void fun(T t, Args ...args) {}
+  };
+    void test() {C c; )cpp";
+  const std::string ExpectedSig = "fun([[T t]], [[Args args...]]) -> void";
+
+  {
+    const auto Result = signatures(Header + "c.fun(^);}");
+    EXPECT_EQ(0, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
+  }
+  {
+    const auto Result = signatures(Header + "c.fun(1, ^);}");
+    EXPECT_EQ(1, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
+  }
+  {
+    const auto Result = signatures(Header + "c.fun(1, 2, ^);}");
+    EXPECT_EQ(1, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
+  }
+}
+
+TEST(SignatureHelpTest, VariadicType) {
+  const std::string Header = R"cpp(
+  void fun(int x, ...) {}
+  auto get_fun() { return fun; }
+  void test() {
+  )cpp";
+  const std::string ExpectedSig = "([[int]], [[...]]) -> void";
+
+  {
+    const auto Result = signatures(Header + "get_fun()(^);}");
+    EXPECT_EQ(0, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
+  }
+  {
+    const auto Result = signatures(Header + "get_fun()(1, ^);}");
+    EXPECT_EQ(1, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
+  }
+  {
+    const auto Result = signatures(Header + "get_fun()(1, 2, ^);}");
+    EXPECT_EQ(1, Result.activeParameter);
+    EXPECT_THAT(Result.signatures, UnorderedElementsAre(Sig(ExpectedSig)));
   }
 }
 
@@ -3170,6 +3291,7 @@ TEST(CompletionTest, FunctionArgsExist) {
   clangd::CodeCompleteOptions Opts;
   Opts.EnableSnippets = true;
   std::string Context = R"cpp(
+    #define MACRO(x)
     int foo(int A);
     int bar();
     struct Object {
@@ -3217,6 +3339,9 @@ TEST(CompletionTest, FunctionArgsExist) {
       Contains(AllOf(Labeled("Container<typename T>(int Size)"),
                      SnippetSuffix(""),
                      Kind(CompletionItemKind::Constructor))));
+  EXPECT_THAT(completions(Context + "MAC^(2)", {}, Opts).Completions,
+              Contains(AllOf(Labeled("MACRO(x)"), SnippetSuffix(""),
+                             Kind(CompletionItemKind::Text))));
 }
 
 TEST(CompletionTest, NoCrashDueToMacroOrdering) {
@@ -3311,6 +3436,21 @@ TEST(CompletionTest, CommentParamName) {
   EXPECT_THAT(completions(Code + "fun(/* x^", {}, Opts).Completions, IsEmpty());
   EXPECT_THAT(completions(Code + "fun(/* f ^", {}, Opts).Completions,
               IsEmpty());
+}
+
+TEST(SignatureHelp, DocFormat) {
+  Annotations Code(R"cpp(
+    // Comment `with` markup.
+    void foo(int);
+    void bar() { foo(^); }
+  )cpp");
+  for (auto DocumentationFormat :
+       {MarkupKind::PlainText, MarkupKind::Markdown}) {
+    auto Sigs = signatures(Code.code(), Code.point(), /*IndexSymbols=*/{},
+                           DocumentationFormat);
+    ASSERT_EQ(Sigs.signatures.size(), 1U);
+    EXPECT_EQ(Sigs.signatures[0].documentation.kind, DocumentationFormat);
+  }
 }
 
 } // namespace

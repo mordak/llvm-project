@@ -14,7 +14,7 @@
 #define TEST_ATTRDEFS
 
 // To get the test dialect definition.
-include "TestOps.td"
+include "TestDialect.td"
 include "mlir/IR/BuiltinAttributeInterfaces.td"
 include "mlir/IR/SubElementInterfaces.td"
 
@@ -121,6 +121,29 @@ def TestSubElementsAccessAttr : Test_Attr<"TestSubElementsAccess", [
   );
 }
 
+// A more complex parameterized attribute with multiple level of nesting.
+def CompoundNestedInner : Test_Attr<"CompoundNestedInner"> {
+  let mnemonic = "cmpnd_nested_inner";
+  // List of type parameters.
+  let parameters = (
+    ins
+    "int":$some_int,
+    CompoundAttrA:$cmpdA
+  );
+  let assemblyFormat = "`<` $some_int $cmpdA `>`";
+}
+
+def CompoundNestedOuter : Test_Attr<"CompoundNestedOuter"> {
+  let mnemonic = "cmpnd_nested_outer";
+
+  // List of type parameters.
+  let parameters = (
+    ins
+    CompoundNestedInner:$inner
+  );
+  let assemblyFormat = "`<` `i`  $inner `>`";
+}
+
 def TestParamOne : AttrParameter<"int64_t", ""> {}
 
 def TestParamTwo : AttrParameter<"std::string", "", "llvm::StringRef"> {
@@ -159,6 +182,14 @@ def TestAttrParams: Test_Attr<"TestAttrParams"> {
 
   let mnemonic = "attr_params";
   let assemblyFormat = "`<` params `>`";
+}
+
+// Test types can be parsed/printed.
+def TestAttrWithTypeParam : Test_Attr<"TestAttrWithTypeParam"> {
+  let parameters = (ins "::mlir::IntegerType":$int_type,
+                        "::mlir::Type":$any_type);
+  let mnemonic = "attr_with_type";
+  let assemblyFormat = "`<` $int_type `,` $any_type `>`";
 }
 
 #endif // TEST_ATTRDEFS

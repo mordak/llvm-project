@@ -672,6 +672,8 @@ struct DWARFTypePrinter {
       return;
     if (D.getTag() == DW_TAG_subprogram)
       return;
+    if (D.getTag() == DW_TAG_lexical_block)
+      return;
     D = D.resolveTypeUnitReference();
     if (DWARFDie P = D.getParent())
       appendScopes(P);
@@ -891,8 +893,8 @@ DWARFDie::getAttributeValueAsReferencedDie(const DWARFFormValue &V) const {
 DWARFDie DWARFDie::resolveTypeUnitReference() const {
   if (auto Attr = find(DW_AT_signature)) {
     if (Optional<uint64_t> Sig = Attr->getAsReferenceUVal()) {
-      if (DWARFTypeUnit *TU =
-              U->getContext().getTypeUnitForHash(U->getVersion(), *Sig))
+      if (DWARFTypeUnit *TU = U->getContext().getTypeUnitForHash(
+              U->getVersion(), *Sig, U->isDWOUnit()))
         return TU->getDIEForOffset(TU->getTypeOffset() + TU->getOffset());
     }
   }

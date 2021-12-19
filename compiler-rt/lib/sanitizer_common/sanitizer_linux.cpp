@@ -163,6 +163,12 @@ ScopedBlockSignals::ScopedBlockSignals(__sanitizer_sigset_t *copy) {
   // See test/sanitizer_common/TestCases/Linux/setuid.c.
   internal_sigdelset(&set, 33);
 #  endif
+#  if SANITIZER_LINUX
+  // Seccomp-BPF-sandboxed processes rely on SIGSYS to handle trapped syscalls.
+  // If this signal is blocked, such calls cannot be handled and the process may
+  // hang.
+  internal_sigdelset(&set, 31);
+#  endif
   SetSigProcMask(&set, &saved_);
   if (copy)
     internal_memcpy(copy, &saved_, sizeof(saved_));
@@ -1380,7 +1386,7 @@ uptr internal_clone(int (*fn)(void *), void *child_stack, int flags, void *arg,
 #elif defined(__aarch64__)
 uptr internal_clone(int (*fn)(void *), void *child_stack, int flags, void *arg,
                     int *parent_tidptr, void *newtls, int *child_tidptr) {
-  long long res;
+  register long long res __asm__("x0");
   if (!fn || !child_stack)
     return -EINVAL;
   CHECK_EQ(0, (uptr)child_stack % 16);
@@ -1760,6 +1766,8 @@ HandleSignalMode GetHandleSignalMode(int signum) {
 
 #if !SANITIZER_GO
 void *internal_start_thread(void *(*func)(void *arg), void *arg) {
+  if (&real_pthread_create == 0)
+    return nullptr;
   // Start the thread with signals blocked, otherwise it can steal user signals.
   ScopedBlockSignals block(nullptr);
   void *th;
@@ -1768,7 +1776,8 @@ void *internal_start_thread(void *(*func)(void *arg), void *arg) {
 }
 
 void internal_join_thread(void *th) {
-  real_pthread_join(th, nullptr);
+  if (&real_pthread_join)
+    real_pthread_join(th, nullptr);
 }
 #else
 void *internal_start_thread(void *(*func)(void *), void *arg) { return 0; }

@@ -70,12 +70,30 @@ struct InstructionPointer {
   void update(uint64_t Addr);
 };
 
+// The special frame addresses.
+enum SpecialFrameAddr {
+  // Dummy root of frame trie.
+  DummyRoot = 0,
+  // Represent all the addresses outside of current binary.
+  // This's also used to indicate the call stack should be truncated since this
+  // isn't a real call context the compiler will see.
+  ExternalAddr = 1,
+};
+
 using RangesTy = std::vector<std::pair<uint64_t, uint64_t>>;
 
 struct BinaryFunction {
   StringRef FuncName;
   // End of range is an exclusive bound.
   RangesTy Ranges;
+
+  uint64_t getFuncSize() {
+    uint64_t Sum = 0;
+    for (auto &R : Ranges) {
+      Sum += R.second - R.first;
+    }
+    return Sum;
+  }
 };
 
 // Info about function range. A function can be split into multiple
@@ -173,6 +191,8 @@ class ProfiledBinary {
   Triple TheTriple;
   // The runtime base address that the first executable segment is loaded at.
   uint64_t BaseAddress = 0;
+  // The runtime base address that the first loadabe segment is loaded at.
+  uint64_t FirstLoadableAddress = 0;
   // The preferred load address of each executable segment.
   std::vector<uint64_t> PreferredTextSegmentAddresses;
   // The file offset of each executable segment.
@@ -234,6 +254,8 @@ class ProfiledBinary {
 
   bool UsePseudoProbes = false;
 
+  bool UseFSDiscriminator = false;
+
   // Whether we need to symbolize all instructions to get function context size.
   bool TrackFuncContextSize = false;
 
@@ -249,6 +271,10 @@ class ProfiledBinary {
   void setPreferredTextSegmentAddresses(const ELFFile<ELFT> &Obj, StringRef FileName);
 
   void decodePseudoProbe(const ELFObjectFileBase *Obj);
+
+  void
+  checkUseFSDiscriminator(const ELFObjectFileBase *Obj,
+                          std::map<SectionRef, SectionSymbolsTy> &AllSymbols);
 
   // Set up disassembler and related components.
   void setUpDisassembler(const ELFObjectFileBase *Obj);
@@ -305,6 +331,8 @@ public:
 
   // Return the preferred load address for the first executable segment.
   uint64_t getPreferredBaseAddress() const { return PreferredTextSegmentAddresses[0]; }
+  // Return the preferred load address for the first loadable segment.
+  uint64_t getFirstLoadableAddress() const { return FirstLoadableAddress; }
   // Return the file offset for the first executable segment.
   uint64_t getTextSegmentOffset() const { return TextSegmentOffsets[0]; }
   const std::vector<uint64_t> &getPreferredTextSegmentAddresses() const {
@@ -312,6 +340,13 @@ public:
   }
   const std::vector<uint64_t> &getTextSegmentOffsets() const {
     return TextSegmentOffsets;
+  }
+
+  uint64_t getInstSize(uint64_t Offset) const {
+    auto I = Offset2InstSizeMap.find(Offset);
+    if (I == Offset2InstSizeMap.end())
+      return 0;
+    return I->second;
   }
 
   bool offsetIsCode(uint64_t Offset) const {
@@ -346,6 +381,7 @@ public:
   size_t getCodeOffsetsSize() const { return CodeAddrOffsets.size(); }
 
   bool usePseudoProbes() const { return UsePseudoProbes; }
+  bool useFSDiscriminator() const { return UseFSDiscriminator; }
   // Get the index in CodeAddrOffsets for the address
   // As we might get an address which is not the code
   // here it would round to the next valid code address by
@@ -360,6 +396,8 @@ public:
   }
 
   uint64_t getCallAddrFromFrameAddr(uint64_t FrameAddr) const {
+    if (FrameAddr == ExternalAddr)
+      return ExternalAddr;
     auto I = getIndexForAddr(FrameAddr);
     FrameAddr = I ? getAddressforIndex(I - 1) : 0;
     if (FrameAddr && addressIsCall(FrameAddr))
@@ -400,6 +438,13 @@ public:
   const std::unordered_map<std::string, BinaryFunction> &
   getAllBinaryFunctions() {
     return BinaryFunctions;
+  }
+
+  BinaryFunction *getBinaryFunction(StringRef FName) {
+    auto I = BinaryFunctions.find(FName.str());
+    if (I == BinaryFunctions.end())
+      return nullptr;
+    return &I->second;
   }
 
   uint32_t getFuncSizeForContext(SampleContext &Context) {
@@ -450,7 +495,13 @@ public:
     SmallVector<MCPseduoProbeFrameLocation, 16> ProbeInlineContext;
     ProbeDecoder.getInlineContextForProbe(Probe, ProbeInlineContext,
                                           IncludeLeaf);
-    for (auto &Callsite : ProbeInlineContext) {
+    for (uint32_t I = 0; I < ProbeInlineContext.size(); I++) {
+      auto &Callsite = ProbeInlineContext[I];
+      // Clear the current context for an unknown probe.
+      if (Callsite.second == 0 && I != ProbeInlineContext.size() - 1) {
+        InlineContextStack.clear();
+        continue;
+      }
       InlineContextStack.emplace_back(Callsite.first,
                                       LineLocation(Callsite.second, 0));
     }

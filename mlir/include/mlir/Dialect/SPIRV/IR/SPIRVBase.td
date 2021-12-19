@@ -239,10 +239,12 @@ class SPIRVOpInterface<string name> : OpInterface<name> {
 // TODO: the following interfaces definitions are duplicating with the above.
 // Remove them once we are able to support dialect-specific contents in ODS.
 def QueryMinVersionInterface : SPIRVOpInterface<"QueryMinVersionInterface"> {
-  let methods = [InterfaceMethod<"", "::mlir::spirv::Version", "getMinVersion">];
+  let methods = [InterfaceMethod<
+    "", "::llvm::Optional<::mlir::spirv::Version>", "getMinVersion">];
 }
 def QueryMaxVersionInterface : SPIRVOpInterface<"QueryMaxVersionInterface"> {
-  let methods = [InterfaceMethod<"", "::mlir::spirv::Version", "getMaxVersion">];
+  let methods = [InterfaceMethod<
+    "", "::llvm::Optional<::mlir::spirv::Version>", "getMaxVersion">];
 }
 def QueryExtensionInterface : SPIRVOpInterface<"QueryExtensionInterface"> {
   let methods = [InterfaceMethod<
@@ -1208,19 +1210,22 @@ def SPV_C_IntegerFunctions2INTEL                      : I32EnumAttrCase<"Integer
   ];
 }
 def SPV_C_AtomicFloat32AddEXT                         : I32EnumAttrCase<"AtomicFloat32AddEXT", 6033> {
-  list<I32EnumAttrCase> implies = [SPV_C_Shader];
+  // Float atomics also supported in kernels (https://github.com/KhronosGroup/SPIRV-Headers/pull/257).
+  // list<I32EnumAttrCase> implies = [SPV_C_Shader];
   list<Availability> availability = [
     Extension<[SPV_EXT_shader_atomic_float_add]>
   ];
 }
 def SPV_C_AtomicFloat64AddEXT                         : I32EnumAttrCase<"AtomicFloat64AddEXT", 6034> {
-  list<I32EnumAttrCase> implies = [SPV_C_Shader];
+  // Float atomics also supported in kernels (https://github.com/KhronosGroup/SPIRV-Headers/pull/257).
+  // list<I32EnumAttrCase> implies = [SPV_C_Shader];
   list<Availability> availability = [
     Extension<[SPV_EXT_shader_atomic_float_add]>
   ];
 }
 def SPV_C_AtomicFloat16AddEXT                         : I32EnumAttrCase<"AtomicFloat16AddEXT", 6095> {
-  list<I32EnumAttrCase> implies = [SPV_C_Shader];
+  // Float atomics also supported in kernels (https://github.com/KhronosGroup/SPIRV-Headers/pull/257).
+  // list<I32EnumAttrCase> implies = [SPV_C_Shader];
   list<Availability> availability = [
     Extension<[SPV_EXT_shader_atomic_float16_add]>
   ];
@@ -4169,6 +4174,7 @@ def SPV_OC_OpCooperativeMatrixMulAddNV : I32EnumAttrCase<"OpCooperativeMatrixMul
 def SPV_OC_OpCooperativeMatrixLengthNV : I32EnumAttrCase<"OpCooperativeMatrixLengthNV", 5362>;
 def SPV_OC_OpSubgroupBlockReadINTEL    : I32EnumAttrCase<"OpSubgroupBlockReadINTEL", 5575>;
 def SPV_OC_OpSubgroupBlockWriteINTEL   : I32EnumAttrCase<"OpSubgroupBlockWriteINTEL", 5576>;
+def SPV_OC_OpAtomicFAddEXT             : I32EnumAttrCase<"OpAtomicFAddEXT", 6035>;
 
 def SPV_OpcodeAttr :
     SPV_I32EnumAttr<"Opcode", "valid SPIR-V instructions", [
@@ -4232,7 +4238,8 @@ def SPV_OpcodeAttr :
       SPV_OC_OpSubgroupBallotKHR, SPV_OC_OpTypeCooperativeMatrixNV,
       SPV_OC_OpCooperativeMatrixLoadNV, SPV_OC_OpCooperativeMatrixStoreNV,
       SPV_OC_OpCooperativeMatrixMulAddNV, SPV_OC_OpCooperativeMatrixLengthNV,
-      SPV_OC_OpSubgroupBlockReadINTEL, SPV_OC_OpSubgroupBlockWriteINTEL
+      SPV_OC_OpSubgroupBlockReadINTEL, SPV_OC_OpSubgroupBlockWriteINTEL,
+      SPV_OC_OpAtomicFAddEXT
     ]>;
 
 // End opcode section. Generated from SPIR-V spec; DO NOT MODIFY!

@@ -55,6 +55,12 @@ module attributes {gpu.container_module} {
       %offset = arith.constant 3 : i32
       // CHECK: gpu.shuffle %{{.*}}, %{{.*}}, %{{.*}} xor : f32
       %shfl, %pred = gpu.shuffle %arg0, %offset, %width xor : f32
+      // CHECK: gpu.shuffle %{{.*}}, %{{.*}}, %{{.*}} up : f32
+      %shfl1, %pred1 = gpu.shuffle %arg0, %offset, %width up : f32
+      // CHECK: gpu.shuffle %{{.*}}, %{{.*}}, %{{.*}} down : f32
+      %shfl2, %pred2 = gpu.shuffle %arg0, %offset, %width down : f32
+      // CHECK: gpu.shuffle %{{.*}}, %{{.*}}, %{{.*}} idx : f32
+      %shfl3, %pred3 = gpu.shuffle %arg0, %offset, %width idx : f32
 
       "gpu.barrier"() : () -> ()
 
@@ -103,6 +109,14 @@ module attributes {gpu.container_module} {
       "use"(%arg1) : (memref<42xf32, 3>) -> ()
       "use"(%arg2) : (memref<2xf32, 5>) -> ()
       "use"(%arg3) : (memref<1xf32, 5>) -> ()
+      gpu.return
+    }
+
+    // CHECK-LABEL gpu.func @printf_test
+    // CHECK: (%[[ARG0:.*]]: i32)
+    // CHECK: gpu.printf "Value: %d" %[[ARG0]] : i32
+    gpu.func @printf_test(%arg0 : i32) {
+      gpu.printf "Value: %d" %arg0 : i32
       gpu.return
     }
 

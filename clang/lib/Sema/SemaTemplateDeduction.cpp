@@ -603,9 +603,9 @@ DeduceTemplateSpecArguments(Sema &S, TemplateParameterList *TemplateParams,
                                  /*NumberOfArgumentsMustMatch=*/true);
 }
 
-/// Determines whether the given type is an opaque type that
-/// might be more qualified when instantiated.
-static bool IsPossiblyOpaquelyQualifiedType(QualType T) {
+static bool IsPossiblyOpaquelyQualifiedTypeInternal(const Type *T) {
+  assert(T->isCanonicalUnqualified());
+
   switch (T->getTypeClass()) {
   case Type::TypeOfExpr:
   case Type::TypeOf:
@@ -619,12 +619,19 @@ static bool IsPossiblyOpaquelyQualifiedType(QualType T) {
   case Type::IncompleteArray:
   case Type::VariableArray:
   case Type::DependentSizedArray:
-    return IsPossiblyOpaquelyQualifiedType(
-                                      cast<ArrayType>(T)->getElementType());
+    return IsPossiblyOpaquelyQualifiedTypeInternal(
+        cast<ArrayType>(T)->getElementType().getTypePtr());
 
   default:
     return false;
   }
+}
+
+/// Determines whether the given type is an opaque type that
+/// might be more qualified when instantiated.
+static bool IsPossiblyOpaquelyQualifiedType(QualType T) {
+  return IsPossiblyOpaquelyQualifiedTypeInternal(
+      T->getCanonicalTypeInternal().getTypePtr());
 }
 
 /// Helper function to build a TemplateParameter when we don't
@@ -1330,6 +1337,13 @@ static Sema::TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
     TemplateDeductionInfo &Info,
     SmallVectorImpl<DeducedTemplateArgument> &Deduced, unsigned TDF,
     bool PartialOrdering, bool DeducedFromArrayBound) {
+
+  // If the argument type is a pack expansion, look at its pattern.
+  // This isn't explicitly called out
+  if (const auto *AExp = dyn_cast<PackExpansionType>(A))
+    A = AExp->getPattern();
+  assert(!isa<PackExpansionType>(A.getCanonicalType()));
+
   if (PartialOrdering) {
     // C++11 [temp.deduct.partial]p5:
     //   Before the partial ordering is done, certain transformations are
@@ -1583,7 +1597,7 @@ static Sema::TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
     case Type::ObjCObject:
     case Type::ObjCInterface:
     case Type::ObjCObjectPointer:
-    case Type::ExtInt:
+    case Type::BitInt:
       return (TDF & TDF_SkipNonDependent) ||
                      ((TDF & TDF_IgnoreQualifiers)
                           ? S.Context.hasSameUnqualifiedType(P, A)
@@ -2130,10 +2144,10 @@ static Sema::TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
 
       return Sema::TDK_NonDeducedMismatch;
     }
-    case Type::DependentExtInt: {
-      const auto *IP = P->castAs<DependentExtIntType>();
+    case Type::DependentBitInt: {
+      const auto *IP = P->castAs<DependentBitIntType>();
 
-      if (const auto *IA = A->getAs<ExtIntType>()) {
+      if (const auto *IA = A->getAs<BitIntType>()) {
         if (IP->isUnsigned() != IA->isUnsigned())
           return Sema::TDK_NonDeducedMismatch;
 
@@ -2150,7 +2164,7 @@ static Sema::TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
                                              Deduced);
       }
 
-      if (const auto *IA = A->getAs<DependentExtIntType>()) {
+      if (const auto *IA = A->getAs<DependentBitIntType>()) {
         if (IP->isUnsigned() != IA->isUnsigned())
           return Sema::TDK_NonDeducedMismatch;
         return Sema::TDK_Success;
@@ -5935,9 +5949,9 @@ MarkUsedTemplateParameters(ASTContext &Ctx, QualType T,
                                cast<DeducedType>(T)->getDeducedType(),
                                OnlyDeduced, Depth, Used);
     break;
-  case Type::DependentExtInt:
+  case Type::DependentBitInt:
     MarkUsedTemplateParameters(Ctx,
-                               cast<DependentExtIntType>(T)->getNumBitsExpr(),
+                               cast<DependentBitIntType>(T)->getNumBitsExpr(),
                                OnlyDeduced, Depth, Used);
     break;
 
@@ -5952,7 +5966,7 @@ MarkUsedTemplateParameters(ASTContext &Ctx, QualType T,
   case Type::ObjCObjectPointer:
   case Type::UnresolvedUsing:
   case Type::Pipe:
-  case Type::ExtInt:
+  case Type::BitInt:
 #define TYPE(Class, Base)
 #define ABSTRACT_TYPE(Class, Base)
 #define DEPENDENT_TYPE(Class, Base)

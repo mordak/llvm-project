@@ -826,10 +826,9 @@ std::vector<LocatedSymbol> locateSymbolAt(ParsedAST &AST, Position Pos,
         log("Found definition heuristically using nearby identifier {0}",
             NearbyIdent->text(SM));
         return ASTResults;
-      } else {
-        vlog("No definition found using nearby identifier {0} at {1}",
-             Word->Text, Word->Location.printToString(SM));
       }
+      vlog("No definition found using nearby identifier {0} at {1}", Word->Text,
+           Word->Location.printToString(SM));
     }
     // No nearby word, or it didn't refer to anything either. Try the index.
     auto TextualResults =
@@ -1907,7 +1906,9 @@ prepareCallHierarchy(ParsedAST &AST, Position Pos, PathRef TUPath) {
     return Result;
   }
   for (const NamedDecl *Decl : getDeclAtPosition(AST, *Loc, {})) {
-    if (!Decl->isFunctionOrFunctionTemplate())
+    if (!(isa<DeclContext>(Decl) &&
+          cast<DeclContext>(Decl)->isFunctionOrMethod()) &&
+        Decl->getKind() != Decl::Kind::FunctionTemplate)
       continue;
     if (auto CHI = declToCallHierarchyItem(*Decl))
       Result.emplace_back(std::move(*CHI));

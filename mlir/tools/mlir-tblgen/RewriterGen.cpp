@@ -50,7 +50,7 @@ struct format_provider<mlir::tblgen::Pattern::IdentifierLine> {
     os << v.first << ":" << v.second;
   }
 };
-} // end namespace llvm
+} // namespace llvm
 
 //===----------------------------------------------------------------------===//
 // PatternEmitter
@@ -328,7 +328,7 @@ private:
   StaticVerifierFunctionEmitter staticVerifierEmitter;
 };
 
-} // end anonymous namespace
+} // namespace
 
 PatternEmitter::PatternEmitter(Record *pat, RecordOperatorMap *mapper,
                                raw_ostream &os, StaticMatcherHelper &helper)
@@ -793,6 +793,18 @@ void PatternEmitter::emitAttributeMatch(DagNode tree, StringRef opName,
     // If a constraint is specified, we need to generate function call to its
     // static verifier.
     StringRef verifier = staticMatcherHelper.getVerifierName(matcher);
+    if (attr.isOptional()) {
+      // Avoid dereferencing null attribute. This is using a simple heuristic to
+      // avoid common cases of attempting to dereference null attribute. This
+      // will return where there is no check if attribute is null unless the
+      // attribute's value is not used.
+      // FIXME: This could be improved as some null dereferences could slip
+      // through.
+      if (!StringRef(matcher.getConditionTemplate()).contains("!$_self") &&
+          StringRef(matcher.getConditionTemplate()).contains("$_self")) {
+        os << "if (!tblgen_attr) return failure();\n";
+      }
+    }
     emitStaticVerifierCall(
         verifier, opName, "tblgen_attr",
         formatv("\"op '{0}' attribute '{1}' failed to satisfy constraint: "
@@ -953,7 +965,7 @@ void PatternEmitter::emit(StringRef rewriteName) {
   // Emit matchAndRewrite() function.
   {
     auto classScope = os.scope();
-    os.reindent(R"(
+    os.printReindented(R"(
     ::mlir::LogicalResult matchAndRewrite(::mlir::Operation *op0,
         ::mlir::PatternRewriter &rewriter) const override {)")
         << '\n';
@@ -1145,7 +1157,7 @@ std::string PatternEmitter::handleLocationDirective(DagNode tree) {
   if (tree.getNumArgs() == 1) {
     DagLeaf leaf = tree.getArgAsLeaf(0);
     if (leaf.isStringAttr())
-      return formatv("::mlir::NameLoc::get(rewriter.getIdentifier(\"{0}\"))",
+      return formatv("::mlir::NameLoc::get(rewriter.getStringAttr(\"{0}\"))",
                      leaf.getStringAttr())
           .str();
     return lookUpArgLoc(0);
@@ -1607,7 +1619,7 @@ void PatternEmitter::createAggregateLocalVarsForOpArgs(
 
   const char *addAttrCmd =
       "if (auto tmpAttr = {1}) {\n"
-      "  tblgen_attrs.emplace_back(rewriter.getIdentifier(\"{0}\"), "
+      "  tblgen_attrs.emplace_back(rewriter.getStringAttr(\"{0}\"), "
       "tmpAttr);\n}\n";
   for (int argIndex = 0, e = resultOp.getNumArgs(); argIndex < e; ++argIndex) {
     if (resultOp.getArg(argIndex).is<NamedAttribute *>()) {

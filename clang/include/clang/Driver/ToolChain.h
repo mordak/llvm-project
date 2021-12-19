@@ -348,10 +348,7 @@ public:
   /// is LLD. If it's set, it can be assumed that the linker is LLD built
   /// at the same revision as clang, and clang can make assumptions about
   /// LLD's supported flags, error output, etc.
-  /// If LinkerIsLLDDarwinNew is non-nullptr, it's set if the linker is
-  /// the new version in lld/MachO.
-  std::string GetLinkerPath(bool *LinkerIsLLD = nullptr,
-                            bool *LinkerIsLLDDarwinNew = nullptr) const;
+  std::string GetLinkerPath(bool *LinkerIsLLD = nullptr) const;
 
   /// Returns the linker path for emitting a static library.
   std::string GetStaticLibToolPath() const;
@@ -486,9 +483,6 @@ public:
 
   /// Test whether this toolchain defaults to PIE.
   virtual bool isPIEDefault(const llvm::opt::ArgList &Args) const = 0;
-
-  /// Test whether this toolchaind defaults to non-executable stacks.
-  virtual bool isNoExecStackDefault() const;
 
   /// Tests whether this toolchain forces its default for PIC, PIE or
   /// non-PIC.  If this returns true, any PIC related flags should be ignored

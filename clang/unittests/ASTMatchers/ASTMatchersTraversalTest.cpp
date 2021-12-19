@@ -1094,6 +1094,31 @@ TEST(ForEachArgumentWithParamType, MatchesMemberFunctionPtrCalls) {
       S, CallExpr, std::make_unique<VerifyIdIsBoundTo<DeclRefExpr>>("arg")));
 }
 
+TEST(ForEachArgumentWithParamType, MatchesVariadicFunctionPtrCalls) {
+  StatementMatcher ArgumentY =
+      declRefExpr(to(varDecl(hasName("y")))).bind("arg");
+  TypeMatcher IntType = qualType(builtinType()).bind("type");
+  StatementMatcher CallExpr =
+      callExpr(forEachArgumentWithParamType(ArgumentY, IntType));
+
+  StringRef S = R"cpp(
+    void fcntl(int fd, int cmd, ...) {}
+
+    template <typename Func>
+    void f(Func F) {
+      int y = 42;
+      F(y, 1, 3);
+    }
+
+    void g() { f(fcntl); }
+  )cpp";
+
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+      S, CallExpr, std::make_unique<VerifyIdIsBoundTo<QualType>>("type")));
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+      S, CallExpr, std::make_unique<VerifyIdIsBoundTo<DeclRefExpr>>("arg")));
+}
+
 TEST(QualType, hasCanonicalType) {
   EXPECT_TRUE(notMatches("typedef int &int_ref;"
                            "int a;"
@@ -4767,6 +4792,66 @@ TEST(ForEachConstructorInitializer, MatchesInitializers) {
   EXPECT_TRUE(matches(
     "struct X { X() : i(42), j(42) {} int i, j; };",
     cxxConstructorDecl(forEachConstructorInitializer(cxxCtorInitializer()))));
+}
+
+TEST(ForEachLambdaCapture, MatchesCaptures) {
+  EXPECT_TRUE(matches(
+      "int main() { int x, y; auto f = [x, y]() { return x + y; }; }",
+      lambdaExpr(forEachLambdaCapture(lambdaCapture())), langCxx11OrLater()));
+  auto matcher = lambdaExpr(forEachLambdaCapture(
+      lambdaCapture(capturesVar(varDecl(hasType(isInteger())))).bind("LC")));
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+      "int main() { int x, y; float z; auto f = [=]() { return x + y + z; }; }",
+      matcher, std::make_unique<VerifyIdIsBoundTo<LambdaCapture>>("LC", 2)));
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+      "int main() { int x, y; float z; auto f = [x, y, z]() { return x + y + "
+      "z; }; }",
+      matcher, std::make_unique<VerifyIdIsBoundTo<LambdaCapture>>("LC", 2)));
+}
+
+TEST(ForEachLambdaCapture, IgnoreUnlessSpelledInSource) {
+  auto matcher =
+      traverse(TK_IgnoreUnlessSpelledInSource,
+               lambdaExpr(forEachLambdaCapture(
+                   lambdaCapture(capturesVar(varDecl(hasType(isInteger()))))
+                       .bind("LC"))));
+  EXPECT_TRUE(
+      notMatches("int main() { int x, y; auto f = [=]() { return x + y; }; }",
+                 matcher, langCxx11OrLater()));
+  EXPECT_TRUE(
+      notMatches("int main() { int x, y; auto f = [&]() { return x + y; }; }",
+                 matcher, langCxx11OrLater()));
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+      R"cc(
+      int main() {
+        int x, y;
+        float z;
+        auto f = [=, &y]() { return x + y + z; };
+      }
+      )cc",
+      matcher, std::make_unique<VerifyIdIsBoundTo<LambdaCapture>>("LC", 1)));
+}
+
+TEST(ForEachLambdaCapture, MatchImplicitCapturesOnly) {
+  auto matcher =
+      lambdaExpr(forEachLambdaCapture(lambdaCapture(isImplicit()).bind("LC")));
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+      "int main() { int x, y, z; auto f = [=, &z]() { return x + y + z; }; }",
+      matcher, std::make_unique<VerifyIdIsBoundTo<LambdaCapture>>("LC", 2)));
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+      "int main() { int x, y, z; auto f = [&, z]() { return x + y + z; }; }",
+      matcher, std::make_unique<VerifyIdIsBoundTo<LambdaCapture>>("LC", 2)));
+}
+
+TEST(ForEachLambdaCapture, MatchExplicitCapturesOnly) {
+  auto matcher = lambdaExpr(
+      forEachLambdaCapture(lambdaCapture(unless(isImplicit())).bind("LC")));
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+      "int main() { int x, y, z; auto f = [=, &z]() { return x + y + z; }; }",
+      matcher, std::make_unique<VerifyIdIsBoundTo<LambdaCapture>>("LC", 1)));
+  EXPECT_TRUE(matchAndVerifyResultTrue(
+      "int main() { int x, y, z; auto f = [&, z]() { return x + y + z; }; }",
+      matcher, std::make_unique<VerifyIdIsBoundTo<LambdaCapture>>("LC", 1)));
 }
 
 TEST(HasConditionVariableStatement, DoesNotMatchCondition) {

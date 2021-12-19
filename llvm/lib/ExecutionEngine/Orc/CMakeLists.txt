@@ -3,6 +3,7 @@ add_llvm_component_library(LLVMOrcJIT
   CompileUtils.cpp
   Core.cpp
   DebugObjectManagerPlugin.cpp
+  DebuggerSupportPlugin.cpp
   DebugUtils.cpp
   EPCDynamicLibrarySearchGenerator.cpp
   EPCDebugObjectRegistrar.cpp
@@ -12,6 +13,7 @@ add_llvm_component_library(LLVMOrcJIT
   EPCGenericRTDyldMemoryManager.cpp
   EPCIndirectionUtils.cpp
   ExecutionUtils.cpp
+  ObjectFileInterface.cpp
   IndirectionUtils.cpp
   IRCompileLayer.cpp
   IRTransformLayer.cpp

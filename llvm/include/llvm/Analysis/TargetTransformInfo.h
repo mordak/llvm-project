@@ -1127,7 +1127,7 @@ public:
   ///   <0,0,0,1,1,1,2,2,2,3,3,3>
   InstructionCost getReplicationShuffleCost(Type *EltTy, int ReplicationFactor,
                                             int VF,
-                                            const APInt &DemandedReplicatedElts,
+                                            const APInt &DemandedDstElts,
                                             TTI::TargetCostKind CostKind);
 
   /// \return The cost of Load and Store instructions.
@@ -1136,6 +1136,13 @@ public:
                   unsigned AddressSpace,
                   TTI::TargetCostKind CostKind = TTI::TCK_RecipThroughput,
                   const Instruction *I = nullptr) const;
+
+  /// \return The cost of VP Load and Store instructions.
+  InstructionCost
+  getVPMemoryOpCost(unsigned Opcode, Type *Src, Align Alignment,
+                    unsigned AddressSpace,
+                    TTI::TargetCostKind CostKind = TTI::TCK_RecipThroughput,
+                    const Instruction *I = nullptr) const;
 
   /// \return The cost of masked Load and Store instructions.
   InstructionCost getMaskedMemoryOpCost(
@@ -1391,9 +1398,11 @@ public:
   /// \name Vector Predication Information
   /// @{
   /// Whether the target supports the %evl parameter of VP intrinsic efficiently
-  /// in hardware. (see LLVM Language Reference - "Vector Predication
-  /// Intrinsics") Use of %evl is discouraged when that is not the case.
-  bool hasActiveVectorLength() const;
+  /// in hardware, for the given opcode and type/alignment. (see LLVM Language
+  /// Reference - "Vector Predication Intrinsics").
+  /// Use of %evl is discouraged when that is not the case.
+  bool hasActiveVectorLength(unsigned Opcode, Type *DataType,
+                             Align Alignment) const;
 
   struct VPLegalization {
     enum VPTransform {
@@ -1659,7 +1668,7 @@ public:
 
   virtual InstructionCost
   getReplicationShuffleCost(Type *EltTy, int ReplicationFactor, int VF,
-                            const APInt &DemandedReplicatedElts,
+                            const APInt &DemandedDstElts,
                             TTI::TargetCostKind CostKind) = 0;
 
   virtual InstructionCost getMemoryOpCost(unsigned Opcode, Type *Src,
@@ -1667,6 +1676,11 @@ public:
                                           unsigned AddressSpace,
                                           TTI::TargetCostKind CostKind,
                                           const Instruction *I) = 0;
+  virtual InstructionCost getVPMemoryOpCost(unsigned Opcode, Type *Src,
+                                            Align Alignment,
+                                            unsigned AddressSpace,
+                                            TTI::TargetCostKind CostKind,
+                                            const Instruction *I) = 0;
   virtual InstructionCost
   getMaskedMemoryOpCost(unsigned Opcode, Type *Src, Align Alignment,
                         unsigned AddressSpace,
@@ -1748,7 +1762,8 @@ public:
   virtual bool shouldExpandReduction(const IntrinsicInst *II) const = 0;
   virtual unsigned getGISelRematGlobalCost() const = 0;
   virtual bool supportsScalableVectors() const = 0;
-  virtual bool hasActiveVectorLength() const = 0;
+  virtual bool hasActiveVectorLength(unsigned Opcode, Type *DataType,
+                                     Align Alignment) const = 0;
   virtual InstructionCost getInstructionLatency(const Instruction *I) = 0;
   virtual VPLegalization
   getVPLegalizationStrategy(const VPIntrinsic &PI) const = 0;
@@ -2173,10 +2188,10 @@ public:
   }
   InstructionCost
   getReplicationShuffleCost(Type *EltTy, int ReplicationFactor, int VF,
-                            const APInt &DemandedReplicatedElts,
+                            const APInt &DemandedDstElts,
                             TTI::TargetCostKind CostKind) override {
     return Impl.getReplicationShuffleCost(EltTy, ReplicationFactor, VF,
-                                          DemandedReplicatedElts, CostKind);
+                                          DemandedDstElts, CostKind);
   }
   InstructionCost getMemoryOpCost(unsigned Opcode, Type *Src, Align Alignment,
                                   unsigned AddressSpace,
@@ -2184,6 +2199,13 @@ public:
                                   const Instruction *I) override {
     return Impl.getMemoryOpCost(Opcode, Src, Alignment, AddressSpace,
                                 CostKind, I);
+  }
+  InstructionCost getVPMemoryOpCost(unsigned Opcode, Type *Src, Align Alignment,
+                                    unsigned AddressSpace,
+                                    TTI::TargetCostKind CostKind,
+                                    const Instruction *I) override {
+    return Impl.getVPMemoryOpCost(Opcode, Src, Alignment, AddressSpace,
+                                  CostKind, I);
   }
   InstructionCost getMaskedMemoryOpCost(unsigned Opcode, Type *Src,
                                         Align Alignment, unsigned AddressSpace,
@@ -2340,8 +2362,9 @@ public:
     return Impl.supportsScalableVectors();
   }
 
-  bool hasActiveVectorLength() const override {
-    return Impl.hasActiveVectorLength();
+  bool hasActiveVectorLength(unsigned Opcode, Type *DataType,
+                             Align Alignment) const override {
+    return Impl.hasActiveVectorLength(Opcode, DataType, Alignment);
   }
 
   InstructionCost getInstructionLatency(const Instruction *I) override {

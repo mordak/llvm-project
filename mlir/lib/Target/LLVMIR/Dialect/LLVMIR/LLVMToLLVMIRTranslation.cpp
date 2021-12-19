@@ -161,7 +161,7 @@ static llvm::FastMathFlags getFastmathFlags(FastmathFlagsInterface &op) {
       // clang-format on
   };
   llvm::FastMathFlags ret;
-  auto fmf = op.fastmathFlags();
+  auto fmf = op.getFastmathFlags();
   for (auto it : handlers)
     if (bitEnumContains(fmf, it.first))
       (ret.*(it.second))(true);
@@ -224,9 +224,9 @@ static void setLoopMetadata(Operation &opInst, llvm::Instruction &llvmInst,
         SmallVector<llvm::Metadata *> parallelAccess;
         parallelAccess.push_back(
             llvm::MDString::get(ctx, "llvm.loop.parallel_accesses"));
-        for (SymbolRefAttr accessGroupRef :
-             parallelAccessGroup->second.cast<ArrayAttr>()
-                 .getAsRange<SymbolRefAttr>())
+        for (SymbolRefAttr accessGroupRef : parallelAccessGroup->getValue()
+                                                .cast<ArrayAttr>()
+                                                .getAsRange<SymbolRefAttr>())
           parallelAccess.push_back(
               moduleTranslation.getAccessGroup(opInst, accessGroupRef));
         loopOptions.push_back(llvm::MDNode::get(ctx, parallelAccess));
@@ -471,7 +471,7 @@ public:
     return convertOperationImpl(*op, builder, moduleTranslation);
   }
 };
-} // end namespace
+} // namespace
 
 void mlir::registerLLVMDialectTranslation(DialectRegistry &registry) {
   registry.insert<LLVM::LLVMDialect>();

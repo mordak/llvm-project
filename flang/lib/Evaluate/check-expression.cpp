@@ -659,13 +659,12 @@ public:
       // simple contiguity to allow their use in contexts like
       // data targets in pointer assignments with remapping.
       return true;
-    } else if (semantics::IsPointer(ultimate)) {
+    } else if (semantics::IsPointer(ultimate) ||
+        semantics::IsAssumedShape(ultimate)) {
       return false;
     } else if (const auto *details{
                    ultimate.detailsIf<semantics::ObjectEntityDetails>()}) {
-      // N.B. ALLOCATABLEs are deferred shape, not assumed, and
-      // are obviously contiguous.
-      return !details->IsAssumedShape() && !details->IsAssumedRank();
+      return !details->IsAssumedRank();
     } else if (auto assoc{Base::operator()(ultimate)}) {
       return assoc;
     } else {
@@ -678,8 +677,15 @@ public:
     if (!(*this)(symbol).has_value()) {
       return false;
     } else if (auto rank{CheckSubscripts(x.subscript())}) {
-      // a(:)%b(1,1) is not contiguous; a(1)%b(:,:) is
-      return *rank > 0 || x.Rank() == 0;
+      if (x.Rank() == 0) {
+        return true;
+      } else if (*rank > 0) {
+        // a(1)%b(:,:) is contiguous if an only if a(1)%b is contiguous.
+        return (*this)(x.base());
+      } else {
+        // a(:)%b(1,1) is not contiguous.
+        return false;
+      }
     } else {
       return false;
     }

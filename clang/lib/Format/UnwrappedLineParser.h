@@ -84,7 +84,7 @@ private:
   void reset();
   void parseFile();
   void parseLevel(bool HasOpeningBrace);
-  void parseBlock(bool MustBeDeclaration, unsigned AddLevels = 1u,
+  void parseBlock(bool MustBeDeclaration = false, unsigned AddLevels = 1u,
                   bool MunchSemi = true,
                   bool UnindentWhitesmithsBraces = false);
   void parseChildBlock();
@@ -110,6 +110,7 @@ private:
   void parseCaseLabel();
   void parseSwitch();
   void parseNamespace();
+  void parseModuleImport();
   void parseNew();
   void parseAccessSpecifier();
   bool parseEnum();
@@ -137,6 +138,7 @@ private:
   // https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/where-generic-type-constraint
   void parseCSharpGenericTypeConstraint();
   bool tryToParseLambda();
+  bool tryToParseCSharpLambda();
   bool tryToParseLambdaIntroducer();
   bool tryToParsePropertyAccessor();
   void tryToParseJSFunction();

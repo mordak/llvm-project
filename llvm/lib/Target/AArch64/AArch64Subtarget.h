@@ -60,6 +60,7 @@ public:
     CortexA77,
     CortexA78,
     CortexA78C,
+    CortexA710,
     CortexR82,
     CortexX1,
     CortexX2,
@@ -114,6 +115,8 @@ protected:
   bool HasFullFP16 = false;
   bool HasFP16FML = false;
   bool HasSPE = false;
+
+  bool FixCortexA53_835769 = false;
 
   // ARMv8.1 extensions
   bool HasVH = false;
@@ -571,6 +574,8 @@ public:
   bool hasEL2VMSA() const { return HasEL2VMSA; }
   bool hasEL3() const { return HasEL3; }
 
+  bool fixCortexA53_835769() const { return FixCortexA53_835769; }
+
   bool addrSinkUsingGEPs() const override {
     // Keeping GEPs inbounds is important for exploiting AArch64
     // addressing-modes in ILP32 mode.
@@ -632,8 +637,7 @@ public:
     // extended frames should be flagged as present.
     const Triple &TT = getTargetTriple();
 
-    unsigned Major, Minor, Micro;
-    TT.getOSVersion(Major, Minor, Micro);
+    unsigned Major = TT.getOSVersion().getMajor();
     switch(TT.getOS()) {
     default:
       return false;

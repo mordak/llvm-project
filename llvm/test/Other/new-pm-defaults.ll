@@ -7,69 +7,81 @@
 ; Any invalidation that shows up here is a bug, unless we started modifying
 ; the IR, in which case we need to make it immutable harder.
 
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes='default<O1>' -S %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O1,%llvmcheckext
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes='default<O2>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O2,CHECK-O23SZ,%llvmcheckext
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes='default<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,CHECK-O23SZ,%llvmcheckext
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes='default<Os>' -S %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-Os,CHECK-O23SZ,%llvmcheckext
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes='default<Oz>' -S %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-Oz,CHECK-O23SZ,%llvmcheckext
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes='lto-pre-link<O2>' -S %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-LTO,CHECK-O2,CHECK-O23SZ,%llvmcheckext
 
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes-ep-peephole='no-op-function' \
 ; RUN:     -passes='default<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,%llvmcheckext,CHECK-EP-PEEPHOLE,CHECK-O23SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes-ep-late-loop-optimizations='no-op-loop' \
 ; RUN:     -passes='default<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,%llvmcheckext,CHECK-EP-LOOP-LATE,CHECK-O23SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes-ep-loop-optimizer-end='no-op-loop' \
 ; RUN:     -passes='default<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,%llvmcheckext,CHECK-EP-LOOP-END,CHECK-O23SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes-ep-scalar-optimizer-late='no-op-function' \
 ; RUN:     -passes='default<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,%llvmcheckext,CHECK-EP-SCALAR-LATE,CHECK-O23SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes-ep-cgscc-optimizer-late='no-op-cgscc' \
 ; RUN:     -passes='default<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,%llvmcheckext,CHECK-EP-CGSCC-LATE,CHECK-O23SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes-ep-vectorizer-start='no-op-function' \
 ; RUN:     -passes='default<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,%llvmcheckext,CHECK-EP-VECTORIZER-START,CHECK-O23SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes-ep-pipeline-start='no-op-module' \
 ; RUN:     -passes='default<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,%llvmcheckext,CHECK-EP-PIPELINE-START,CHECK-O23SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes-ep-pipeline-early-simplification='no-op-module' \
 ; RUN:     -passes='default<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,%llvmcheckext,CHECK-EP-PIPELINE-EARLY-SIMPLIFICATION,CHECK-O23SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes-ep-pipeline-start='no-op-module' \
 ; RUN:     -passes='lto-pre-link<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-LTO,CHECK-O3,%llvmcheckext,CHECK-EP-PIPELINE-START,CHECK-O23SZ
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes-ep-optimizer-last='no-op-function' \
 ; RUN:     -passes='default<O3>' -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,%llvmcheckext,CHECK-EP-OPTIMIZER-LAST,CHECK-O23SZ
 
-; RUN: opt -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
 ; RUN:     -passes='default<O3>' -enable-matrix -S  %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,CHECK-O23SZ,%llvmcheckext,CHECK-MATRIX
+
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
+; RUN:     -passes='default<O3>' -enable-merge-functions -S  %s 2>&1 \
+; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,CHECK-O23SZ,%llvmcheckext,CHECK-MERGE-FUNCS
+
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
+; RUN:     -passes='default<O3>' -ir-outliner -S  %s 2>&1 \
+; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,CHECK-O23SZ,%llvmcheckext,CHECK-IR-OUTLINER
+
+; RUN: opt -disable-verify -verify-cfg-preserved=1 -eagerly-invalidate-analyses=0 -debug-pass-manager \
+; RUN:     -passes='default<O3>' -hot-cold-split -S  %s 2>&1 \
+; RUN:     | FileCheck %s --check-prefixes=CHECK-O,CHECK-DEFAULT,CHECK-O3,CHECK-O23SZ,%llvmcheckext,CHECK-HOT-COLD-SPLIT
 
 ; Suppress FileCheck --allow-unused-prefixes=false diagnostics.
 ; CHECK-Oz: {{^}}
@@ -138,8 +150,8 @@
 ; CHECK-O23SZ-NEXT: Running pass: CorrelatedValuePropagationPass
 ; CHECK-O23SZ-NEXT: Invalidating analysis: LazyValueAnalysis
 ; CHECK-O-NEXT: Running pass: SimplifyCFGPass
-; CHECK-O3-NEXT: AggressiveInstCombinePass
 ; CHECK-O-NEXT: Running pass: InstCombinePass
+; CHECK-O3-NEXT: AggressiveInstCombinePass
 ; CHECK-O1-NEXT: Running pass: LibCallsShrinkWrapPass
 ; CHECK-O2-NEXT: Running pass: LibCallsShrinkWrapPass
 ; CHECK-O3-NEXT: Running pass: LibCallsShrinkWrapPass
@@ -245,6 +257,10 @@
 ; CHECK-O-NEXT: Running pass: SimplifyCFGPass
 ; CHECK-O-NEXT: Running pass: CoroCleanupPass
 ; CHECK-EP-OPTIMIZER-LAST: Running pass: NoOpFunctionPass
+; CHECK-HOT-COLD-SPLIT-NEXT: Running pass: HotColdSplittingPass
+; CHECK-IR-OUTLINER-NEXT: Running pass: IROutlinerPass
+; CHECK-IR-OUTLINER-NEXT: Running analysis: IRSimilarityAnalysis
+; CHECK-MERGE-FUNCS-NEXT: Running pass: MergeFunctionsPass
 ; CHECK-O-NEXT: Running pass: CGProfilePass
 ; CHECK-O-NEXT: Running pass: GlobalDCEPass
 ; CHECK-O-NEXT: Running pass: ConstantMergePass

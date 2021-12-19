@@ -16,6 +16,9 @@
 include "mlir/Dialect/LLVMIR/LLVMOpBase.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
+def LLVM_i8Ptr_global : LLVM_IntPtrBase<8, 1>;
+def LLVM_i8Ptr_shared : LLVM_IntPtrBase<8, 3>;
+
 //===----------------------------------------------------------------------===//
 // NVVM dialect definitions
 //===----------------------------------------------------------------------===//
@@ -97,22 +100,36 @@ def NVVM_Barrier0Op : NVVM_Op<"barrier0"> {
   let assemblyFormat = "attr-dict";
 }
 
-def NVVM_ShflBflyOp :
-  NVVM_Op<"shfl.sync.bfly">,
+def ShflKindBfly : StrEnumAttrCase<"bfly">;
+def ShflKindUp : StrEnumAttrCase<"up">;
+def ShflKindDown : StrEnumAttrCase<"down">;
+def ShflKindIdx : StrEnumAttrCase<"idx">;
+
+/// Enum attribute of the different shuffle kinds.
+def ShflKind : StrEnumAttr<"ShflKind", "NVVM shuffle kind",
+  [ShflKindBfly, ShflKindUp, ShflKindDown, ShflKindIdx]> {
+  let cppNamespace = "::mlir::NVVM";
+  let storageType = "mlir::StringAttr";
+  let returnType = "NVVM::ShflKind";
+  let convertFromStorage = "*symbolizeEnum<NVVM::ShflKind>($_self.getValue())";
+  let constBuilderCall = "$_builder.getStringAttr(stringifyEnum($0))";
+}
+
+def NVVM_ShflOp :
+  NVVM_Op<"shfl.sync">,
   Results<(outs LLVM_Type:$res)>,
-  Arguments<(ins LLVM_Type:$dst,
+  Arguments<(ins I32:$dst,
                  LLVM_Type:$val,
-                 LLVM_Type:$offset,
-                 LLVM_Type:$mask_and_clamp,
+                 I32:$offset,
+                 I32:$mask_and_clamp,
+                 ShflKind:$kind,
                  OptionalAttr<UnitAttr>:$return_value_and_is_valid)> {
   string llvmBuilder = [{
-      auto intId = getShflBflyIntrinsicId(
-          $_resultType, static_cast<bool>($return_value_and_is_valid));
+      auto intId = getShflIntrinsicId(
+          $_resultType, $kind, static_cast<bool>($return_value_and_is_valid));
       $res = createIntrinsicCall(builder,
           intId, {$dst, $val, $offset, $mask_and_clamp});
   }];
-  let parser = [{ return parseNVVMShflSyncBflyOp(parser, result); }];
-  let printer = [{ printNVVMIntrinsicOp(p, this->getOperation()); }];
   let verifier = [{
     if (!(*this)->getAttrOfType<UnitAttr>("return_value_and_is_valid"))
       return success();
@@ -125,6 +142,10 @@ def NVVM_ShflBflyOp :
                        "i1 as the second element");
     return success();
   }];
+  let assemblyFormat = [{
+    $kind $dst `,` $val `,` $offset `,` $mask_and_clamp  attr-dict
+     `:` type($val) `->` type($res)
+   }];
 }
 
 def NVVM_VoteBallotOp :
@@ -137,6 +158,56 @@ def NVVM_VoteBallotOp :
   }];
   let parser = [{ return parseNVVMVoteBallotOp(parser, result); }];
   let printer = [{ printNVVMIntrinsicOp(p, this->getOperation()); }];
+}
+
+
+def NVVM_CpAsyncOp : NVVM_Op<"cp.async.shared.global">,
+  Arguments<(ins LLVM_i8Ptr_shared:$dst,
+                 LLVM_i8Ptr_global:$src,
+                 I32Attr:$size)> {
+  string llvmBuilder = [{
+      llvm::Intrinsic::ID id;
+      switch ($size) {
+        case 4:
+          id = llvm::Intrinsic::nvvm_cp_async_ca_shared_global_4;
+          break;
+        case 8:
+          id = llvm::Intrinsic::nvvm_cp_async_ca_shared_global_8;
+          break;
+        case 16:
+          id = llvm::Intrinsic::nvvm_cp_async_ca_shared_global_16;
+          break;
+        default:
+          llvm_unreachable("unsupported async copy size");
+      }
+      createIntrinsicCall(builder, id, {$dst, $src});
+  }];
+  let verifier = [{
+    if (size() != 4 && size() != 8 && size() != 16)
+      return emitError("expected byte size to be either 4, 8 or 16.");
+    return success();
+  }];
+  let assemblyFormat = "$dst `,` $src `,` $size attr-dict";
+}
+
+def NVVM_CpAsyncCommitGroupOp : NVVM_Op<"cp.async.commit.group"> {
+  string llvmBuilder = [{
+      createIntrinsicCall(builder, llvm::Intrinsic::nvvm_cp_async_commit_group);
+  }];
+  let assemblyFormat = "attr-dict";
+}
+
+def NVVM_CpAsyncWaitGroupOp : NVVM_Op<"cp.async.wait.group">,
+  Arguments<(ins I32Attr:$n)> {
+  string llvmBuilder = [{
+      createIntrinsicCall(
+        builder,
+        llvm::Intrinsic::nvvm_cp_async_wait_group,
+        llvm::ConstantInt::get(
+          llvm::Type::getInt32Ty(moduleTranslation.getLLVMContext()),
+          $n));
+  }];
+  let assemblyFormat = "$n attr-dict";
 }
 
 def NVVM_MmaOp :

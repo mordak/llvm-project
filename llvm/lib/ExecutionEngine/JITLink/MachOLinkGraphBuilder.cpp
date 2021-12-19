@@ -23,7 +23,7 @@ MachOLinkGraphBuilder::~MachOLinkGraphBuilder() {}
 
 Expected<std::unique_ptr<LinkGraph>> MachOLinkGraphBuilder::buildGraph() {
 
-  // Sanity check: we only operate on relocatable objects.
+  // We only operate on relocatable objects.
   if (!Obj.isRelocatableObject())
     return make_error<JITLinkError>("Object is not a relocatable MachO");
 
@@ -180,17 +180,10 @@ Error MachOLinkGraphBuilder::createNormalizedSections() {
     else
       Prot = MemProt::Read | MemProt::Write;
 
-    if (!isDebugSection(NSec)) {
-      auto FullyQualifiedName =
-          G->allocateString(StringRef(NSec.SegName) + "," + NSec.SectName);
-      NSec.GraphSection = &G->createSection(
-          StringRef(FullyQualifiedName.data(), FullyQualifiedName.size()),
-          Prot);
-    } else
-      LLVM_DEBUG({
-        dbgs() << "    " << NSec.SegName << "," << NSec.SectName
-               << " is a debug section: No graph section will be created.\n";
-      });
+    auto FullyQualifiedName =
+        G->allocateString(StringRef(NSec.SegName) + "," + NSec.SectName);
+    NSec.GraphSection = &G->createSection(
+        StringRef(FullyQualifiedName.data(), FullyQualifiedName.size()), Prot);
 
     IndexToSection.insert(std::make_pair(SecIndex, std::move(NSec)));
   }
@@ -288,7 +281,7 @@ Error MachOLinkGraphBuilder::createNormalizedSymbols() {
       dbgs() << "\n";
     });
 
-    // If this symbol has a section, sanity check that the addresses line up.
+    // If this symbol has a section, verify that the addresses line up.
     if (Sect != 0) {
       auto NSec = findSectionByIndex(Sect - 1);
       if (!NSec)

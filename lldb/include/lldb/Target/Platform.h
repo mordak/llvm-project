@@ -310,19 +310,7 @@ public:
 
   /// Get the platform's supported architectures in the order in which they
   /// should be searched.
-  ///
-  /// \param[in] idx
-  ///     A zero based architecture index
-  ///
-  /// \param[out] arch
-  ///     A copy of the architecture at index if the return value is
-  ///     \b true.
-  ///
-  /// \return
-  ///     \b true if \a arch was filled in and is valid, \b false
-  ///     otherwise.
-  virtual bool GetSupportedArchitectureAtIndex(uint32_t idx,
-                                               ArchSpec &arch) = 0;
+  virtual std::vector<ArchSpec> GetSupportedArchitectures() = 0;
 
   virtual size_t GetSoftwareBreakpointTrapOpcode(Target &target,
                                                  BreakpointSite *bp_site);
@@ -876,6 +864,12 @@ public:
   }
 
 protected:
+  /// Create a list of ArchSpecs with the given OS and a architectures. The
+  /// vendor field is left as an "unspecified unknown".
+  static std::vector<ArchSpec>
+  CreateArchList(llvm::ArrayRef<llvm::Triple::ArchType> archs,
+                 llvm::Triple::OSType os);
+
   /// Private implementation of connecting to a process. If the stream is set
   /// we connect synchronously.
   lldb::ProcessSP DoConnectProcess(llvm::StringRef connect_url,
@@ -931,8 +925,7 @@ protected:
   virtual void CalculateTrapHandlerSymbolNames() = 0;
 
   Status GetCachedExecutable(ModuleSpec &module_spec, lldb::ModuleSP &module_sp,
-                             const FileSpecList *module_search_paths_ptr,
-                             Platform &remote_platform);
+                             const FileSpecList *module_search_paths_ptr);
 
   virtual Status DownloadModuleSlice(const FileSpec &src_file_spec,
                                      const uint64_t src_offset,
@@ -944,6 +937,11 @@ protected:
 
   virtual const char *GetCacheHostname();
 
+  virtual Status
+  ResolveRemoteExecutable(const ModuleSpec &module_spec,
+                          lldb::ModuleSP &exe_module_sp,
+                          const FileSpecList *module_search_paths_ptr);
+
 private:
   typedef std::function<Status(const ModuleSpec &)> ModuleResolver;
 
@@ -954,11 +952,6 @@ private:
 
   bool GetCachedSharedModule(const ModuleSpec &module_spec,
                              lldb::ModuleSP &module_sp, bool *did_create_ptr);
-
-  Status LoadCachedExecutable(const ModuleSpec &module_spec,
-                              lldb::ModuleSP &module_sp,
-                              const FileSpecList *module_search_paths_ptr,
-                              Platform &remote_platform);
 
   FileSpec GetModuleCacheRoot();
 };

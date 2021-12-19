@@ -319,13 +319,22 @@ cplusplus.StringChecker (C++)
 """""""""""""""""""""""""""""
 Checks std::string operations.
 
+Checks if the cstring pointer from which the ``std::string`` object is
+constructed is ``NULL`` or not.
+If the checker cannot reason about the nullness of the pointer it will assume
+that it was non-null to satisfy the precondition of the constructor.
+
+This checker is capable of checking the `SEI CERT C++ coding rule STR51-CPP.
+Do not attempt to create a std::string from a null pointer
+<https://wiki.sei.cmu.edu/confluence/x/E3s-BQ>`__.
+
 .. code-block:: cpp
 
  #include <string>
 
  void f(const char *p) {
    if (!p) {
-     std::string msg(p); // warn: p is NULL
+     std::string msg(p); // warn: The parameter must not be null
    }
  }
 
@@ -2308,8 +2317,15 @@ Checkers implementing `taint analysis <https://en.wikipedia.org/wiki/Taint_check
 
 alpha.security.taint.TaintPropagation (C, C++)
 """"""""""""""""""""""""""""""""""""""""""""""
-Generate taint information used by other checkers.
-A data is tainted when it comes from an unreliable source.
+
+Taint analysis identifies untrusted sources of information (taint sources), rules as to how the untrusted data flows along the execution path (propagation rules), and points of execution where the use of tainted data is risky (taints sinks).
+The most notable examples of taint sources are:
+
+  - network originating data
+  - environment variables
+  - database originating data
+
+``GenericTaintChecker`` is the main implementation checker for this rule, and it generates taint information used by other checkers.
 
 .. code-block:: c
 
@@ -2334,6 +2350,25 @@ A data is tainted when it comes from an unreliable source.
    int *p = (int *)malloc(ts * sizeof(int));
      // warn: untrusted data as buffer size
  }
+
+There are built-in sources, propagations and sinks defined in code inside ``GenericTaintChecker``.
+These operations are handled even if no external taint configuration is provided.
+
+Default sources defined by ``GenericTaintChecker``:
+``fdopen``, ``fopen``, ``freopen``, ``getch``, ``getchar``, ``getchar_unlocked``, ``gets``, ``scanf``, ``socket``, ``wgetch``
+
+Default propagations defined by ``GenericTaintChecker``:
+``atoi``, ``atol``, ``atoll``, ``fgetc``, ``fgetln``, ``fgets``, ``fscanf``, ``sscanf``, ``getc``, ``getc_unlocked``, ``getdelim``, ``getline``, ``getw``, ``pread``, ``read``, ``strchr``, ``strrchr``, ``tolower``, ``toupper``
+
+Default sinks defined in ``GenericTaintChecker``:
+``printf``, ``setproctitle``, ``system``, ``popen``, ``execl``, ``execle``, ``execlp``, ``execv``, ``execvp``, ``execvP``, ``execve``, ``dlopen``, ``memcpy``, ``memmove``, ``strncpy``, ``strndup``, ``malloc``, ``calloc``, ``alloca``, ``memccpy``, ``realloc``, ``bcopy``
+
+The user can configure taint sources, sinks, and propagation rules by providing a configuration file via checker option ``alpha.security.taint.TaintPropagation:Config``.
+
+External taint configuration is in `YAML <http://llvm.org/docs/YamlIO.html#introduction-to-yaml>`_ format. The taint-related options defined in the config file extend but do not override the built-in sources, rules, sinks.
+The format of the external taint configuration file is not stable, and could change without any notice even in a non-backward compatible way.
+
+For a more detailed description of configuration options, please see the :doc:`user-docs/TaintAnalysisConfiguration`. For an example see :ref:`clangsa-taint-configuration-example`.
 
 alpha.unix
 ^^^^^^^^^^^

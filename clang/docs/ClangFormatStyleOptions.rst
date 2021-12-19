@@ -2457,7 +2457,7 @@ the configuration (without a prefix: ``Auto``).
         Priority:        2
         SortPriority:    2
         CaseSensitive:   true
-      - Regex:           '^(<|"(gtest|gmock|isl|json)/)'
+      - Regex:           '^((<|")(gtest|gmock|isl|json)/)'
         Priority:        3
       - Regex:           '<[[:alnum:].]+>'
         Priority:        4
