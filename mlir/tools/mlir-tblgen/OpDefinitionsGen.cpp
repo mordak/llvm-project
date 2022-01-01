@@ -527,7 +527,7 @@ static void genAttributeVerifier(
                                emitHelper.isEmittingForOp());
 
     // Prefix with `tblgen_` to avoid hiding the attribute accessor.
-    Twine varName = tblgenNamePrefix + attrName;
+    std::string varName = (tblgenNamePrefix + attrName).str();
 
     // If the attribute is not required and we cannot emit the condition, then
     // there is nothing to be done.
@@ -1756,7 +1756,7 @@ void OpEmitter::genCodeForAddingArgAndRegionForBuilder(
 
       // Add the segment attribute.
       body << "  {\n"
-           << "    SmallVector<int32_t> rangeSegments;\n"
+           << "    ::llvm::SmallVector<int32_t> rangeSegments;\n"
            << "    for (::mlir::ValueRange range : " << argName << ")\n"
            << "      rangeSegments.push_back(range.size());\n"
            << "    " << builderOpState << ".addAttribute("

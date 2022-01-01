@@ -182,6 +182,7 @@ template <> struct DominatingValue<Address> {
 
   struct saved_type {
     DominatingLLVMValue::saved_type SavedValue;
+    llvm::Type *ElementType;
     CharUnits Alignment;
   };
 
@@ -190,11 +191,11 @@ template <> struct DominatingValue<Address> {
   }
   static saved_type save(CodeGenFunction &CGF, type value) {
     return { DominatingLLVMValue::save(CGF, value.getPointer()),
-             value.getAlignment() };
+             value.getElementType(), value.getAlignment() };
   }
   static type restore(CodeGenFunction &CGF, saved_type value) {
     return Address(DominatingLLVMValue::restore(CGF, value.SavedValue),
-                   value.Alignment);
+                   value.ElementType, value.Alignment);
   }
 };
 
@@ -458,6 +459,11 @@ public:
 
     /// Get the name of the capture helper.
     virtual StringRef getHelperName() const { return "__captured_stmt"; }
+
+    /// Get the CaptureFields
+    llvm::SmallDenseMap<const VarDecl *, FieldDecl *> getCaptureFields() {
+      return CaptureFields;
+    }
 
   private:
     /// The kind of captured statement being generated.
@@ -4410,7 +4416,7 @@ public:
 
   /// EmitCXXGlobalVarDeclInit - Create the initializer for a C++
   /// variable with global storage.
-  void EmitCXXGlobalVarDeclInit(const VarDecl &D, llvm::Constant *DeclPtr,
+  void EmitCXXGlobalVarDeclInit(const VarDecl &D, llvm::GlobalVariable *GV,
                                 bool PerformInit);
 
   llvm::Function *createAtExitStub(const VarDecl &VD, llvm::FunctionCallee Dtor,
