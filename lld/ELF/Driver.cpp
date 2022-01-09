@@ -96,6 +96,7 @@ bool elf::link(ArrayRef<const char *> args, bool canExitEarly,
     sharedFiles.clear();
     backwardReferences.clear();
     whyExtract.clear();
+    symAux.clear();
 
     tar = nullptr;
     in.reset();
@@ -1871,8 +1872,7 @@ static void demoteSharedSymbols() {
   llvm::TimeTraceScope timeScope("Demote shared symbols");
   for (Symbol *sym : symtab->symbols()) {
     auto *s = dyn_cast<SharedSymbol>(sym);
-    if (!((s && !s->getFile().isNeeded) ||
-          (sym->isLazy() && sym->isUsedInRegularObj)))
+    if (!(s && !s->getFile().isNeeded) && !sym->isLazy())
       continue;
 
     bool used = sym->used;

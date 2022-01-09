@@ -207,13 +207,9 @@ Constant *AA::getInitialValueForObj(Value &Obj, Type &Ty,
                                     const TargetLibraryInfo *TLI) {
   if (isa<AllocaInst>(Obj))
     return UndefValue::get(&Ty);
-  if (isNoAliasFn(&Obj, TLI)) {
-    if (isMallocLikeFn(&Obj, TLI) || isAlignedAllocLikeFn(&Obj, TLI))
-      return UndefValue::get(&Ty);
-    if (isCallocLikeFn(&Obj, TLI))
-      return Constant::getNullValue(&Ty);
-    return nullptr;
-  }
+  if (isAllocationFn(&Obj, TLI))
+    return getInitialValueOfAllocation(&cast<CallBase>(Obj), TLI, &Ty);
+
   auto *GV = dyn_cast<GlobalVariable>(&Obj);
   if (!GV || !GV->hasLocalLinkage())
     return nullptr;
@@ -753,6 +749,7 @@ void IRPosition::verify() {
     assert((CBContext == nullptr) &&
            "'call site argument' position must not have CallBaseContext!");
     Use *U = getAsUsePtr();
+    (void)U; // Silence unused variable warning.
     assert(U && "Expected use for a 'call site argument' position!");
     assert(isa<CallBase>(U->getUser()) &&
            "Expected call base user for a 'call site argument' position!");

@@ -510,20 +510,55 @@ checkTilingLegality(MutableArrayRef<mlir::AffineForOp> origLoops) {
   return success(checkTilingLegalityImpl(origLoops));
 }
 
-/// Check if the input data is valid and whether tiled code will be legal or
-/// not.
+/// Checks whether a loop nest is hyper-rectangular or not.
+LogicalResult checkIfHyperRectangular(MutableArrayRef<AffineForOp> input) {
+  FlatAffineValueConstraints cst;
+  SmallVector<Operation *, 8> ops(input.begin(), input.end());
+  // 0-d or 1-d is trivially hyper-rectangular.
+  if (input.size() <= 1)
+    return success();
+  if (failed(getIndexSet(ops, &cst))) {
+    LLVM_DEBUG(llvm::dbgs() << "Index set computation failed!\n");
+    return failure();
+  }
+  if (!cst.isHyperRectangular(0, input.size())) {
+    LLVM_DEBUG(llvm::dbgs()
+               << "Non-hyperrectangular nests not supported for tiling!\n");
+    return failure();
+  }
+  return success();
+}
+
+/// Check if the input nest is supported for tiling and whether tiling would be
+/// legal or not.
 template <typename t>
-void performPreTilingChecks(MutableArrayRef<AffineForOp> input,
-                            ArrayRef<t> tileSizes) {
-  // Check if the supplied for op's are all successively nested.
-  assert(!input.empty() && "no loops in input band");
+LogicalResult performPreTilingChecks(MutableArrayRef<AffineForOp> input,
+                                     ArrayRef<t> tileSizes) {
   assert(input.size() == tileSizes.size() && "Too few/many tile sizes");
 
-  assert(isPerfectlyNested(input) && "input loops not perfectly nested");
+  if (llvm::any_of(input,
+                   [](AffineForOp op) { return op.getNumResults() > 0; })) {
+    LLVM_DEBUG(llvm::dbgs()
+               << "Cannot tile nest where a loop has yield values\n");
+    return failure();
+  }
 
-  // Perform tiling legality test.
-  if (failed(checkTilingLegality(input)))
-    input[0].emitRemark("tiled code is illegal due to dependences");
+  // Check if the supplied `for` ops are all successively nested.
+  if (!isPerfectlyNested(input)) {
+    LLVM_DEBUG(llvm::dbgs() << "input loops not perfectly nested");
+    return failure();
+  }
+
+  if (failed(checkIfHyperRectangular(input)))
+    return failure();
+
+  // Check if tiling is legal.
+  if (failed(checkTilingLegality(input))) {
+    input[0].emitRemark("tiling code is illegal due to dependences");
+    return failure();
+  }
+
+  return success();
 }
 
 /// Move the loop body of AffineForOp 'src' from 'src' into the specified
@@ -580,21 +615,6 @@ void constructTiledLoopNest(MutableArrayRef<AffineForOp> origLoops,
 
   // Move the loop body of the original nest to the new one.
   moveLoopBody(origLoops.back(), innermostPointLoop);
-}
-
-/// Checks whether a loop nest is hyper-rectangular or not.
-LogicalResult checkIfHyperRectangular(MutableArrayRef<AffineForOp> input,
-                                      AffineForOp rootAffineForOp,
-                                      unsigned width) {
-  FlatAffineValueConstraints cst;
-  SmallVector<Operation *, 8> ops(input.begin(), input.end());
-  (void)getIndexSet(ops, &cst);
-  if (!cst.isHyperRectangular(0, width)) {
-    rootAffineForOp.emitError("tiled code generation unimplemented for the "
-                              "non-hyperrectangular case");
-    return failure();
-  }
-  return success();
 }
 
 /// Set lower and upper bounds of intra-tile loops for parametric tiling.
@@ -912,11 +932,16 @@ LogicalResult
 mlir::tilePerfectlyNested(MutableArrayRef<AffineForOp> input,
                           ArrayRef<unsigned> tileSizes,
                           SmallVectorImpl<AffineForOp> *tiledNest) {
-  performPreTilingChecks(input, tileSizes);
+  if (input.empty())
+    return success();
+
+  if (failed(performPreTilingChecks(input, tileSizes)))
+    return failure();
 
   MutableArrayRef<AffineForOp> origLoops = input;
   AffineForOp rootAffineForOp = origLoops[0];
-  // Note that width is at least one since band isn't empty.
+
+  // Note that width is at least one since the band isn't empty.
   unsigned width = input.size();
   SmallVector<AffineForOp, 6> tiledLoops(2 * width);
 
@@ -926,9 +951,6 @@ mlir::tilePerfectlyNested(MutableArrayRef<AffineForOp> input,
 
   SmallVector<Value, 8> origLoopIVs;
   extractForInductionVars(input, &origLoopIVs);
-
-  if (failed(checkIfHyperRectangular(input, rootAffineForOp, width)))
-    return failure();
 
   // Set loop bounds for the tiled loop nest.
   constructTiledIndexSetHyperRect(origLoops, tiledLoops, tileSizes);
@@ -954,11 +976,14 @@ LogicalResult
 mlir::tilePerfectlyNestedParametric(MutableArrayRef<AffineForOp> input,
                                     ArrayRef<Value> tileSizes,
                                     SmallVectorImpl<AffineForOp> *tiledNest) {
-  performPreTilingChecks(input, tileSizes);
+  if (input.empty())
+    return success();
+
+  if (failed(performPreTilingChecks(input, tileSizes)))
+    return failure();
 
   MutableArrayRef<AffineForOp> origLoops = input;
   AffineForOp rootAffineForOp = origLoops[0];
-  // Note that width is at least one since band isn't empty.
   unsigned width = input.size();
   SmallVector<AffineForOp, 6> tiledLoops(2 * width);
 
@@ -968,9 +993,6 @@ mlir::tilePerfectlyNestedParametric(MutableArrayRef<AffineForOp> input,
 
   SmallVector<Value, 8> origLoopIVs;
   extractForInductionVars(input, &origLoopIVs);
-
-  if (failed(checkIfHyperRectangular(input, rootAffineForOp, width)))
-    return failure();
 
   // Set loop bounds for the tiled loop nest.
   constructParametricallyTiledIndexSetHyperRect(origLoops, tiledLoops,
@@ -1345,9 +1367,7 @@ static bool areInnerBoundsInvariant(AffineForOp forOp) {
     }
     return WalkResult::advance();
   });
-  if (walkResult.wasInterrupted())
-    return false;
-  return true;
+  return !walkResult.wasInterrupted();
 }
 
 // Gathers all maximal sub-blocks of operations that do not themselves
@@ -2882,8 +2902,8 @@ static LogicalResult generateCopy(
                                  /*extraIndices=*/{}, indexRemap,
                                  /*extraOperands=*/regionSymbols,
                                  /*symbolOperands=*/{},
-                                 /*domInstFilter=*/&*begin,
-                                 /*postDomInstFilter=*/&*postDomFilter);
+                                 /*domOpFilter=*/&*begin,
+                                 /*postDomOpFilter=*/&*postDomFilter);
 
   *nBegin = isBeginAtStartOfBlock ? block->begin() : std::next(prevOfBegin);
 
@@ -3258,7 +3278,7 @@ static AffineIfOp createSeparationCondition(MutableArrayRef<AffineForOp> loops,
                                1);
     unsigned fullTileLbPos, fullTileUbPos;
     if (!cst.getConstantBoundOnDimSize(0, /*lb=*/nullptr,
-                                       /*lbFloorDivisor=*/nullptr,
+                                       /*boundFloorDivisor=*/nullptr,
                                        /*ub=*/nullptr, &fullTileLbPos,
                                        &fullTileUbPos)) {
       LLVM_DEBUG(llvm::dbgs() << "Can't get constant diff pair for a loop\n");
@@ -3355,7 +3375,7 @@ createFullTiles(MutableArrayRef<AffineForOp> inputNest,
 
   // Add the body for the full tile loop nest.
   BlockAndValueMapping operandMap;
-  for (auto loopEn : llvm::enumerate(inputNest))
+  for (const auto &loopEn : llvm::enumerate(inputNest))
     operandMap.map(loopEn.value().getInductionVar(),
                    fullTileLoops[loopEn.index()].getInductionVar());
   b = OpBuilder::atBlockTerminator(fullTileLoops.back().getBody());
