@@ -129,7 +129,7 @@ struct ConcatOptimization : public OpRewritePattern<tosa::ConcatOp> {
   }
 };
 
-void ConcatOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+void ConcatOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                            MLIRContext *context) {
   results.insert<ConcatOptimization>(context);
 }
@@ -187,7 +187,7 @@ struct ReshapeConstOptimization : public OpRewritePattern<tosa::ReshapeOp> {
   }
 };
 
-void ReshapeOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+void ReshapeOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                             MLIRContext *context) {
   results.insert<ReshapeReshapeOptimization>(context);
   results.insert<ReshapeConstOptimization>(context);
@@ -284,7 +284,7 @@ struct NoOpOptimization : public OpRewritePattern<tosa::TransposeOp> {
   }
 };
 
-void TransposeOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+void TransposeOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                               MLIRContext *context) {
   results.insert<ConstantTransposeOptimization>(context);
   results.insert<NoOpOptimization>(context);
@@ -322,7 +322,7 @@ struct AddZeroOptimization : public OpRewritePattern<tosa::AddOp> {
   }
 };
 
-void AddOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+void AddOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                         MLIRContext *context) {
   results.insert<AddZeroOptimization>(context);
 }
@@ -371,7 +371,7 @@ struct MulOneOptimization : public OpRewritePattern<tosa::MulOp> {
   }
 };
 
-void MulOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+void MulOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                         MLIRContext *context) {
   results.insert<MulOneOptimization>(context);
 }
@@ -418,7 +418,7 @@ struct MaterializePadValue : public OpRewritePattern<tosa::PadOp> {
   }
 };
 
-void PadOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+void PadOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                         MLIRContext *context) {
   results.insert<MaterializePadValue>(context);
 }
@@ -453,9 +453,112 @@ struct MaxPool2dIsNoOp : public OpRewritePattern<tosa::MaxPool2dOp> {
   }
 };
 
-void MaxPool2dOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+void MaxPool2dOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                               MLIRContext *context) {
   results.insert<MaxPool2dIsNoOp>(context);
+}
+
+struct ClampIsNoOp : public OpRewritePattern<tosa::ClampOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(tosa::ClampOp op,
+                                PatternRewriter &rewriter) const override {
+    Value input = op.input();
+    auto inputType = op.input().getType().template dyn_cast<RankedTensorType>();
+    auto inputElementType = inputType.getElementType();
+
+    if (!inputType.hasStaticShape()) {
+      return failure();
+    }
+
+    if (inputElementType.isF32()) {
+      auto minClamp = op.min_fp();
+      auto maxClamp = op.max_fp();
+      bool isMin = (minClamp.isLargest() || minClamp.isInfinity()) &&
+                   minClamp.isNegative();
+      bool isMax = (maxClamp.isLargest() || maxClamp.isInfinity()) &&
+                   !maxClamp.isNegative();
+
+      if (isMin && isMax) {
+        rewriter.replaceOp(op, input);
+        return success();
+      }
+      return failure();
+    }
+
+    if (inputElementType.isUnsignedInteger()) {
+      int64_t minClamp = op.min_int();
+      int64_t maxClamp = op.max_int();
+
+      int64_t intMin =
+          APInt::getMinValue(inputElementType.getIntOrFloatBitWidth())
+              .getZExtValue();
+      int64_t intMax =
+          APInt::getMaxValue(inputElementType.getIntOrFloatBitWidth())
+              .getZExtValue();
+
+      if (minClamp <= intMin && maxClamp >= intMax) {
+        rewriter.replaceOp(op, input);
+        return success();
+      }
+      return failure();
+    }
+
+    if (inputElementType.isa<IntegerType>()) {
+      int64_t minClamp = op.min_int();
+      int64_t maxClamp = op.max_int();
+
+      int64_t intMin =
+          APInt::getSignedMinValue(inputElementType.getIntOrFloatBitWidth())
+              .getSExtValue();
+      int64_t intMax =
+          APInt::getSignedMaxValue(inputElementType.getIntOrFloatBitWidth())
+              .getSExtValue();
+
+      if (minClamp <= intMin && maxClamp >= intMax) {
+        rewriter.replaceOp(op, input);
+        return success();
+      }
+      return failure();
+    }
+
+    return failure();
+  }
+};
+
+struct ClampClampOptimization : public OpRewritePattern<tosa::ClampOp> {
+  using OpRewritePattern<tosa::ClampOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(tosa::ClampOp op,
+                                PatternRewriter &rewriter) const override {
+    Value input = op.input();
+
+    Operation *definingOp = input.getDefiningOp();
+    if (!definingOp)
+      return failure();
+
+    if (tosa::ClampOp clampOp = dyn_cast<tosa::ClampOp>(definingOp)) {
+      auto minFp = std::max(op.min_fp(), clampOp.min_fp()).convertToFloat();
+      auto maxFp = std::min(op.max_fp(), clampOp.max_fp()).convertToFloat();
+
+      auto minInt = std::max(op.min_int(), clampOp.min_int());
+      auto maxInt = std::min(op.max_int(), clampOp.max_int());
+
+      rewriter.replaceOpWithNewOp<tosa::ClampOp>(
+          op, op.getType(), clampOp.input(), rewriter.getI64IntegerAttr(minInt),
+          rewriter.getI64IntegerAttr(maxInt), rewriter.getF32FloatAttr(minFp),
+          rewriter.getF32FloatAttr(maxFp));
+      return success();
+    }
+
+    return failure();
+  }
+};
+
+void ClampOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                          MLIRContext *context) {
+  results.insert<ClampIsNoOp>(context);
+  results.insert<ClampClampOptimization>(context);
 }
 
 //===----------------------------------------------------------------------===//

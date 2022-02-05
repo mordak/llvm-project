@@ -1,6 +1,6 @@
-========================================
-Clang 14.0.0 (In-Progress) Release Notes
-========================================
+===========================================
+Clang |release| |ReleaseNotesTitle|
+===========================================
 
 .. contents::
    :local:
@@ -8,17 +8,18 @@ Clang 14.0.0 (In-Progress) Release Notes
 
 Written by the `LLVM Team <https://llvm.org/>`_
 
-.. warning::
+.. only:: PreRelease
 
-   These are in-progress notes for the upcoming Clang 14 release.
-   Release notes for previous releases can be found on
-   `the Download Page <https://releases.llvm.org/download.html>`_.
+  .. warning::
+     These are in-progress notes for the upcoming Clang |version| release.
+     Release notes for previous releases can be found on
+     `the Download Page <https://releases.llvm.org/download.html>`_.
 
 Introduction
 ============
 
 This document contains the release notes for the Clang C/C++/Objective-C
-frontend, part of the LLVM Compiler Infrastructure, release 14.0.0. Here we
+frontend, part of the LLVM Compiler Infrastructure, release |release|. Here we
 describe the status of Clang in some detail, including major
 improvements from the previous release and new feature work. For the
 general LLVM release notes, see `the LLVM
@@ -35,8 +36,8 @@ main Clang web page, this document applies to the *next* release, not
 the current one. To see the release notes for a specific release, please
 see the `releases page <https://llvm.org/releases/>`_.
 
-What's New in Clang 14.0.0?
-===========================
+What's New in Clang |release|?
+==============================
 
 Some of the major new features and improvements to Clang are listed
 here. Generic improvements to Clang as a whole or to its underlying
@@ -58,6 +59,11 @@ Improvements to Clang's diagnostics
   release being diagnosed against). These new groups are automatically implied
   when passing ``-Wc++N-extensions``. Resolves PR33518.
 
+- Support ``-Wdeclaration-after-statement`` with C99 and later standards, and
+  not just C89, matching GCC's behaviour. A notable usecase is supporting style
+  guides that forbid mixing declarations and code, but want to move to newer C
+  standards.
+
 Non-comprehensive list of changes in this release
 -------------------------------------------------
 
@@ -72,6 +78,9 @@ New Compiler Flags
 
 - Clang plugin arguments can now be passed through the compiler driver via
   ``-fplugin-arg-pluginname-arg``, similar to GCC's ``-fplugin-arg``.
+- The ``-mno-bti-at-return-twice`` flag will make sure a BTI instruction won't
+  be added after a setjmp or possible other return-twice construct (ARM backend
+  only).
 
 Deprecated Compiler Flags
 -------------------------
@@ -102,7 +111,10 @@ Modified Compiler Flags
 Removed Compiler Flags
 -------------------------
 
-- ...
+- ``-fno-experimental-new-pass-manager`` has been removed.
+  ``-flegacy-pass-manager`` can be used as a makeshift,
+  Using the legacy pass manager for the optimization pipeline was deprecated in
+  13.0.0 and will be removed after 14.0.0.
 
 New Pragmas in Clang
 --------------------
@@ -136,6 +148,16 @@ Windows Support
   or pass ``/permissive`` to disable C++ operator names altogether. See
   `PR42427 <https://llvm.org/pr42427>` for more info.
 
+- Add support for MSVC-compatible ``/hotpatch`` flag in clang-cl, and equivalent
+  -cc1 flag ``-fms-hotpatch``. Along with the linker flag ``/functionpadmin``
+  this creates executable images suitable for runtime code patching. This flag
+  is only required for x86/x64 targets; ARM/ARM64 simply needs the linker
+  ``/functionpadmin``.
+
+  With this addition, clang-cl can be used in live code patching scenarios,
+  along with tools such as Live++ or Recode. Microsoft Edit and Continue isn't
+  currently supported.
+
 C Language Changes in Clang
 ---------------------------
 
@@ -148,7 +170,6 @@ C Language Changes in Clang
 - Support for ``__attribute__((error("")))`` and
   ``__attribute__((warning("")))`` function attributes have been added.
 - The maximum allowed alignment has been increased from 2^29 to 2^32.
-
 - Clang now supports the ``_BitInt(N)`` family of bit-precise integer types
   from C23. This type was previously exposed as ``_ExtInt(N)``, which is now a
   deprecated alias for ``_BitInt(N)`` (so diagnostics will mention ``_BitInt``
@@ -157,7 +178,28 @@ C Language Changes in Clang
   ``_BitInt(N)`` is supported as an extension in older C modes and in all C++
   modes. Note: the ABI for ``_BitInt(N)`` is still in the process of being
   stabilized, so this type should not yet be used in interfaces that require
-  ABI stability.
+  ABI stability. The maximum width supported by Clang can be obtained from the
+  ``BITINT_MAXWIDTH`` macro in ``<limits.h>``. Currently, Clang supports bit
+  widths <= 128 because backends are not yet able to cope with some math
+  operations (like division) on wider integer types. See
+  `PR44994 <https://github.com/llvm/llvm-project/issues/44994>`_ for more
+  information.
+- When using ``asm goto`` with outputs whose constraint modifier is ``"+"``, we
+  now change the numbering of the labels to occur after hidden tied inputs for
+  better compatibility with GCC.  For better portability between different
+  compilers and versions, symbolic references rather than numbered references
+  should be preferred. See
+  `this thread <https://gcc.gnu.org/bugzilla/show_bug.cgi?id=103640>` for more
+  info.
+
+- Implemented `WG14 N2412 <http://www.open-std.org/jtc1/sc22/wg14/www/docs/n2412.pdf>`_,
+  which adds ``*_WIDTH`` macros to limits.h and stdint.h to report the bit
+  width of various integer datatypes.
+
+- The ``ATOMIC_VAR_INIT`` macro from ``<stdatomic.h>`` is now diagnosed as
+  deprecated in C17 and later. The diagnostic can be disabled by defining the
+  ``_CLANG_DISABLE_CRT_DEPRECATION_WARNINGS`` macro prior to including the
+  header.
 
 C++ Language Changes in Clang
 -----------------------------
@@ -166,7 +208,15 @@ C++ Language Changes in Clang
 
 C++20 Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
-...
+
+- The ``ATOMIC_VAR_INIT`` and ``ATOMIC_FLAG_INIT`` macros from the C standard
+  library ``<stdatomic.h>`` header are now diagnosed as deprecated in C++20 and
+  later. Note, the behavior is specific to the inclusion of ``<stdatomic.h>``
+  in C++ code; the STL ``<atomic>`` header also controls the behavior of these
+  macros and is not affected by these changes. The ``<stdatomic.h>`` diagnostic
+  can be disabled by defining the ``_CLANG_DISABLE_CRT_DEPRECATION_WARNINGS``
+  macro prior to including the header.
+
 
 C++2b Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
@@ -198,11 +248,17 @@ ABI Changes in Clang
   is still in the process of being stabilized, so this type should not yet be
   used in interfaces that require ABI stability.
 
+- GCC doesn't pack non-POD members in packed structs unless the packed
+  attribute is also specified on the member. Clang historically did perform
+  such packing. Clang now matches the gcc behavior (except on Darwin and PS4).
+  You can switch back to the old ABI behavior with the flag:
+  ``-fclang-abi-compat=13.0``.
+
 OpenMP Support in Clang
 -----------------------
 
 - ``clang-nvlink-wrapper`` tool introduced to support linking of cubin files archived in an archive. See :doc:`ClangNvlinkWrapper`.
-
+- ``clang-linker-wrapper`` tool introduced to support linking using a new OpenMP target offloading method. See :doc:`ClangLinkerWrapper`.
 
 CUDA Support in Clang
 ---------------------
@@ -213,6 +269,14 @@ X86 Support in Clang
 --------------------
 
 - Support for ``AVX512-FP16`` instructions has been added.
+
+DWARF Support in Clang
+----------------------
+
+- The default DWARF version has increased from DWARFv4 to DWARFv5.  You can opt
+  back in to the old behavior with ``-gdwarf-4`` or ``-fdebug-default-version=4``.
+  Some platforms (Darwin, Android, and SCE for instance) already opt out of this
+  version bump as is suitable for the platform
 
 Arm and AArch64 Support in Clang
 --------------------------------
@@ -229,6 +293,14 @@ Arm and AArch64 Support in Clang
   architecture features, but will enable certain optimizations specific to
   Cortex-A57 CPUs and enable the use of a more accurate scheduling model.
 
+- The --aarch64-none-elf target now uses the BareMetal driver rather than the
+  GNU driver. Programs that depend on clang invoking GCC as the linker driver
+  should use GCC as the linker in the build system.
+
+- The ``-mbranch-protection`` flag will now also work for the ARM backend.
+
+- The ``attribute((target("branch-protection=...)))`` attributes will now also
+  work for the ARM backend.
 
 Floating Point Support in Clang
 -------------------------------
@@ -283,12 +355,20 @@ AST Matchers
   and the underlying ``Type`` with ``hasUnderlyingType``.
   ``hasDeclaration`` continues to see through the alias and apply to the
   underlying type.
+- Added the ``isConsteval`` matcher to match ``consteval`` function
+  declarations as well as `if consteval` and `if ! consteval` statements.
+- Added the ``isConstinit`` matcher to match ``constinit`` variable
+  declarations.
 
 clang-format
 ------------
 
 - Option ``AllowShortEnumsOnASingleLine: false`` has been improved, it now
   correctly places the opening brace according to ``BraceWrapping.AfterEnum``.
+
+- Option ``AlignAfterOpenBracket: BlockIndent`` has been added. If set, it will
+  always break after an open bracket, if the parameters don't fit on a single
+  line. Closing brackets will be placed on a new line.
 
 - Option ``QualifierAlignment`` has been added in order to auto-arrange the
   positioning of specifiers/qualifiers
@@ -299,6 +379,9 @@ clang-format
 - Option ``QualifierOrder`` has been added to allow the order
   `const` `volatile` `static` `inline` `constexpr` `restrict`
   to be controlled relative to the `type`.
+
+- Option ``RemoveBracesLLVM`` has been added to remove optional braces of
+  control statements for the LLVM style.
 
 - Option ``SeparateDefinitionBlocks`` has been added to insert or remove empty
   lines between definition blocks including functions, classes, structs, enums,

@@ -48,8 +48,8 @@ static arith::CmpIOp createCondition(fir::FirOpBuilder &builder) {
 }
 
 static void checkIntegerConstant(mlir::Value value, mlir::Type ty, int64_t v) {
-  EXPECT_TRUE(mlir::isa<ConstantOp>(value.getDefiningOp()));
-  auto cstOp = dyn_cast<ConstantOp>(value.getDefiningOp());
+  EXPECT_TRUE(mlir::isa<mlir::arith::ConstantOp>(value.getDefiningOp()));
+  auto cstOp = dyn_cast<mlir::arith::ConstantOp>(value.getDefiningOp());
   EXPECT_EQ(ty, cstOp.getType());
   auto valueAttr = cstOp.getValue().dyn_cast_or_null<IntegerAttr>();
   EXPECT_EQ(v, valueAttr.getInt());
@@ -238,7 +238,7 @@ TEST_F(FIRBuilderTest, uniqueCFIdent) {
 
 TEST_F(FIRBuilderTest, locationToLineNo) {
   auto builder = getBuilder();
-  auto loc = mlir::FileLineColLoc::get(builder.getIdentifier("file1"), 10, 5);
+  auto loc = mlir::FileLineColLoc::get(builder.getStringAttr("file1"), 10, 5);
   mlir::Value line =
       fir::factory::locationToLineNo(builder, loc, builder.getI64Type());
   checkIntegerConstant(line, builder.getI64Type(), 10);
@@ -260,7 +260,7 @@ TEST_F(FIRBuilderTest, hasDynamicSize) {
 TEST_F(FIRBuilderTest, locationToFilename) {
   auto builder = getBuilder();
   auto loc =
-      mlir::FileLineColLoc::get(builder.getIdentifier("file1.f90"), 10, 5);
+      mlir::FileLineColLoc::get(builder.getStringAttr("file1.f90"), 10, 5);
   mlir::Value locToFile = fir::factory::locationToFilename(builder, loc);
   auto addrOp = dyn_cast<fir::AddrOfOp>(locToFile.getDefiningOp());
   auto symbol = addrOp.symbol().getRootReference().getValue();

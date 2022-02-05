@@ -609,6 +609,15 @@ class sve_int_pfalse<bits<6> opc, string asm>
   let isReMaterializable = 1;
 }
 
+multiclass sve_int_pfalse<bits<6> opc, string asm> {
+  def NAME : sve_int_pfalse<opc, asm>;
+
+  def : Pat<(nxv16i1 (splat_vector (i32 0))), (!cast<Instruction>(NAME))>;
+  def : Pat<(nxv8i1 (splat_vector (i32 0))), (!cast<Instruction>(NAME))>;
+  def : Pat<(nxv4i1 (splat_vector (i32 0))), (!cast<Instruction>(NAME))>;
+  def : Pat<(nxv2i1 (splat_vector (i32 0))), (!cast<Instruction>(NAME))>;
+}
+
 class sve_int_ptest<bits<6> opc, string asm>
 : I<(outs), (ins PPRAny:$Pg, PPR8:$Pn),
   asm, "\t$Pg, $Pn",
@@ -762,7 +771,7 @@ multiclass sve_int_count_r_x64<bits<5> opc, string asm,
   def : Pat<(i64 (op GPR64:$Rn, (nxv2i1 PPRAny:$Pg))),
             (!cast<Instruction>(NAME # _D) PPRAny:$Pg, $Rn)>;
 
-  // Combine cntp with combine_op
+  // combine_op(x, cntp(all_active, p)) ==> inst p, x
   def : Pat<(i64 (combine_op GPR64:$Rn, (int_aarch64_sve_cntp_oneuse (nxv16i1 (SVEAllActive)), (nxv16i1 PPRAny:$pred)))),
             (!cast<Instruction>(NAME # _B) PPRAny:$pred, $Rn)>;
   def : Pat<(i64 (combine_op GPR64:$Rn, (int_aarch64_sve_cntp_oneuse (nxv8i1 (SVEAllActive)), (nxv8i1 PPRAny:$pred)))),
@@ -770,6 +779,16 @@ multiclass sve_int_count_r_x64<bits<5> opc, string asm,
   def : Pat<(i64 (combine_op GPR64:$Rn, (int_aarch64_sve_cntp_oneuse (nxv4i1 (SVEAllActive)), (nxv4i1 PPRAny:$pred)))),
             (!cast<Instruction>(NAME # _S) PPRAny:$pred, $Rn)>;
   def : Pat<(i64 (combine_op GPR64:$Rn, (int_aarch64_sve_cntp_oneuse (nxv2i1 (SVEAllActive)), (nxv2i1 PPRAny:$pred)))),
+            (!cast<Instruction>(NAME # _D) PPRAny:$pred, $Rn)>;
+
+  // combine_op(x, cntp(p, p)) ==> inst p, x
+  def : Pat<(i64 (combine_op GPR64:$Rn, (int_aarch64_sve_cntp_oneuse (nxv16i1 PPRAny:$pred), (nxv16i1 PPRAny:$pred)))),
+            (!cast<Instruction>(NAME # _B) PPRAny:$pred, $Rn)>;
+  def : Pat<(i64 (combine_op GPR64:$Rn, (int_aarch64_sve_cntp_oneuse (nxv8i1 PPRAny:$pred), (nxv8i1 PPRAny:$pred)))),
+            (!cast<Instruction>(NAME # _H) PPRAny:$pred, $Rn)>;
+  def : Pat<(i64 (combine_op GPR64:$Rn, (int_aarch64_sve_cntp_oneuse (nxv4i1 PPRAny:$pred), (nxv4i1 PPRAny:$pred)))),
+            (!cast<Instruction>(NAME # _S) PPRAny:$pred, $Rn)>;
+  def : Pat<(i64 (combine_op GPR64:$Rn, (int_aarch64_sve_cntp_oneuse (nxv2i1 PPRAny:$pred), (nxv2i1 PPRAny:$pred)))),
             (!cast<Instruction>(NAME # _D) PPRAny:$pred, $Rn)>;
 }
 
@@ -1622,6 +1641,21 @@ multiclass sve_int_pred_log<bits<4> opc, string asm, SDPatternOperator op,
                                !cast<Instruction>(NAME), PTRUE_D>;
 }
 
+// An instance of sve_int_pred_log_and but uses op_nopred's first operand as the
+// general predicate.
+multiclass sve_int_pred_log_v2<bits<4> opc, string asm, SDPatternOperator op,
+                               SDPatternOperator op_nopred> :
+  sve_int_pred_log<opc, asm, op> {
+  def : Pat<(nxv16i1 (op_nopred nxv16i1:$Op1, nxv16i1:$Op2)),
+            (!cast<Instruction>(NAME) $Op1, $Op1, $Op2)>;
+  def : Pat<(nxv8i1 (op_nopred nxv8i1:$Op1, nxv8i1:$Op2)),
+            (!cast<Instruction>(NAME) $Op1, $Op1, $Op2)>;
+  def : Pat<(nxv4i1 (op_nopred nxv4i1:$Op1, nxv4i1:$Op2)),
+            (!cast<Instruction>(NAME) $Op1, $Op1, $Op2)>;
+  def : Pat<(nxv2i1 (op_nopred nxv2i1:$Op1, nxv2i1:$Op2)),
+            (!cast<Instruction>(NAME) $Op1, $Op1, $Op2)>;
+}
+
 //===----------------------------------------------------------------------===//
 // SVE Logical Mask Immediate Group
 //===----------------------------------------------------------------------===//
@@ -1708,6 +1742,9 @@ multiclass sve_int_dup_mask_imm<string asm> {
                   (!cast<Instruction>(NAME) ZPR32:$Zd, sve_preferred_logical_imm32:$imm), 6>;
   def : InstAlias<"mov $Zd, $imm",
                   (!cast<Instruction>(NAME) ZPR64:$Zd, sve_preferred_logical_imm64:$imm), 5>;
+
+  def : Pat<(nxv2i64 (AArch64dup (i64 logical_imm64:$imm))),
+            (!cast<Instruction>(NAME) logical_imm64:$imm)>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -4641,6 +4678,10 @@ multiclass SVE_SETCC_Pat<CondCode cc, CondCode invcc, ValueType predvt,
             (cmp $Op1, $Op2, $Op3)>;
   def : Pat<(predvt (AArch64setcc_z predvt:$Op1, intvt:$Op2, intvt:$Op3, invcc)),
             (cmp $Op1, $Op3, $Op2)>;
+  def : Pat<(predvt (and predvt:$Pg, (AArch64setcc_z (predvt (AArch64ptrue 31)), intvt:$Op2, intvt:$Op3, cc))),
+            (cmp $Pg, $Op2, $Op3)>;
+  def : Pat<(predvt (and predvt:$Pg, (AArch64setcc_z (predvt (AArch64ptrue 31)), intvt:$Op2, intvt:$Op3, invcc))),
+            (cmp $Pg, $Op3, $Op2)>;
 }
 
 multiclass SVE_SETCC_Pat_With_Zero<CondCode cc, CondCode invcc, ValueType predvt,

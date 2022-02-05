@@ -38,10 +38,14 @@ What's New in Libc++ 14.0.0?
 New Features
 ------------
 
-- There's initial support for the C++20 header ``<format>``. The implementation
-  is incomplete. Some functions are known to be inefficient; both in memory
-  usage and performance. The implementation is considered experimental and isn't
-  considered ABI stable.
+- There's support for the C++20 header ``<format>``. Some parts are still
+  missing, most notably the compile-time format string validation. Some
+  functions are known to be inefficient, both in memory usage and performance.
+  The implementation isn't API- or ABI-stable and therefore considered
+  experimental. (Some not-yet-implemented papers require an API-break.)
+  As a result, it is disabled by default, however vendors can enable the
+  header by using ``-DLIBCXX_ENABLE_INCOMPLETE_FEATURES=ON`` when
+  configuring their build.
 
 - There's a new CMake option ``LIBCXX_ENABLE_UNICODE`` to disable Unicode
   support in the ``<format>`` header. This only affects the estimation of the
@@ -51,13 +55,21 @@ New Features
   added. This is useful for building libc++ in an embedded setting, and it adds itself to the various
   freestanding-friendly options provided by libc++.
 
-- ``_LIBCPP_DEBUG`` equals to ``1`` enables the randomization of unspecified
-  behavior of standard algorithms (e.g. equal elements in ``std::sort`` or
-  randomization of both sides of partition for ``std::nth_element``)
+- Defining ``_LIBCPP_DEBUG`` to ``1`` enables the randomization of unspecified
+  behavior in standard algorithms (e.g. the ordering of equal elements in ``std::sort``, or
+  the ordering of both sides of the partition in ``std::nth_element``).
 
 - Floating-point support for ``std::to_chars`` support has been added.
   Thanks to Stephan T. Lavavej and Microsoft for providing their implementation
   to libc++.
+
+- The C++20 ``<coroutine>`` implementation has been completed.
+
+- More C++20 features have been implemented. :doc:`Status/Cxx20` has the full
+  overview of libc++'s C++20 implementation status.
+
+- More C++2b features have been implemented. :doc:`Status/Cxx2b` has the full
+  overview of libc++'s C++2b implementation status.
 
 API Changes
 -----------
@@ -97,6 +109,42 @@ API Changes
   from all modes. Their symbols are still provided by the dynamic library for the benefit of
   existing compiled code. All of these functions have always behaved as no-ops.
 
+- ``std::filesystem::path::iterator``, which (in our implementation) stashes
+  a ``path`` value inside itself similar to ``istream_iterator``, now sets its
+  ``reference`` type to ``path`` and its ``iterator_category`` to ``input_iterator_tag``,
+  so that it is a conforming input iterator in C++17 and a conforming
+  ``std::bidirectional_iterator`` in C++20. Before this release, it had set its
+  ``reference`` type to ``const path&`` and its ``iterator_category`` to
+  ``bidirectional_iterator_tag``, making it a non-conforming bidirectional iterator.
+  After this change, ``for`` loops of the form ``for (auto& c : path)`` must be rewritten
+  as either ``for (auto&& c : path)`` or ``for (const auto& c : path)``.
+  ``std::reverse_iterator<path::iterator>`` is no longer rejected.
+
+- Removed the nonstandard default constructor from ``std::chrono::month_weekday``.
+  You must now explicitly initialize with a ``chrono::month`` and
+  ``chrono::weekday_indexed`` instead of "meh, whenever".
+
+- C++20 requires that ``std::basic_string::reserve(n)`` never reduce the capacity
+  of the string. (For that, use ``shrink_to_fit()``.) Prior to this release, libc++'s
+  ``std::basic_string::reserve(n)`` could reduce capacity in C++17 and before, but
+  not in C++20 and later. This caused ODR violations when mixing code compiled under
+  different Standard modes. After this change, libc++'s ``std::basic_string::reserve(n)``
+  never reduces capacity, even in C++17 and before.
+  C++20 deprecates the zero-argument overload of ``std::basic_string::reserve()``,
+  but specifically permits it to reduce capacity. To avoid breaking existing code
+  assuming that ``std::basic_string::reserve()`` will shrink, libc++ maintains
+  the behavior to shrink, even though that makes ``std::basic_string::reserve()`` not
+  a synonym for ``std::basic_string::reserve(0)`` in any Standard mode anymore.
+
+- The ``<experimental/coroutine>`` header is deprecated, as is any
+  use of coroutines without C++20. Use C++20's ``<coroutine>`` header
+  instead. The ``<experimental/coroutine>`` header will be removed
+  in LLVM 15.
+
+- ``_VSTD`` is now an alias for ``std`` instead of ``std::_LIBCPP_ABI_NAMESPACE``.
+  This is technically not a functional change, except for folks that might have been
+  using ``_VSTD`` in creative ways (which has never been officially supported).
+
 ABI Changes
 -----------
 
@@ -111,8 +159,22 @@ ABI Changes
   errors involving ``std::nullptr_t`` against previously compiled binaries, this may
   be the cause. You can define the ``_LIBCPP_ABI_USE_CXX03_NULLPTR_EMULATION`` macro
   to return to the previous behavior. That macro will be removed in LLVM 15. Please
-  comment `here <https://reviews.llvm.org/D109459>`_ if you are broken by this change
+  comment `on D109459 <https://reviews.llvm.org/D109459>`_ if you are broken by this change
   and need to define the macro.
+
+- On Apple platforms, ``std::random_device`` is now implemented on top of ``arc4random()``
+  instead of reading from ``/dev/urandom``. Any implementation-defined token used when
+  constructing a ``std::random_device`` will now be ignored instead of interpreted as a
+  file to read entropy from.
+
+- ``std::lognormal_distribution::param_type`` used to store a data member of type
+  ``std::normal_distribution``; now this member is stored in the ``lognormal_distribution``
+  class itself, and the ``param_type`` stores only the mean and standard deviation,
+  as required by the Standard. This changes ``sizeof(std::lognormal_distribution::param_type)``.
+  You can define the ``_LIBCPP_ABI_OLD_LOGNORMAL_DISTRIBUTION`` macro to return to the
+  previous behavior. That macro will be removed in LLVM 15. Please comment
+  `on PR52906 <https://llvm.org/PR52906>`_ if you are broken by this change and need to
+  define the macro.
 
 Build System Changes
 --------------------
@@ -121,13 +183,13 @@ Build System Changes
   Consider using a Bootstrapping build to build libc++ with a fresh Clang if you
   can't use the system compiler to build libc++ anymore.
 
-- Historically, there has been numerous ways of building libc++ and libc++abi. This has
-  culminated in over 5 different ways to build the runtimes, which made it impossible to
-  maintain with a good level of support. Starting with this release, the runtimes support
+- Historically, there have been numerous ways of building libc++ and libc++abi. This has
+  led to at least 5 different ways to build the runtimes, which was impossible to
+  maintain with a good level of support. Starting with this release, libc++ and libc++abi support
   exactly two ways of being built, which should cater to all use-cases. Furthermore,
   these builds are as lightweight as possible and will work consistently even when targeting
-  embedded platforms, which used not to be the case. Please see the documentation on building
-  libc++ to see those two ways of building and migrate over to the appropriate build instructions
+  embedded platforms, which used not to be the case. :doc:`BuildingLibcxx` describes
+  those two ways of building. Please migrate over to the appropriate build instructions
   as soon as possible.
 
   All other ways to build are deprecated and will not be supported in the next release.
@@ -162,8 +224,8 @@ Build System Changes
 
       -DLLVM_RUNTIME_TARGETS=i386-unknown-linux
 
-- Libc++, libc++abi and libunwind will not be built with ``-fPIC`` by default anymore.
-  If you want to build those runtimes with position independent code, please specify
+- Libc++, libc++abi, and libunwind will not be built with ``-fPIC`` by default anymore.
+  If you want to build those runtimes with position-independent code, please specify
   ``-DCMAKE_POSITION_INDEPENDENT_CODE=ON`` explicitly when configuring the build, or
   ``-DRUNTIMES_<target-name>_CMAKE_POSITION_INDEPENDENT_CODE=ON`` if using the
   bootstrapping build.

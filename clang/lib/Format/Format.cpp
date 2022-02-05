@@ -44,6 +44,7 @@
 #include <algorithm>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <string>
 #include <unordered_map>
 
@@ -384,6 +385,7 @@ template <> struct ScalarEnumerationTraits<FormatStyle::BracketAlignmentStyle> {
     IO.enumCase(Value, "Align", FormatStyle::BAS_Align);
     IO.enumCase(Value, "DontAlign", FormatStyle::BAS_DontAlign);
     IO.enumCase(Value, "AlwaysBreak", FormatStyle::BAS_AlwaysBreak);
+    IO.enumCase(Value, "BlockIndent", FormatStyle::BAS_BlockIndent);
 
     // For backward compatibility.
     IO.enumCase(Value, "true", FormatStyle::BAS_Align);
@@ -531,11 +533,9 @@ template <> struct MappingTraits<FormatStyle> {
     IO.mapOptional("Language", Style.Language);
 
     if (IO.outputting()) {
-      StringRef StylesArray[] = {"LLVM",   "Google", "Chromium", "Mozilla",
-                                 "WebKit", "GNU",    "Microsoft"};
-      ArrayRef<StringRef> Styles(StylesArray);
-      for (size_t i = 0, e = Styles.size(); i < e; ++i) {
-        StringRef StyleName(Styles[i]);
+      StringRef Styles[] = {"LLVM",   "Google", "Chromium", "Mozilla",
+                            "WebKit", "GNU",    "Microsoft"};
+      for (StringRef StyleName : Styles) {
         FormatStyle PredefinedStyle;
         if (getPredefinedStyle(StyleName, Style.Language, &PredefinedStyle) &&
             Style == PredefinedStyle) {
@@ -781,6 +781,7 @@ template <> struct MappingTraits<FormatStyle> {
     IO.mapOptional("RawStringFormats", Style.RawStringFormats);
     IO.mapOptional("ReferenceAlignment", Style.ReferenceAlignment);
     IO.mapOptional("ReflowComments", Style.ReflowComments);
+    IO.mapOptional("RemoveBracesLLVM", Style.RemoveBracesLLVM);
     IO.mapOptional("SeparateDefinitionBlocks", Style.SeparateDefinitionBlocks);
     IO.mapOptional("ShortNamespaceLines", Style.ShortNamespaceLines);
     IO.mapOptional("SortIncludes", Style.SortIncludes);
@@ -1214,6 +1215,7 @@ FormatStyle getLLVMStyle(FormatStyle::LanguageKind Language) {
   LLVMStyle.UseCRLF = false;
   LLVMStyle.UseTab = FormatStyle::UT_Never;
   LLVMStyle.ReflowComments = true;
+  LLVMStyle.RemoveBracesLLVM = false;
   LLVMStyle.SpacesInParentheses = false;
   LLVMStyle.SpacesInSquareBrackets = false;
   LLVMStyle.SpaceInEmptyBlock = false;
@@ -1678,10 +1680,10 @@ std::error_code parseConfiguration(llvm::MemoryBufferRef Config,
   // configuration (which can only be at slot 0) after it.
   FormatStyle::FormatStyleSet StyleSet;
   bool LanguageFound = false;
-  for (int i = Styles.size() - 1; i >= 0; --i) {
-    if (Styles[i].Language != FormatStyle::LK_None)
-      StyleSet.Add(Styles[i]);
-    if (Styles[i].Language == Language)
+  for (const FormatStyle &Style : llvm::reverse(Styles)) {
+    if (Style.Language != FormatStyle::LK_None)
+      StyleSet.Add(Style);
+    if (Style.Language == Language)
       LanguageFound = true;
   }
   if (!LanguageFound) {
@@ -1747,6 +1749,45 @@ FormatStyle::GetLanguageStyle(FormatStyle::LanguageKind Language) const {
 }
 
 namespace {
+
+class BracesRemover : public TokenAnalyzer {
+public:
+  BracesRemover(const Environment &Env, const FormatStyle &Style)
+      : TokenAnalyzer(Env, Style) {}
+
+  std::pair<tooling::Replacements, unsigned>
+  analyze(TokenAnnotator &Annotator,
+          SmallVectorImpl<AnnotatedLine *> &AnnotatedLines,
+          FormatTokenLexer &Tokens) override {
+    AffectedRangeMgr.computeAffectedLines(AnnotatedLines);
+    tooling::Replacements Result;
+    removeBraces(AnnotatedLines, Result);
+    return {Result, 0};
+  }
+
+private:
+  // Remove optional braces.
+  void removeBraces(SmallVectorImpl<AnnotatedLine *> &Lines,
+                    tooling::Replacements &Result) {
+    const auto &SourceMgr = Env.getSourceManager();
+    for (AnnotatedLine *Line : Lines) {
+      removeBraces(Line->Children, Result);
+      if (!Line->Affected)
+        continue;
+      for (FormatToken *Token = Line->First; Token; Token = Token->Next) {
+        if (!Token->Optional)
+          continue;
+        assert(Token->isOneOf(tok::l_brace, tok::r_brace));
+        const auto Start = Token == Line->Last
+                               ? Token->WhitespaceRange.getBegin()
+                               : Token->Tok.getLocation();
+        const auto Range =
+            CharSourceRange::getCharRange(Start, Token->Tok.getEndLoc());
+        cantFail(Result.add(tooling::Replacement(SourceMgr, Range, "")));
+      }
+    }
+  }
+};
 
 class JavaScriptRequoter : public TokenAnalyzer {
 public:
@@ -1848,9 +1889,8 @@ public:
     tooling::Replacements Result;
     deriveLocalStyle(AnnotatedLines);
     AffectedRangeMgr.computeAffectedLines(AnnotatedLines);
-    for (unsigned i = 0, e = AnnotatedLines.size(); i != e; ++i) {
-      Annotator.calculateFormattingInformation(*AnnotatedLines[i]);
-    }
+    for (AnnotatedLine *Line : AnnotatedLines)
+      Annotator.calculateFormattingInformation(*Line);
     Annotator.setCommentLineLevels(AnnotatedLines);
 
     WhitespaceManager Whitespaces(
@@ -1886,7 +1926,7 @@ private:
       if (hasCpp03IncompatibleFormat(Line->Children))
         return true;
       for (FormatToken *Tok = Line->First->Next; Tok; Tok = Tok->Next) {
-        if (Tok->WhitespaceRange.getBegin() == Tok->WhitespaceRange.getEnd()) {
+        if (!Tok->hasWhitespaceBefore()) {
           if (Tok->is(tok::coloncolon) && Tok->Previous->is(TT_TemplateOpener))
             return true;
           if (Tok->is(TT_TemplateCloser) &&
@@ -1905,10 +1945,8 @@ private:
       for (FormatToken *Tok = Line->First; Tok && Tok->Next; Tok = Tok->Next) {
         if (!Tok->is(TT_PointerOrReference))
           continue;
-        bool SpaceBefore =
-            Tok->WhitespaceRange.getBegin() != Tok->WhitespaceRange.getEnd();
-        bool SpaceAfter = Tok->Next->WhitespaceRange.getBegin() !=
-                          Tok->Next->WhitespaceRange.getEnd();
+        bool SpaceBefore = Tok->hasWhitespaceBefore();
+        bool SpaceAfter = Tok->Next->hasWhitespaceBefore();
         if (SpaceBefore && !SpaceAfter)
           ++AlignmentDiff;
         if (!SpaceBefore && SpaceAfter)
@@ -1922,10 +1960,10 @@ private:
   deriveLocalStyle(const SmallVectorImpl<AnnotatedLine *> &AnnotatedLines) {
     bool HasBinPackedFunction = false;
     bool HasOnePerLineFunction = false;
-    for (unsigned i = 0, e = AnnotatedLines.size(); i != e; ++i) {
-      if (!AnnotatedLines[i]->First->Next)
+    for (AnnotatedLine *Line : AnnotatedLines) {
+      if (!Line->First->Next)
         continue;
-      FormatToken *Tok = AnnotatedLines[i]->First->Next;
+      FormatToken *Tok = Line->First->Next;
       while (Tok->Next) {
         if (Tok->is(PPK_BinPacked))
           HasBinPackedFunction = true;
@@ -2484,9 +2522,8 @@ static void sortCppIncludes(const FormatStyle &Style,
   if (!affectsRange(Ranges, IncludesBeginOffset, IncludesEndOffset))
     return;
   SmallVector<unsigned, 16> Indices;
-  for (unsigned i = 0, e = Includes.size(); i != e; ++i) {
-    Indices.push_back(i);
-  }
+  Indices.resize(Includes.size());
+  std::iota(Indices.begin(), Indices.end(), 0);
 
   if (Style.SortIncludes == FormatStyle::SI_CaseInsensitive) {
     llvm::stable_sort(Indices, [&](unsigned LHSI, unsigned RHSI) {
@@ -2638,6 +2675,15 @@ tooling::Replacements sortCppIncludes(const FormatStyle &Style, StringRef Code,
     if (!FormattingOff && !MergeWithNextLine) {
       if (IncludeRegex.match(Line, &Matches)) {
         StringRef IncludeName = Matches[2];
+        if (Line.contains("/*") && !Line.contains("*/")) {
+          // #include with a start of a block comment, but without the end.
+          // Need to keep all the lines until the end of the comment together.
+          // FIXME: This is somehow simplified check that probably does not work
+          // correctly if there are multiple comments on a line.
+          Pos = Code.find("*/", SearchFrom);
+          Line = Code.substr(
+              Prev, (Pos != StringRef::npos ? Pos + 2 : Code.size()) - Prev);
+        }
         int Category = Categories.getIncludePriority(
             IncludeName,
             /*CheckMainHeader=*/!MainIncludeFound && FirstIncludeBlock);
@@ -2678,7 +2724,7 @@ static unsigned findJavaImportGroup(const FormatStyle &Style,
   unsigned LongestMatchIndex = UINT_MAX;
   unsigned LongestMatchLength = 0;
   for (unsigned I = 0; I < Style.JavaImportGroups.size(); I++) {
-    std::string GroupPrefix = Style.JavaImportGroups[I];
+    const std::string &GroupPrefix = Style.JavaImportGroups[I];
     if (ImportIdentifier.startswith(GroupPrefix) &&
         GroupPrefix.length() > LongestMatchLength) {
       LongestMatchIndex = I;
@@ -2703,13 +2749,16 @@ static void sortJavaImports(const FormatStyle &Style,
   unsigned ImportsBlockSize = ImportsEndOffset - ImportsBeginOffset;
   if (!affectsRange(Ranges, ImportsBeginOffset, ImportsEndOffset))
     return;
+
   SmallVector<unsigned, 16> Indices;
+  Indices.resize(Imports.size());
+  std::iota(Indices.begin(), Indices.end(), 0);
+
   SmallVector<unsigned, 16> JavaImportGroups;
-  for (unsigned i = 0, e = Imports.size(); i != e; ++i) {
-    Indices.push_back(i);
-    JavaImportGroups.push_back(
-        findJavaImportGroup(Style, Imports[i].Identifier));
-  }
+  JavaImportGroups.reserve(Imports.size());
+  for (const JavaImportDirective &Import : Imports)
+    JavaImportGroups.push_back(findJavaImportGroup(Style, Import.Identifier));
+
   bool StaticImportAfterNormalImport =
       Style.SortJavaStaticImport == FormatStyle::SJSIO_After;
   llvm::sort(Indices, [&](unsigned LHSI, unsigned RHSI) {
@@ -3048,6 +3097,11 @@ reformat(const FormatStyle &Style, StringRef Code,
           .process();
     });
   }
+
+  if (Style.isCpp() && Style.RemoveBracesLLVM)
+    Passes.emplace_back([&](const Environment &Env) {
+      return BracesRemover(Env, Expanded).process();
+    });
 
   if (Style.Language == FormatStyle::LK_Cpp) {
     if (Style.FixNamespaceComments)

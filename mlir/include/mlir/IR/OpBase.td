@@ -314,11 +314,11 @@ class Dialect {
 
   // If this dialect should use default generated attribute parser boilerplate:
   // it'll dispatch the parsing to every individual attributes directly.
-  bit useDefaultAttributePrinterParser = 0;
+  bit useDefaultAttributePrinterParser = 1;
 
   // If this dialect should use default generated type parser boilerplate:
   // it'll dispatch the parsing to every individual types directly.
-  bit useDefaultTypePrinterParser = 0;
+  bit useDefaultTypePrinterParser = 1;
 
   // If this dialect overrides the hook for canonicalization patterns.
   bit hasCanonicalizer = 0;
@@ -903,41 +903,38 @@ class NestedTupleOf<list<Type> allowedTypes> :
 //===----------------------------------------------------------------------===//
 // Common type constraints
 //===----------------------------------------------------------------------===//
+// Type constraint for types that are "like" some type or set of types T, that is
+// they're either a T, a vector of Ts, or a tensor of Ts
+class TypeOrContainer<Type allowedType, string name> : TypeConstraint<Or<[
+  allowedType.predicate, VectorOf<[allowedType]>.predicate,
+  TensorOf<[allowedType]>.predicate]>,
+  name>;
+
+// Temporary constraint to allow gradual transition to supporting 0-D vectors.
+// TODO: Remove this when all ops support 0-D vectors.
+class TypeOrContainerOfAnyRank<Type allowedType, string name> : TypeConstraint<Or<[
+  allowedType.predicate, VectorOfAnyRankOf<[allowedType]>.predicate,
+  TensorOf<[allowedType]>.predicate]>,
+  name>;
+
 
 // Type constraint for bool-like types: bools, vectors of bools, tensors of
 // bools.
-def BoolLike : TypeConstraint<Or<[I1.predicate, VectorOf<[I1]>.predicate,
-                                  TensorOf<[I1]>.predicate]>,
-    "bool-like">;
+def BoolLike : TypeOrContainer<I1, "bool-like">;
 
-// Temporary constraint to allow gradual transition to supporting 0-D vectors.
-// TODO: Remove this when all ops support 0-D vectors.
-def BoolLikeOfAnyRank : TypeConstraint<Or<[
-        I1.predicate,
-        VectorOfAnyRankOf<[I1]>.predicate,
-        TensorOf<[I1]>.predicate]>,
-    "bool-like">;
+def BoolLikeOfAnyRank : TypeOrContainerOfAnyRank<I1, "bool-like">;
 
 // Type constraint for signless-integer-like types: signless integers, indices,
 // vectors of signless integers or indices, tensors of signless integers.
-def SignlessIntegerLike : TypeConstraint<Or<[
-        AnySignlessIntegerOrIndex.predicate,
-        VectorOf<[AnySignlessIntegerOrIndex]>.predicate,
-        TensorOf<[AnySignlessIntegerOrIndex]>.predicate]>,
+def SignlessIntegerLike : TypeOrContainer<AnySignlessIntegerOrIndex,
     "signless-integer-like">;
 
-// Temporary constraint to allow gradual transition to supporting 0-D vectors.
-// TODO: Remove this when all ops support 0-D vectors.
-def SignlessIntegerLikeOfAnyRank : TypeConstraint<Or<[
-        AnySignlessIntegerOrIndex.predicate,
-        VectorOfAnyRankOf<[AnySignlessIntegerOrIndex]>.predicate,
-        TensorOf<[AnySignlessIntegerOrIndex]>.predicate]>,
+def SignlessIntegerLikeOfAnyRank : TypeOrContainerOfAnyRank<
+    AnySignlessIntegerOrIndex,
     "signless-integer-like">;
 
 // Type constraint for float-like types: floats, vectors or tensors thereof.
-def FloatLike : TypeConstraint<Or<[AnyFloat.predicate,
-        VectorOf<[AnyFloat]>.predicate, TensorOf<[AnyFloat]>.predicate]>,
-    "floating-point-like">;
+def FloatLike : TypeOrContainer<AnyFloat, "floating-point-like">;
 
 // Type constraint for signless-integer-like or float-like types.
 def SignlessIntegerOrFloatLike : TypeConstraint<Or<[
@@ -1323,12 +1320,30 @@ class I64EnumAttrCase<string sym, int val, string str = sym>
 // A bit enum case stored with 32-bit IntegerAttr. `val` here is *not* the
 // ordinal number of the bit that is set. It is the 32-bit integer with only
 // one bit set.
-class BitEnumAttrCase<string sym, int val, string str = sym> :
-    EnumAttrCaseInfo<sym, val, str>,
-    SignlessIntegerAttrBase<I32, "case " # str> {
-  let predicate = CPred<
-    "$_self.cast<::mlir::IntegerAttr>().getValue().getZExtValue() & "
-    # val # "u">;
+class BitEnumAttrCase<string sym, int val, string str = sym>
+    : EnumAttrCaseInfo<sym, val, str>,
+      SignlessIntegerAttrBase<I32, "case " #str>;
+
+// The special bit enum case for no bits set (i.e. value = 0).
+class BitEnumAttrCaseNone<string sym, string str = sym>
+    : BitEnumAttrCase<sym, 0, str>;
+
+// The bit enum case for a single bit, specified by the bit position.
+// The pos argument refers to the index of the bit, and is currently
+// limited to be in the range [0, 31].
+class BitEnumAttrCaseBit<string sym, int pos, string str = sym>
+    : BitEnumAttrCase<sym, !shl(1, pos), str> {
+  assert !and(!ge(pos, 0), !le(pos, 31)),
+      "bit position must be between 0 and 31";
+}
+
+// A bit enum case for a group/list of previously declared single bits,
+// providing a convenient alias for that group.
+class BitEnumAttrCaseGroup<string sym, list<BitEnumAttrCaseBit> cases,
+                           string str = sym>
+    : BitEnumAttrCase<
+          sym, !foldl(0, cases, value, bitcase, !or(value, bitcase.value)),
+          str> {
 }
 
 // Additional information for an enum attribute.
@@ -1452,7 +1467,7 @@ class I64EnumAttr<string name, string summary, list<I64EnumAttrCase> cases> :
 // A bit enum stored with 32-bit IntegerAttr.
 //
 // Op attributes of this kind are stored as IntegerAttr. Extra verification will
-// be generated on the integer to make sure only allowed bit are set. Besides,
+// be generated on the integer to make sure only allowed bits are set. Besides,
 // helper methods are generated to parse a string separated with a specified
 // delimiter to a symbol and vice versa.
 class BitEnumAttrBase<list<BitEnumAttrCase> cases, string summary> :
@@ -1469,6 +1484,9 @@ class BitEnumAttrBase<list<BitEnumAttrCase> cases, string summary> :
 class BitEnumAttr<string name, string summary, list<BitEnumAttrCase> cases> :
     EnumAttrInfo<name, cases, BitEnumAttrBase<cases, summary>> {
   let underlyingType = "uint32_t";
+
+  // Determine "valid" bits from enum cases for error checking
+  int validBits = !foldl(0, cases, value, bitcase, !or(value, bitcase.value));
 
   // We need to return a string because we may concatenate symbols for multiple
   // bits together.
@@ -1943,6 +1961,13 @@ class VariadicSuccessor<Successor successor>
 // Trait represents a trait regarding an attribute, operation, or type.
 class Trait;
 
+// Define a Trait corresponding to a list of Traits, this allows for specifying
+// a list of traits as trait. Avoids needing to do `[Traits, ...] # ListOfTraits
+// # [Others, ...]` while still allowing providing convenient groupings.
+class TraitList<list<Trait> props> : Trait {
+  list<Trait> traits = props;
+}
+
 // NativeTrait corresponds to the MLIR C++ trait mechanism. The purpose to wrap
 // around C++ symbol string with this class is to make traits specified for
 // entities in TableGen less alien and more integrated.
@@ -1976,58 +2001,34 @@ class PredTrait<string descr, Pred pred> : Trait {
 // TypeTrait definitions
 //===----------------------------------------------------------------------===//
 
-// TypeTrait represents a trait regarding a type.
-// TODO: Remove this class in favor of using Trait.
-class TypeTrait;
-
 // These classes are used to define type specific traits.
-class NativeTypeTrait<string name> : NativeTrait<name, "Type">, TypeTrait;
+class NativeTypeTrait<string name> : NativeTrait<name, "Type">;
 class ParamNativeTypeTrait<string prop, string params>
-    : ParamNativeTrait<prop, params, "Type">, TypeTrait;
-class GenInternalTypeTrait<string prop>
-    : GenInternalTrait<prop, "Type">, TypeTrait;
-class PredTypeTrait<string descr, Pred pred>
-    : PredTrait<descr, pred>, TypeTrait;
+    : ParamNativeTrait<prop, params, "Type">;
+class GenInternalTypeTrait<string prop> : GenInternalTrait<prop, "Type">;
+class PredTypeTrait<string descr, Pred pred> : PredTrait<descr, pred>;
 
 //===----------------------------------------------------------------------===//
 // AttrTrait definitions
 //===----------------------------------------------------------------------===//
 
-// AttrTrait represents a trait regarding an attribute.
-// TODO: Remove this class in favor of using Trait.
-class AttrTrait;
-
 // These classes are used to define attribute specific traits.
-class NativeAttrTrait<string name> : NativeTrait<name, "Attribute">, AttrTrait;
+class NativeAttrTrait<string name> : NativeTrait<name, "Attribute">;
 class ParamNativeAttrTrait<string prop, string params>
-    : ParamNativeTrait<prop, params, "Attribute">, AttrTrait;
-class GenInternalAttrTrait<string prop>
-    : GenInternalTrait<prop, "Attribute">, AttrTrait;
-class PredAttrTrait<string descr, Pred pred>
-    : PredTrait<descr, pred>, AttrTrait;
+    : ParamNativeTrait<prop, params, "Attribute">;
+class GenInternalAttrTrait<string prop> : GenInternalTrait<prop, "Attribute">;
+class PredAttrTrait<string descr, Pred pred> : PredTrait<descr, pred>;
 
 //===----------------------------------------------------------------------===//
 // OpTrait definitions
 //===----------------------------------------------------------------------===//
 
-// OpTrait represents a trait regarding an operation.
-// TODO: Remove this class in favor of using Trait.
-class OpTrait;
-
-// Define a OpTrait corresponding to a list of OpTraits, this allows for
-// specifying a list of traits as trait. Avoids needing to do
-// `[Traits, ...] # ListOfTraits # [Others, ...]` while still allowing providing
-// convenient groupings.
-class OpTraitList<list<OpTrait> props> : OpTrait {
-  list<OpTrait> traits = props;
-}
-
 // These classes are used to define operation specific traits.
-class NativeOpTrait<string name> : NativeTrait<name, "Op">, OpTrait;
+class NativeOpTrait<string name> : NativeTrait<name, "Op">;
 class ParamNativeOpTrait<string prop, string params>
-    : ParamNativeTrait<prop, params, "Op">, OpTrait;
-class GenInternalOpTrait<string prop> : GenInternalTrait<prop, "Op">, OpTrait;
-class PredOpTrait<string descr, Pred pred> : PredTrait<descr, pred>, OpTrait;
+    : ParamNativeTrait<prop, params, "Op">;
+class GenInternalOpTrait<string prop> : GenInternalTrait<prop, "Op">;
+class PredOpTrait<string descr, Pred pred> : PredTrait<descr, pred>;
 
 // Op defines an affine scope.
 def AffineScope : NativeOpTrait<"AffineScope">;
@@ -2044,8 +2045,6 @@ def Idempotent  : NativeOpTrait<"IsIdempotent">;
 def Involution  : NativeOpTrait<"IsInvolution">;
 // Op behaves like a constant.
 def ConstantLike : NativeOpTrait<"ConstantLike">;
-// Op behaves like a function.
-def FunctionLike : NativeOpTrait<"FunctionLike">;
 // Op is isolated from above.
 def IsolatedFromAbove : NativeOpTrait<"IsIsolatedFromAbove">;
 // Op results are float or vectors/tensors thereof.
@@ -2077,14 +2076,12 @@ def Tensorizable : NativeOpTrait<"Tensorizable">;
 
 // Group together `Elementwise`, `Scalarizable`, `Vectorizable`, and
 // `Tensorizable` for convenience.
-def ElementwiseMappable {
-  list<OpTrait> traits = [
+def ElementwiseMappable : TraitList<[
     Elementwise,
     Scalarizable,
     Vectorizable,
     Tensorizable,
-  ];
-}
+]>;
 
 // Op's regions have a single block.
 def SingleBlock : NativeOpTrait<"SingleBlock">;
@@ -2168,7 +2165,7 @@ class InterfaceTrait<string name> : NativeTrait<"", ""> {
 // C++. The purpose to wrap around C++ symbol string with this class is to make
 // interfaces specified for ops in TableGen less alien and more integrated.
 class OpInterfaceTrait<string name, code verifyBody = [{}]>
-    : InterfaceTrait<name>, OpTrait {
+    : InterfaceTrait<name> {
   // Specify the body of the verification function. `$_op` will be replaced with
   // the operation being verified.
   code verify = verifyBody;
@@ -2226,6 +2223,10 @@ class Interface<string name> {
   // An optional code block containing extra declarations to place in the
   // interface declaration.
   code extraClassDeclaration = "";
+
+  // An optional code block containing extra declarations to place in both
+  // the interface and trait declaration.
+  code extraSharedClassDeclaration = "";
 }
 
 // AttrInterface represents an interface registered to an attribute.
@@ -2356,7 +2357,7 @@ class Res<Constraint constraint, string desc = "",
   : OpVariable<constraint, desc, decorators>;
 
 // Base class for all ops.
-class Op<Dialect dialect, string mnemonic, list<OpTrait> props = []> {
+class Op<Dialect dialect, string mnemonic, list<Trait> props = []> {
   // The dialect of the op.
   Dialect opDialect = dialect;
 
@@ -2440,7 +2441,7 @@ class Op<Dialect dialect, string mnemonic, list<OpTrait> props = []> {
 
   // Op traits.
   // Note: The list of traits will be uniqued by ODS.
-  list<OpTrait> traits = props;
+  list<Trait> traits = props;
 
   // Additional code that will be added to the public part of the generated
   // C++ code of the op declaration.
@@ -2455,7 +2456,7 @@ class Op<Dialect dialect, string mnemonic, list<OpTrait> props = []> {
 // Base class for ops with static/dynamic offset, sizes and strides
 // attributes/arguments.
 class BaseOpWithOffsetSizesAndStrides<Dialect dialect, string mnemonic,
-                                      list<OpTrait> traits = []> :
+                                      list<Trait> traits = []> :
   Op<dialect, mnemonic, traits> {
 
   // For every such op, there needs to be a:
@@ -2470,13 +2471,14 @@ class BaseOpWithOffsetSizesAndStrides<Dialect dialect, string mnemonic,
 
   code extraBaseClassDeclaration = [{
     /// Returns the dynamic sizes for this subview operation if specified.
-    operand_range getDynamicSizes() { return sizes(); }
+    ::mlir::Operation::operand_range getDynamicSizes() { return sizes(); }
 
     /// Return the list of Range (i.e. offset, size, stride). Each
     /// Range entry contains either the dynamic value or a ConstantIndexOp
     /// constructed with `b` at location `loc`.
-    SmallVector<Range, 8> getOrCreateRanges(OpBuilder &b, Location loc) {
-      return mlir::getOrCreateRanges(*this, b, loc);
+    ::mlir::SmallVector<::mlir::Range, 8> getOrCreateRanges(
+        ::mlir::OpBuilder &b, ::mlir::Location loc) {
+      return ::mlir::getOrCreateRanges(*this, b, loc);
     }
   }];
 }

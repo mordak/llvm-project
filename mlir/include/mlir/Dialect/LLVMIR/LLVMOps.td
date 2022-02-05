@@ -15,19 +15,20 @@
 
 include "mlir/Dialect/LLVMIR/LLVMOpBase.td"
 include "mlir/Dialect/LLVMIR/LLVMOpsInterfaces.td"
+include "mlir/IR/FunctionInterfaces.td"
 include "mlir/IR/SymbolInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
-def FMFnnan     : BitEnumAttrCase<"nnan", 0x1>;
-def FMFninf     : BitEnumAttrCase<"ninf", 0x2>;
-def FMFnsz      : BitEnumAttrCase<"nsz", 0x4>;
-def FMFarcp     : BitEnumAttrCase<"arcp", 0x8>;
-def FMFcontract : BitEnumAttrCase<"contract", 0x10>;
-def FMFafn      : BitEnumAttrCase<"afn", 0x20>;
-def FMFreassoc  : BitEnumAttrCase<"reassoc", 0x40>;
-def FMFfast     : BitEnumAttrCase<"fast", 0x80>;
+def FMFnnan     : BitEnumAttrCaseBit<"nnan", 0>;
+def FMFninf     : BitEnumAttrCaseBit<"ninf", 1>;
+def FMFnsz      : BitEnumAttrCaseBit<"nsz", 2>;
+def FMFarcp     : BitEnumAttrCaseBit<"arcp", 3>;
+def FMFcontract : BitEnumAttrCaseBit<"contract", 4>;
+def FMFafn      : BitEnumAttrCaseBit<"afn", 5>;
+def FMFreassoc  : BitEnumAttrCaseBit<"reassoc", 6>;
+def FMFfast     : BitEnumAttrCaseBit<"fast", 7>;
 
 def FastmathFlags_DoNotUse : BitEnumAttr<
     "FastmathFlags",
@@ -111,12 +112,12 @@ def LLVM_TerminatorPassthroughOpBuilder :
 
 // Base class for LLVM terminator operations.  All terminator operations have
 // zero results and an optional list of successors.
-class LLVM_TerminatorOp<string mnemonic, list<OpTrait> traits = []> :
+class LLVM_TerminatorOp<string mnemonic, list<Trait> traits = []> :
     LLVM_Op<mnemonic, !listconcat(traits, [Terminator])>;
 
 // Class for arithmetic binary operations.
 class LLVM_ArithmeticOpBase<Type type, string mnemonic,
-                            string builderFunc, list<OpTrait> traits = []> :
+                            string builderFunc, list<Trait> traits = []> :
     LLVM_Op<mnemonic,
            !listconcat([NoSideEffect, SameOperandsAndResultType], traits)>,
     LLVM_Builder<"$res = builder." # builderFunc # "($lhs, $rhs);"> {
@@ -127,12 +128,12 @@ class LLVM_ArithmeticOpBase<Type type, string mnemonic,
   let assemblyFormat = "$lhs `,` $rhs custom<LLVMOpAttrs>(attr-dict) `:` type($res)";
 }
 class LLVM_IntArithmeticOp<string mnemonic, string builderFunc,
-                           list<OpTrait> traits = []> :
+                           list<Trait> traits = []> :
     LLVM_ArithmeticOpBase<AnyInteger, mnemonic, builderFunc, traits> {
   let arguments = commonArgs;
 }
 class LLVM_FloatArithmeticOp<string mnemonic, string builderFunc,
-                             list<OpTrait> traits = []> :
+                             list<Trait> traits = []> :
     LLVM_ArithmeticOpBase<LLVM_AnyFloat, mnemonic, builderFunc,
     !listconcat([DeclareOpInterfaceMethods<FastmathFlagsInterface>], traits)> {
   dag fmfArg = (ins DefaultValuedAttr<LLVM_FMFAttr, "{}">:$fastmathFlags);
@@ -141,7 +142,7 @@ class LLVM_FloatArithmeticOp<string mnemonic, string builderFunc,
 
 // Class for arithmetic unary operations.
 class LLVM_UnaryFloatArithmeticOp<Type type, string mnemonic,
-                             string builderFunc, list<OpTrait> traits = []> :
+                             string builderFunc, list<Trait> traits = []> :
     LLVM_Op<mnemonic,
            !listconcat([NoSideEffect, SameOperandsAndResultType, DeclareOpInterfaceMethods<FastmathFlagsInterface>], traits)>,
     LLVM_Builder<"$res = builder." # builderFunc # "($operand);"> {
@@ -295,7 +296,7 @@ class MemoryOpWithAlignmentAndAttributes : MemoryOpWithAlignmentBase {
 def LLVM_AllocaOp : LLVM_Op<"alloca">, MemoryOpWithAlignmentBase {
   let arguments = (ins AnyInteger:$arraySize,
                    OptionalAttr<I64Attr>:$alignment);
-  let results = (outs LLVM_AnyPointer:$res);
+  let results = (outs Res<LLVM_AnyPointer, "", [MemAlloc<AutomaticAllocationScopeResource>]>:$res);
   string llvmBuilder = [{
     auto *inst = builder.CreateAlloca(
       $_resultType->getPointerElementType(), $arraySize);
@@ -356,7 +357,7 @@ def LLVM_GEPOp : LLVM_Op<"getelementptr", [NoSideEffect]> {
 }
 
 def LLVM_LoadOp : LLVM_Op<"load">, MemoryOpWithAlignmentAndAttributes {
-  let arguments = (ins LLVM_PointerTo<LLVM_LoadableType>:$addr,
+  let arguments = (ins Arg<LLVM_PointerTo<LLVM_LoadableType>, "", [MemRead]>:$addr,
                    OptionalAttr<SymbolRefArrayAttr>:$access_groups,
                    OptionalAttr<SymbolRefArrayAttr>:$alias_scopes,
                    OptionalAttr<SymbolRefArrayAttr>:$noalias_scopes,
@@ -390,7 +391,7 @@ def LLVM_LoadOp : LLVM_Op<"load">, MemoryOpWithAlignmentAndAttributes {
 
 def LLVM_StoreOp : LLVM_Op<"store">, MemoryOpWithAlignmentAndAttributes {
   let arguments = (ins LLVM_LoadableType:$value,
-                   LLVM_PointerTo<LLVM_LoadableType>:$addr,
+                   Arg<LLVM_PointerTo<LLVM_LoadableType>,"",[MemWrite]>:$addr,
                    OptionalAttr<SymbolRefArrayAttr>:$access_groups,
                    OptionalAttr<SymbolRefArrayAttr>:$alias_scopes,
                    OptionalAttr<SymbolRefArrayAttr>:$noalias_scopes,
@@ -414,7 +415,7 @@ def LLVM_StoreOp : LLVM_Op<"store">, MemoryOpWithAlignmentAndAttributes {
 
 // Casts.
 class LLVM_CastOp<string mnemonic, string builderFunc, Type type,
-                  Type resultType, list<OpTrait> traits = []> :
+                  Type resultType, list<Trait> traits = []> :
     LLVM_Op<mnemonic, !listconcat([NoSideEffect], traits)>,
     LLVM_Builder<"$res = builder." # builderFunc # "($arg, $_resultType);"> {
   let arguments = (ins type:$arg);
@@ -861,7 +862,7 @@ def UnnamedAddr : LLVM_EnumAttr<
   let cppNamespace = "::mlir::LLVM";
 }
 
-def LLVM_AddressOfOp : LLVM_Op<"mlir.addressof"> {
+def LLVM_AddressOfOp : LLVM_Op<"mlir.addressof", [NoSideEffect]> {
   let arguments = (ins FlatSymbolRefAttr:$global_name);
   let results = (outs LLVM_Type:$res);
 
@@ -1237,8 +1238,9 @@ def LLVM_GlobalDtorsOp : LLVM_Op<"mlir.global_dtors", [
   let assemblyFormat = "attr-dict";
 }
 
-def LLVM_LLVMFuncOp : LLVM_Op<"func",
-    [AutomaticAllocationScope, IsolatedFromAbove, FunctionLike, Symbol]> {
+def LLVM_LLVMFuncOp : LLVM_Op<"func", [
+    AutomaticAllocationScope, IsolatedFromAbove, FunctionOpInterface, Symbol
+  ]> {
   let summary = "LLVM dialect function.";
 
   let description = [{
@@ -1292,24 +1294,19 @@ def LLVM_LLVMFuncOp : LLVM_Op<"func",
     Block *addEntryBlock();
 
     LLVMFunctionType getType() {
-      return (*this)->getAttrOfType<TypeAttr>(getTypeAttrName())
-          .getValue().cast<LLVMFunctionType>();
+      return getTypeAttr().getValue().cast<LLVMFunctionType>();
     }
-    bool isVarArg() {
-      return getType().isVarArg();
-    }
+    bool isVarArg() { return getType().isVarArg(); }
 
-    // Hook for OpTrait::FunctionLike, returns the number of function arguments`.
-    // Depends on the type attribute being correct as checked by verifyType.
-    unsigned getNumFuncArguments();
+    /// Returns the argument types of this function.
+    ArrayRef<Type> getArgumentTypes() { return getType().getParams(); }
 
-    // Hook for OpTrait::FunctionLike, returns the number of function results.
-    // Depends on the type attribute being correct as checked by verifyType.
-    unsigned getNumFuncResults();
+    /// Returns the result types of this function.
+    ArrayRef<Type> getResultTypes() { return getType().getReturnTypes(); }
 
-    // Hook for OpTrait::FunctionLike, called after verifying that the 'type'
-    // attribute is present.  This can check for preconditions of the
-    // getNumArguments hook not failing.
+    /// Hook for FunctionOpInterface, called after verifying that the 'type'
+    /// attribute is present.  This can check for preconditions of the
+    /// getNumArguments hook not failing.
     LogicalResult verifyType();
   }];
 
@@ -1414,31 +1411,31 @@ def LLVM_ConstantOp
 // operations and intrinsics. However, we systematically prefix them with
 // "intr." to avoid potential name clashes.
 
-class LLVM_UnaryIntrinsicOp<string func, list<OpTrait> traits = []> :
+class LLVM_UnaryIntrinsicOp<string func, list<Trait> traits = []> :
     LLVM_OneResultIntrOp<func, [], [0],
            !listconcat([NoSideEffect, SameOperandsAndResultType], traits)> {
   let arguments = (ins LLVM_Type:$in);
 }
 
-class LLVM_BinarySameArgsIntrinsicOp<string func, list<OpTrait> traits = []> :
+class LLVM_BinarySameArgsIntrinsicOp<string func, list<Trait> traits = []> :
     LLVM_OneResultIntrOp<func, [], [0],
            !listconcat([NoSideEffect, SameOperandsAndResultType], traits)> {
   let arguments = (ins LLVM_Type:$a, LLVM_Type:$b);
 }
 
-class LLVM_BinaryIntrinsicOp<string func, list<OpTrait> traits = []> :
+class LLVM_BinaryIntrinsicOp<string func, list<Trait> traits = []> :
     LLVM_OneResultIntrOp<func, [], [0,1],
            !listconcat([NoSideEffect], traits)> {
   let arguments = (ins LLVM_Type:$a, LLVM_Type:$b);
 }
 
-class LLVM_TernarySameArgsIntrinsicOp<string func, list<OpTrait> traits = []> :
+class LLVM_TernarySameArgsIntrinsicOp<string func, list<Trait> traits = []> :
     LLVM_OneResultIntrOp<func, [], [0],
            !listconcat([NoSideEffect, SameOperandsAndResultType], traits)> {
   let arguments = (ins LLVM_Type:$a, LLVM_Type:$b, LLVM_Type:$c);
 }
 
-class LLVM_CountZerosIntrinsicOp<string func, list<OpTrait> traits = []> :
+class LLVM_CountZerosIntrinsicOp<string func, list<Trait> traits = []> :
     LLVM_OneResultIntrOp<func, [], [0],
            !listconcat([NoSideEffect], traits)> {
   let arguments = (ins LLVM_Type:$in, I<1>:$zero_undefined);
@@ -1542,6 +1539,10 @@ def LLVM_CoroBeginOp : LLVM_IntrOp<"coro.begin", [], [], [], 1> {
 }
 
 def LLVM_CoroSizeOp : LLVM_IntrOp<"coro.size", [0], [], [], 1> {
+  let assemblyFormat = "attr-dict `:` type($res)";
+}
+
+def LLVM_CoroAlignOp : LLVM_IntrOp<"coro.align", [0], [], [], 1> {
   let assemblyFormat = "attr-dict `:` type($res)";
 }
 
@@ -1933,7 +1934,8 @@ def LLVM_InlineAsmOp : LLVM_Op<"inline_asm", []> {
         UnitAttr:$has_side_effects,
         UnitAttr:$is_align_stack,
         OptionalAttr<
-          DefaultValuedAttr<AsmATTOrIntel, "AsmDialect::AD_ATT">>:$asm_dialect);
+          DefaultValuedAttr<AsmATTOrIntel, "AsmDialect::AD_ATT">>:$asm_dialect,
+        OptionalAttr<ArrayAttr>:$operand_attrs);
 
   let results = (outs Optional<LLVM_Type>:$res);
 
@@ -1941,9 +1943,16 @@ def LLVM_InlineAsmOp : LLVM_Op<"inline_asm", []> {
     (`has_side_effects` $has_side_effects^)?
     (`is_align_stack` $is_align_stack^)?
     (`asm_dialect` `=` $asm_dialect^)?
+    (`operand_attrs` `=` $operand_attrs^)?
     attr-dict
     $asm_string `,` $constraints
     operands `:` functional-type(operands, results)
    }];
+
+  let extraClassDeclaration = [{
+    static StringRef getElementTypeAttrName() {
+      return "elementtype";
+    }
+  }];
 }
 #endif // LLVMIR_OPS

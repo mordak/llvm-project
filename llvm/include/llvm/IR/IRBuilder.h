@@ -28,12 +28,13 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/FPEnv.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
@@ -44,7 +45,6 @@
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/Casting.h"
 #include <cassert>
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <utility>
@@ -52,7 +52,6 @@
 namespace llvm {
 
 class APInt;
-class MDNode;
 class Use;
 
 /// This provides the default implementation of the IRBuilder
@@ -1211,9 +1210,8 @@ private:
 public:
   Value *CreateAdd(Value *LHS, Value *RHS, const Twine &Name = "",
                    bool HasNUW = false, bool HasNSW = false) {
-    if (auto *LC = dyn_cast<Constant>(LHS))
-      if (auto *RC = dyn_cast<Constant>(RHS))
-        return Insert(Folder.CreateAdd(LC, RC, HasNUW, HasNSW), Name);
+    if (auto *V = Folder.FoldAdd(LHS, RHS, HasNUW, HasNSW))
+      return V;
     return CreateInsertNUWNSWBinOp(Instruction::Add, LHS, RHS, Name,
                                    HasNUW, HasNSW);
   }
@@ -1360,12 +1358,8 @@ public:
   }
 
   Value *CreateAnd(Value *LHS, Value *RHS, const Twine &Name = "") {
-    if (auto *RC = dyn_cast<Constant>(RHS)) {
-      if (isa<ConstantInt>(RC) && cast<ConstantInt>(RC)->isMinusOne())
-        return LHS;  // LHS & -1 -> LHS
-      if (auto *LC = dyn_cast<Constant>(LHS))
-        return Insert(Folder.CreateAnd(LC, RC), Name);
-    }
+    if (auto *V = Folder.FoldAnd(LHS, RHS))
+      return V;
     return Insert(BinaryOperator::CreateAnd(LHS, RHS), Name);
   }
 
@@ -1386,12 +1380,8 @@ public:
   }
 
   Value *CreateOr(Value *LHS, Value *RHS, const Twine &Name = "") {
-    if (auto *RC = dyn_cast<Constant>(RHS)) {
-      if (RC->isNullValue())
-        return LHS;  // LHS | 0 -> LHS
-      if (auto *LC = dyn_cast<Constant>(LHS))
-        return Insert(Folder.CreateOr(LC, RC), Name);
-    }
+    if (auto *V = Folder.FoldOr(LHS, RHS))
+      return V;
     return Insert(BinaryOperator::CreateOr(LHS, RHS), Name);
   }
 
@@ -1571,6 +1561,15 @@ public:
                         Cond2, Name);
   }
 
+  // NOTE: this is sequential, non-commutative, ordered reduction!
+  Value *CreateLogicalOr(ArrayRef<Value *> Ops) {
+    assert(!Ops.empty());
+    Value *Accum = Ops[0];
+    for (unsigned i = 1; i < Ops.size(); i++)
+      Accum = CreateLogicalOr(Accum, Ops[i]);
+    return Accum;
+  }
+
   CallInst *CreateConstrainedFPBinOp(
       Intrinsic::ID ID, Value *L, Value *R, Instruction *FMFSource = nullptr,
       const Twine &Name = "", MDNode *FPMathTag = nullptr,
@@ -1735,45 +1734,28 @@ public:
 
   Value *CreateGEP(Type *Ty, Value *Ptr, ArrayRef<Value *> IdxList,
                    const Twine &Name = "") {
-    if (auto *PC = dyn_cast<Constant>(Ptr)) {
-      // Every index must be constant.
-      size_t i, e;
-      for (i = 0, e = IdxList.size(); i != e; ++i)
-        if (!isa<Constant>(IdxList[i]))
-          break;
-      if (i == e)
-        return Insert(Folder.CreateGetElementPtr(Ty, PC, IdxList), Name);
-    }
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, IdxList, /*IsInBounds=*/false))
+      return V;
     return Insert(GetElementPtrInst::Create(Ty, Ptr, IdxList), Name);
   }
 
   Value *CreateInBoundsGEP(Type *Ty, Value *Ptr, ArrayRef<Value *> IdxList,
                            const Twine &Name = "") {
-    if (auto *PC = dyn_cast<Constant>(Ptr)) {
-      // Every index must be constant.
-      size_t i, e;
-      for (i = 0, e = IdxList.size(); i != e; ++i)
-        if (!isa<Constant>(IdxList[i]))
-          break;
-      if (i == e)
-        return Insert(Folder.CreateInBoundsGetElementPtr(Ty, PC, IdxList),
-                      Name);
-    }
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, IdxList, /*IsInBounds=*/true))
+      return V;
     return Insert(GetElementPtrInst::CreateInBounds(Ty, Ptr, IdxList), Name);
   }
 
   Value *CreateGEP(Type *Ty, Value *Ptr, Value *Idx, const Twine &Name = "") {
-    if (auto *PC = dyn_cast<Constant>(Ptr))
-      if (auto *IC = dyn_cast<Constant>(Idx))
-        return Insert(Folder.CreateGetElementPtr(Ty, PC, IC), Name);
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, {Idx}, /*IsInBounds=*/false))
+      return V;
     return Insert(GetElementPtrInst::Create(Ty, Ptr, Idx), Name);
   }
 
   Value *CreateInBoundsGEP(Type *Ty, Value *Ptr, Value *Idx,
                            const Twine &Name = "") {
-    if (auto *PC = dyn_cast<Constant>(Ptr))
-      if (auto *IC = dyn_cast<Constant>(Idx))
-        return Insert(Folder.CreateInBoundsGetElementPtr(Ty, PC, IC), Name);
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, {Idx}, /*IsInBounds=*/true))
+      return V;
     return Insert(GetElementPtrInst::CreateInBounds(Ty, Ptr, Idx), Name);
   }
 
@@ -1781,8 +1763,8 @@ public:
                             const Twine &Name = "") {
     Value *Idx = ConstantInt::get(Type::getInt32Ty(Context), Idx0);
 
-    if (auto *PC = dyn_cast<Constant>(Ptr))
-      return Insert(Folder.CreateGetElementPtr(Ty, PC, Idx), Name);
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, Idx, /*IsInBounds=*/false))
+      return V;
 
     return Insert(GetElementPtrInst::Create(Ty, Ptr, Idx), Name);
   }
@@ -1791,8 +1773,8 @@ public:
                                     const Twine &Name = "") {
     Value *Idx = ConstantInt::get(Type::getInt32Ty(Context), Idx0);
 
-    if (auto *PC = dyn_cast<Constant>(Ptr))
-      return Insert(Folder.CreateInBoundsGetElementPtr(Ty, PC, Idx), Name);
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, Idx, /*IsInBounds=*/true))
+      return V;
 
     return Insert(GetElementPtrInst::CreateInBounds(Ty, Ptr, Idx), Name);
   }
@@ -1804,8 +1786,8 @@ public:
       ConstantInt::get(Type::getInt32Ty(Context), Idx1)
     };
 
-    if (auto *PC = dyn_cast<Constant>(Ptr))
-      return Insert(Folder.CreateGetElementPtr(Ty, PC, Idxs), Name);
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, Idxs, /*IsInBounds=*/false))
+      return V;
 
     return Insert(GetElementPtrInst::Create(Ty, Ptr, Idxs), Name);
   }
@@ -1817,8 +1799,8 @@ public:
       ConstantInt::get(Type::getInt32Ty(Context), Idx1)
     };
 
-    if (auto *PC = dyn_cast<Constant>(Ptr))
-      return Insert(Folder.CreateInBoundsGetElementPtr(Ty, PC, Idxs), Name);
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, Idxs, /*IsInBounds=*/true))
+      return V;
 
     return Insert(GetElementPtrInst::CreateInBounds(Ty, Ptr, Idxs), Name);
   }
@@ -1827,8 +1809,8 @@ public:
                             const Twine &Name = "") {
     Value *Idx = ConstantInt::get(Type::getInt64Ty(Context), Idx0);
 
-    if (auto *PC = dyn_cast<Constant>(Ptr))
-      return Insert(Folder.CreateGetElementPtr(Ty, PC, Idx), Name);
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, Idx, /*IsInBounds=*/false))
+      return V;
 
     return Insert(GetElementPtrInst::Create(Ty, Ptr, Idx), Name);
   }
@@ -1837,8 +1819,8 @@ public:
                                     const Twine &Name = "") {
     Value *Idx = ConstantInt::get(Type::getInt64Ty(Context), Idx0);
 
-    if (auto *PC = dyn_cast<Constant>(Ptr))
-      return Insert(Folder.CreateInBoundsGetElementPtr(Ty, PC, Idx), Name);
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, Idx, /*IsInBounds=*/true))
+      return V;
 
     return Insert(GetElementPtrInst::CreateInBounds(Ty, Ptr, Idx), Name);
   }
@@ -1850,8 +1832,8 @@ public:
       ConstantInt::get(Type::getInt64Ty(Context), Idx1)
     };
 
-    if (auto *PC = dyn_cast<Constant>(Ptr))
-      return Insert(Folder.CreateGetElementPtr(Ty, PC, Idxs), Name);
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, Idxs, /*IsInBounds=*/false))
+      return V;
 
     return Insert(GetElementPtrInst::Create(Ty, Ptr, Idxs), Name);
   }
@@ -1863,8 +1845,8 @@ public:
       ConstantInt::get(Type::getInt64Ty(Context), Idx1)
     };
 
-    if (auto *PC = dyn_cast<Constant>(Ptr))
-      return Insert(Folder.CreateInBoundsGetElementPtr(Ty, PC, Idxs), Name);
+    if (auto *V = Folder.FoldGEP(Ty, Ptr, Idxs, /*IsInBounds=*/true))
+      return V;
 
     return Insert(GetElementPtrInst::CreateInBounds(Ty, Ptr, Idxs), Name);
   }
@@ -2215,9 +2197,8 @@ public:
 
   Value *CreateICmp(CmpInst::Predicate P, Value *LHS, Value *RHS,
                     const Twine &Name = "") {
-    if (auto *LC = dyn_cast<Constant>(LHS))
-      if (auto *RC = dyn_cast<Constant>(RHS))
-        return Insert(Folder.CreateICmp(P, LC, RC), Name);
+    if (auto *V = Folder.FoldICmp(P, LHS, RHS))
+      return V;
     return Insert(new ICmpInst(P, LHS, RHS), Name);
   }
 
@@ -2431,7 +2412,8 @@ public:
   /// This is intended to implement C-style pointer subtraction. As such, the
   /// pointers must be appropriately aligned for their element types and
   /// pointing into the same object.
-  Value *CreatePtrDiff(Value *LHS, Value *RHS, const Twine &Name = "");
+  Value *CreatePtrDiff(Type *ElemTy, Value *LHS, Value *RHS,
+                       const Twine &Name = "");
 
   /// Create a launder.invariant.group intrinsic call. If Ptr type is
   /// different from pointer to i8, it's casted to pointer to i8 in the same
