@@ -212,6 +212,10 @@ Enable linker job to emit a static library.
 
 Trivial automatic variable initialization to zero is only here for benchmarks, it'll eventually be removed, and I'm OK with that because I'm only using it to benchmark
 
+.. option:: --end-no-unused-arguments
+
+Start emitting warnings for unused driver arguments
+
 .. option:: -exported\_symbols\_list <arg>
 
 .. option:: -faligned-new=<arg>
@@ -662,6 +666,10 @@ Serialize compiler diagnostics to a file
 Dynamically link the sanitizer runtime
 
 .. option:: -single\_module
+
+.. option:: --start-no-unused-arguments
+
+Don't emit warnings about unused arguments for the following arguments
 
 .. option:: -static-libgcc
 
@@ -1224,9 +1232,9 @@ Set directory to include search path with prefix
 
 Add directory to SYSTEM include search path, absolute paths are relative to -isysroot
 
-.. option:: --libomptarget-amdgcn-bc-path=<arg>
+.. option:: --libomptarget-amdgpu-bc-path=<arg>
 
-Path to libomptarget-amdgcn bitcode library
+Path to libomptarget-amdgpu bitcode library
 
 .. option:: --libomptarget-nvptx-bc-path=<arg>
 
@@ -2068,6 +2076,10 @@ Enable debugging in the OpenMP offloading device RTL
 .. option:: -fopenmp-target-new-runtime, -fno-openmp-target-new-runtime
 
 Use the new bitcode library for OpenMP offloading
+
+.. option:: -fopenmp-new-driver
+
+Use the new scheme for creating and linking OpenMP offloading code
 
 .. option:: -fopenmp-version=<arg>
 
