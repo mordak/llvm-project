@@ -1005,12 +1005,16 @@ DEFINE_LIBUNWIND_FUNCTION(__unw_getcontext)
 #elif defined(__sparc__) && defined(__arch64__)
 
 #
-# extern int unw_getcontext(unw_context_t* thread_state)
+# extern int __unw_getcontext(unw_context_t* thread_state)
 #
 # On entry:
 #  thread_state pointer is in %o0
 #
 DEFINE_LIBUNWIND_FUNCTION(__unw_getcontext)
+  .register %g2, #scratch
+  .register %g3, #scratch
+  .register %g6, #scratch
+  .register %g7, #scratch
   stx  %g1, [%o0 + 0x08]
   stx  %g2, [%o0 + 0x10]
   stx  %g3, [%o0 + 0x18]
@@ -1044,15 +1048,17 @@ DEFINE_LIBUNWIND_FUNCTION(__unw_getcontext)
   stx  %i7, [%o0 + 0xf8]
 
   # save StackGhost cookie
-  add  %i7, %g0, %g4
+  mov  %i7, %g4
   save %sp, -176, %sp
   # register window flush necessary even without StackGhost
   flushw
   restore
   ldx  [%sp + 2047 + 0x78], %g5
   xor  %g4, %g5, %g4
+  stx  %g4, [%o0 + 0x100]
   retl
-   stx %g4, [%o0 + 0x100]
+  # return UNW_ESUCCESS
+   clr %o0
 
 #elif defined(__sparc__)
 

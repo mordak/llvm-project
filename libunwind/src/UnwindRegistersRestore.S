@@ -1065,12 +1065,16 @@ DEFINE_LIBUNWIND_FUNCTION(_ZN9libunwind21Registers_mips_newabi6jumptoEv)
 #elif defined(__sparc__) && defined(__arch64__)
 
 DEFINE_LIBUNWIND_FUNCTION(_ZN9libunwind17Registers_sparc646jumptoEv)
-#
-# void libunwind::Registers_sparc64::jumpto()
-#
-# On entry:
-#  thread_state pointer is in %o0
-#
+//
+// void libunwind::Registers_sparc64::jumpto()
+//
+// On entry:
+//  thread_state pointer is in %o0
+//
+  .register %g2, #scratch
+  .register %g3, #scratch
+  .register %g6, #scratch
+  .register %g7, #scratch
   flushw
   ldx  [%o0 + 0x08], %g1
   ldx  [%o0 + 0x10], %g2
@@ -1102,7 +1106,7 @@ DEFINE_LIBUNWIND_FUNCTION(_ZN9libunwind17Registers_sparc646jumptoEv)
   ldx  [%o0 + 0xe8], %i5
   ldx  [%o0 + 0xf0], %i6
   ldx  [%o0 + 0xf8], %i7
-  jmpl %o7 + 8, %g0
+  jmp  %o7
    ldx [%o0 + 0x40], %o0
 
 #elif defined(__sparc__)
