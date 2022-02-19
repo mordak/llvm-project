@@ -1039,8 +1039,7 @@ static void readConfigs(opt::InputArgList &args) {
   config->ignoreDataAddressEquality =
       args.hasArg(OPT_ignore_data_address_equality);
   config->ignoreFunctionAddressEquality =
-      args.hasFlag(OPT_ignore_function_address_equality,
-      OPT_no_ignore_function_address_equality, true);
+      args.hasArg(OPT_ignore_function_address_equality);
   config->init = args.getLastArgValue(OPT_init, "_init");
   config->ltoAAPipeline = args.getLastArgValue(OPT_lto_aa_pipeline);
   config->ltoCSProfileGenerate = args.hasArg(OPT_lto_cs_profile_generate);
