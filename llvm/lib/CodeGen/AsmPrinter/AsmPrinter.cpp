@@ -2530,7 +2530,7 @@ void AsmPrinter::emitTrapAlignment(Align Alignment, const GlobalObject *GV) cons
 /// the OutStreamer, but can be overridden by Target implementations.
 void AsmPrinter::emitTrapToAlignment(Align Alignment) const {
   if (Alignment == Align(1)) return;
-  OutStreamer->emitCodeAlignment(Alignment.value());
+  OutStreamer->emitCodeAlignment(Alignment.value(), &getSubtargetInfo());
 }
 
 
