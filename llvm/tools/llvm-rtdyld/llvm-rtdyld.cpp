@@ -350,7 +350,7 @@ uint8_t *TrivialMemoryManager::allocateDataSection(uintptr_t Size,
 
 // In case the execution needs TLS storage, we define a very small TLS memory
 // area here that will be used in allocateTLSSection().
-#if defined(__x86_64__) && defined(__ELF__)
+#if defined(__x86_64__) && defined(__ELF__) && !defined(__OpenBSD__)
 extern "C" {
 alignas(16) __attribute__((visibility("hidden"), tls_model("initial-exec"),
                            used)) thread_local char LLVMRTDyldTLSSpace[16];
@@ -361,7 +361,7 @@ TrivialMemoryManager::TLSSection
 TrivialMemoryManager::allocateTLSSection(uintptr_t Size, unsigned Alignment,
                                          unsigned SectionID,
                                          StringRef SectionName) {
-#if defined(__x86_64__) && defined(__ELF__)
+#if defined(__x86_64__) && defined(__ELF__) && !defined(__OpenBSD__)
   if (Size + UsedTLSStorage > sizeof(LLVMRTDyldTLSSpace)) {
     return {};
   }
