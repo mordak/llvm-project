@@ -35,7 +35,7 @@ NativeThreadOpenBSD::NativeThreadOpenBSD(NativeProcessOpenBSD &process,
 
 void NativeThreadOpenBSD::SetStoppedBySignal(uint32_t signo,
                                             const siginfo_t *info) {
-  Log *log(ProcessPOSIXLog::GetLogIfAllCategoriesSet(POSIX_LOG_THREAD));
+  Log *log = GetLog(POSIXLog::Thread);
   LLDB_LOG(log, "tid = {0} in called with signal {1}", GetID(), signo);
 
   SetStopped();
@@ -97,7 +97,7 @@ lldb::StateType NativeThreadOpenBSD::GetState() { return m_state; }
 
 bool NativeThreadOpenBSD::GetStopReason(ThreadStopInfo &stop_info,
                                        std::string &description) {
-  Log *log(ProcessPOSIXLog::GetLogIfAllCategoriesSet(POSIX_LOG_THREAD));
+  Log *log = GetLog(POSIXLog::Thread);
 
   description.clear();
 
