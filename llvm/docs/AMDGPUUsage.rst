@@ -3185,6 +3185,10 @@ same *vendor-name*.
                                                                   if a higher numbered
                                                                   register is used
                                                                   explicitly.
+     ".agpr_count"                       integer        Required  Number of accumulator
+                                                                  registers required by
+                                                                  each work-item for
+                                                                  GFX90A, GFX908.
      ".max_flat_workgroup_size"          integer        Required  Maximum flat
                                                                   work-group size
                                                                   supported by the
@@ -3617,9 +3621,9 @@ CPU host program, or from an HSA kernel executing on a GPU.
    executed is obtained.
 2. A pointer to the kernel descriptor (see
    :ref:`amdgpu-amdhsa-kernel-descriptor`) of the kernel to execute is obtained.
-   It must be for a kernel that is contained in a code object that that was
-   loaded by an HSA compatible runtime on the kernel agent with which the AQL
-   queue is associated.
+   It must be for a kernel that is contained in a code object that was loaded
+   by an HSA compatible runtime on the kernel agent with which the AQL queue is
+   associated.
 3. Space is allocated for the kernel arguments using the HSA compatible runtime
    allocator for a memory region with the kernarg property for the kernel agent
    that will execute the kernel. It must be at least 16-byte aligned.
@@ -11431,6 +11435,7 @@ within a map that has been added by the same *vendor-name*.
      ".lds_size"                integer                  Local Data Share size in bytes.
      ".perf_data_buffer_size"   integer                  Performance data buffer size in bytes.
      ".vgpr_count"              integer                  Number of VGPRs used.
+     ".agpr_count"              integer                  Number of AGPRs used.
      ".sgpr_count"              integer                  Number of SGPRs used.
      ".vgpr_limit"              integer                  If non-zero, indicates the shader was compiled with a
                                                          directive to instruct the compiler to limit the VGPR usage to

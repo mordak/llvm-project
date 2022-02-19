@@ -35,6 +35,7 @@
 #include "llvm/ADT/IndexedMap.h"
 #include "llvm/ADT/PointerEmbeddedInt.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Frontend/OpenMP/OMPAssume.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
@@ -5391,7 +5392,7 @@ static CapturedStmt *buildDistanceFunc(Sema &Actions, QualType LogicalTy,
       // the step size, rounding-up the effective upper bound ensures that the
       // last iteration is included.
       // Note that the rounding-up may cause an overflow in a temporry that
-      // could be avoided, but would have occured in a C-style for-loop as well.
+      // could be avoided, but would have occurred in a C-style for-loop as well.
       Expr *Divisor = BuildVarRef(NewStep);
       if (Rel == BO_GE || Rel == BO_GT)
         Divisor =
@@ -7168,6 +7169,13 @@ Sema::checkOpenMPDeclareVariantFunction(Sema::DeclGroupPtrTy DG,
   if (!NewFD) {
     Diag(VariantRef->getExprLoc(), diag::err_omp_function_expected)
         << VariantId << VariantRef->getSourceRange();
+    return None;
+  }
+
+  if (FD->getCanonicalDecl() == NewFD->getCanonicalDecl()) {
+    Diag(VariantRef->getExprLoc(),
+         diag::err_omp_declare_variant_same_base_function)
+        << VariantRef->getSourceRange();
     return None;
   }
 
@@ -11007,8 +11015,6 @@ private:
   Expr *C = nullptr;
   /// True if the cond expr is in the form of 'x ordop expr'.
   bool IsXBinopExpr = true;
-  /// The atomic compare operator.
-  OMPAtomicCompareOp Op;
 
   /// Check if it is a valid conditional update statement (cond-update-stmt).
   bool checkCondUpdateStmt(IfStmt *S, ErrorInfoTy &ErrorInfo);
@@ -11065,23 +11071,7 @@ bool OpenMPAtomicCompareChecker::checkCondUpdateStmt(IfStmt *S,
   }
 
   switch (Cond->getOpcode()) {
-  case BO_EQ:
-    Op = OMPAtomicCompareOp::EQ;
-    break;
-  case BO_LT:
-    Op = OMPAtomicCompareOp::MIN;
-    break;
-  case BO_GT:
-    Op = OMPAtomicCompareOp::MAX;
-    break;
-  default:
-    ErrorInfo.Error = ErrorTy::InvalidBinaryOp;
-    ErrorInfo.ErrorLoc = ErrorInfo.NoteLoc = Cond->getExprLoc();
-    ErrorInfo.ErrorRange = ErrorInfo.NoteRange = Cond->getSourceRange();
-    return false;
-  }
-
-  if (Cond->getOpcode() == BO_EQ) {
+  case BO_EQ: {
     C = Cond;
     D = BO->getRHS();
     if (checkIfTwoExprsAreSame(ContextRef, X, Cond->getLHS())) {
@@ -11094,7 +11084,10 @@ bool OpenMPAtomicCompareChecker::checkCondUpdateStmt(IfStmt *S,
       ErrorInfo.ErrorRange = ErrorInfo.NoteRange = Cond->getSourceRange();
       return false;
     }
-  } else {
+    break;
+  }
+  case BO_LT:
+  case BO_GT: {
     E = BO->getRHS();
     if (checkIfTwoExprsAreSame(ContextRef, X, Cond->getLHS()) &&
         checkIfTwoExprsAreSame(ContextRef, E, Cond->getRHS())) {
@@ -11109,6 +11102,13 @@ bool OpenMPAtomicCompareChecker::checkCondUpdateStmt(IfStmt *S,
       ErrorInfo.ErrorRange = ErrorInfo.NoteRange = Cond->getSourceRange();
       return false;
     }
+    break;
+  }
+  default:
+    ErrorInfo.Error = ErrorTy::InvalidBinaryOp;
+    ErrorInfo.ErrorLoc = ErrorInfo.NoteLoc = Cond->getExprLoc();
+    ErrorInfo.ErrorRange = ErrorInfo.NoteRange = Cond->getSourceRange();
+    return false;
   }
 
   return true;
@@ -11159,23 +11159,7 @@ bool OpenMPAtomicCompareChecker::checkCondExprStmt(Stmt *S,
   }
 
   switch (Cond->getOpcode()) {
-  case BO_EQ:
-    Op = OMPAtomicCompareOp::EQ;
-    break;
-  case BO_LT:
-    Op = OMPAtomicCompareOp::MIN;
-    break;
-  case BO_GT:
-    Op = OMPAtomicCompareOp::MAX;
-    break;
-  default:
-    ErrorInfo.Error = ErrorTy::InvalidBinaryOp;
-    ErrorInfo.ErrorLoc = ErrorInfo.NoteLoc = Cond->getExprLoc();
-    ErrorInfo.ErrorRange = ErrorInfo.NoteRange = Cond->getSourceRange();
-    return false;
-  }
-
-  if (Cond->getOpcode() == BO_EQ) {
+  case BO_EQ: {
     C = Cond;
     D = CO->getTrueExpr();
     if (checkIfTwoExprsAreSame(ContextRef, X, Cond->getLHS())) {
@@ -11188,7 +11172,10 @@ bool OpenMPAtomicCompareChecker::checkCondExprStmt(Stmt *S,
       ErrorInfo.ErrorRange = ErrorInfo.NoteRange = Cond->getSourceRange();
       return false;
     }
-  } else {
+    break;
+  }
+  case BO_LT:
+  case BO_GT: {
     E = CO->getTrueExpr();
     if (checkIfTwoExprsAreSame(ContextRef, X, Cond->getLHS()) &&
         checkIfTwoExprsAreSame(ContextRef, E, Cond->getRHS())) {
@@ -11203,6 +11190,13 @@ bool OpenMPAtomicCompareChecker::checkCondExprStmt(Stmt *S,
       ErrorInfo.ErrorRange = ErrorInfo.NoteRange = Cond->getSourceRange();
       return false;
     }
+    break;
+  }
+  default:
+    ErrorInfo.Error = ErrorTy::InvalidBinaryOp;
+    ErrorInfo.ErrorLoc = ErrorInfo.NoteLoc = Cond->getExprLoc();
+    ErrorInfo.ErrorRange = ErrorInfo.NoteRange = Cond->getSourceRange();
+    return false;
   }
 
   return true;
@@ -11212,8 +11206,7 @@ bool OpenMPAtomicCompareChecker::checkType(ErrorInfoTy &ErrorInfo) const {
   // 'x' and 'e' cannot be nullptr
   assert(X && E && "X and E cannot be nullptr");
 
-  auto CheckValue = [&ErrorInfo](const Expr *E, OMPAtomicCompareOp Op,
-                                 bool ShouldBeLValue) {
+  auto CheckValue = [&ErrorInfo](const Expr *E, bool ShouldBeLValue) {
     if (ShouldBeLValue && !E->isLValue()) {
       ErrorInfo.Error = ErrorTy::XNotLValue;
       ErrorInfo.ErrorLoc = ErrorInfo.NoteLoc = E->getExprLoc();
@@ -11230,7 +11223,7 @@ bool OpenMPAtomicCompareChecker::checkType(ErrorInfoTy &ErrorInfo) const {
         return false;
       }
 
-      if (Op != OMPAtomicCompareOp::EQ && !QTy->isIntegerType()) {
+      if (!QTy->isIntegerType()) {
         ErrorInfo.Error = ErrorTy::NotInteger;
         ErrorInfo.ErrorLoc = ErrorInfo.NoteLoc = E->getExprLoc();
         ErrorInfo.ErrorRange = ErrorInfo.NoteRange = E->getSourceRange();
@@ -11241,13 +11234,13 @@ bool OpenMPAtomicCompareChecker::checkType(ErrorInfoTy &ErrorInfo) const {
     return true;
   };
 
-  if (!CheckValue(X, Op, true))
+  if (!CheckValue(X, true))
     return false;
 
-  if (!CheckValue(E, Op, false))
+  if (!CheckValue(E, false))
     return false;
 
-  if (D && !CheckValue(D, Op, false))
+  if (D && !CheckValue(D, false))
     return false;
 
   return true;
@@ -11315,14 +11308,18 @@ StmtResult Sema::ActOnOpenMPAtomicDirective(ArrayRef<OMPClause *> Clauses,
   SourceLocation AtomicKindLoc;
   OpenMPClauseKind MemOrderKind = OMPC_unknown;
   SourceLocation MemOrderLoc;
+  bool MutexClauseEncountered = false;
+  llvm::SmallSet<OpenMPClauseKind, 2> EncounteredAtomicKinds;
   for (const OMPClause *C : Clauses) {
     switch (C->getClauseKind()) {
     case OMPC_read:
     case OMPC_write:
     case OMPC_update:
+      MutexClauseEncountered = true;
+      LLVM_FALLTHROUGH;
     case OMPC_capture:
     case OMPC_compare: {
-      if (AtomicKind != OMPC_unknown) {
+      if (AtomicKind != OMPC_unknown && MutexClauseEncountered) {
         Diag(C->getBeginLoc(), diag::err_omp_atomic_several_clauses)
             << SourceRange(C->getBeginLoc(), C->getEndLoc());
         Diag(AtomicKindLoc, diag::note_omp_previous_mem_order_clause)
@@ -11330,6 +11327,12 @@ StmtResult Sema::ActOnOpenMPAtomicDirective(ArrayRef<OMPClause *> Clauses,
       } else {
         AtomicKind = C->getClauseKind();
         AtomicKindLoc = C->getBeginLoc();
+        if (!EncounteredAtomicKinds.insert(C->getClauseKind()).second) {
+          Diag(C->getBeginLoc(), diag::err_omp_atomic_several_clauses)
+              << SourceRange(C->getBeginLoc(), C->getEndLoc());
+          Diag(AtomicKindLoc, diag::note_omp_previous_mem_order_clause)
+              << getOpenMPClauseName(AtomicKind);
+        }
       }
       break;
     }
@@ -11356,6 +11359,12 @@ StmtResult Sema::ActOnOpenMPAtomicDirective(ArrayRef<OMPClause *> Clauses,
     default:
       llvm_unreachable("unknown clause is encountered");
     }
+  }
+  bool IsCompareCapture = false;
+  if (EncounteredAtomicKinds.contains(OMPC_compare) &&
+      EncounteredAtomicKinds.contains(OMPC_capture)) {
+    IsCompareCapture = true;
+    AtomicKind = OMPC_compare;
   }
   // OpenMP 5.0, 2.17.7 atomic Construct, Restrictions
   // If atomic-clause is read then memory-order-clause must not be acq_rel or
@@ -11775,17 +11784,22 @@ StmtResult Sema::ActOnOpenMPAtomicDirective(ArrayRef<OMPClause *> Clauses,
     if (CurContext->isDependentContext())
       UE = V = E = X = nullptr;
   } else if (AtomicKind == OMPC_compare) {
-    OpenMPAtomicCompareChecker::ErrorInfoTy ErrorInfo;
-    OpenMPAtomicCompareChecker Checker(*this);
-    if (!Checker.checkStmt(Body, ErrorInfo)) {
-      Diag(ErrorInfo.ErrorLoc, diag::err_omp_atomic_compare)
-          << ErrorInfo.ErrorRange;
-      Diag(ErrorInfo.NoteLoc, diag::note_omp_atomic_compare)
-          << ErrorInfo.Error << ErrorInfo.NoteRange;
-      return StmtError();
+    if (IsCompareCapture) {
+      // TODO: We don't set X, D, E, etc. here because in code gen we will emit
+      // error directly.
+    } else {
+      OpenMPAtomicCompareChecker::ErrorInfoTy ErrorInfo;
+      OpenMPAtomicCompareChecker Checker(*this);
+      if (!Checker.checkStmt(Body, ErrorInfo)) {
+        Diag(ErrorInfo.ErrorLoc, diag::err_omp_atomic_compare)
+            << ErrorInfo.ErrorRange;
+        Diag(ErrorInfo.NoteLoc, diag::note_omp_atomic_compare)
+            << ErrorInfo.Error << ErrorInfo.NoteRange;
+        return StmtError();
+      }
+      // TODO: We don't set X, D, E, etc. here because in code gen we will emit
+      // error directly.
     }
-    // TODO: We don't set X, D, E, etc. here because in code gen we will emit
-    // error directly.
   }
 
   setFunctionHasBranchProtectedScope();
@@ -15329,8 +15343,10 @@ OMPClause *Sema::ActOnOpenMPUpdateClause(OpenMPDependClauseKind Kind,
                                          SourceLocation EndLoc) {
   if (Kind == OMPC_DEPEND_unknown || Kind == OMPC_DEPEND_source ||
       Kind == OMPC_DEPEND_sink || Kind == OMPC_DEPEND_depobj) {
-    unsigned Except[] = {OMPC_DEPEND_source, OMPC_DEPEND_sink,
-                         OMPC_DEPEND_depobj};
+    SmallVector<unsigned> Except = {OMPC_DEPEND_source, OMPC_DEPEND_sink,
+                                    OMPC_DEPEND_depobj};
+    if (LangOpts.OpenMP < 51)
+      Except.push_back(OMPC_DEPEND_inoutset);
     Diag(KindKwLoc, diag::err_omp_unexpected_clause_value)
         << getListOfPossibleValues(OMPC_depend, /*First=*/0,
                                    /*Last=*/OMPC_DEPEND_unknown, Except)
@@ -18874,6 +18890,8 @@ Sema::ActOnOpenMPDependClause(Expr *DepModifier, OpenMPDependClauseKind DepKind,
     Except.push_back(OMPC_DEPEND_sink);
     if (LangOpts.OpenMP < 50 || DSAStack->getCurrentDirective() == OMPD_depobj)
       Except.push_back(OMPC_DEPEND_depobj);
+    if (LangOpts.OpenMP < 51)
+      Except.push_back(OMPC_DEPEND_inoutset);
     std::string Expected = (LangOpts.OpenMP >= 50 && !DepModifier)
                                ? "depend modifier(iterator) or "
                                : "";
@@ -19044,9 +19062,9 @@ Sema::ActOnOpenMPDependClause(Expr *DepModifier, OpenMPDependClauseKind DepKind,
         }
 
         // OpenMP 5.0, 2.17.11 depend Clause, Restrictions, C/C++
-        // List items used in depend clauses with the in, out, inout or
-        // mutexinoutset dependence types cannot be expressions of the
-        // omp_depend_t type.
+        // List items used in depend clauses with the in, out, inout,
+        // inoutset, or mutexinoutset dependence types cannot be
+        // expressions of the omp_depend_t type.
         if (!RefExpr->isValueDependent() && !RefExpr->isTypeDependent() &&
             !RefExpr->isInstantiationDependent() &&
             !RefExpr->containsUnexpandedParameterPack() &&

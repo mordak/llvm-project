@@ -13,10 +13,11 @@ add_mlir_dialect_library(MLIRSparseTensorPipelines
   MLIRMemRefToLLVM
   MLIRPass
   MLIRReconcileUnrealizedCasts
-  MLIRSCFToStandard
+  MLIRSCFToControlFlow
   MLIRSparseTensor
   MLIRSparseTensorTransforms
   MLIRStandardOpsTransforms
   MLIRTensorTransforms
   MLIRVectorToLLVM
+  MLIRVectorTransforms
 )

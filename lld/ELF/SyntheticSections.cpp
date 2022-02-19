@@ -15,12 +15,15 @@
 
 #include "SyntheticSections.h"
 #include "Config.h"
+#include "DWARF.h"
+#include "EhFrame.h"
 #include "InputFiles.h"
 #include "LinkerScript.h"
 #include "OutputSections.h"
 #include "SymbolTable.h"
 #include "Symbols.h"
 #include "Target.h"
+#include "Thunks.h"
 #include "Writer.h"
 #include "lld/Common/CommonLinkerContext.h"
 #include "lld/Common/DWARF.h"
@@ -30,15 +33,11 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/DebugInfo/DWARF/DWARFDebugPubTable.h"
-#include "llvm/Object/ELFObjectFile.h"
-#include "llvm/Support/Compression.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/LEB128.h"
-#include "llvm/Support/MD5.h"
 #include "llvm/Support/Parallel.h"
 #include "llvm/Support/TimeProfiler.h"
 #include <cstdlib>
-#include <thread>
 
 using namespace llvm;
 using namespace llvm::dwarf;
@@ -1231,6 +1230,7 @@ StringTableSection::StringTableSection(StringRef name, bool dynamic)
       dynamic(dynamic) {
   // ELF string tables start with a NUL byte.
   strings.push_back("");
+  stringMap.try_emplace(CachedHashStringRef(""), 0);
   size = 1;
 }
 
@@ -2157,9 +2157,7 @@ void SymbolTableBaseSection::sortSymTabSymbols() {
 void SymbolTableBaseSection::addSymbol(Symbol *b) {
   // Adding a local symbol to a .dynsym is a bug.
   assert(this->type != SHT_DYNSYM || !b->isLocal());
-
-  bool hashIt = b->isLocal() && config->optimize >= 2;
-  symbols.push_back({b, strTabSec.addString(b->getName(), hashIt)});
+  symbols.push_back({b, strTabSec.addString(b->getName(), false)});
 }
 
 size_t SymbolTableBaseSection::getSymbolIndex(Symbol *sym) {
@@ -2193,7 +2191,7 @@ SymbolTableSection<ELFT>::SymbolTableSection(StringTableSection &strTabSec)
 }
 
 static BssSection *getCommonSec(Symbol *sym) {
-  if (!config->defineCommon)
+  if (config->relocatable)
     if (auto *d = dyn_cast<Defined>(sym))
       return dyn_cast_or_null<BssSection>(d->section);
   return nullptr;
@@ -2235,8 +2233,8 @@ template <class ELFT> void SymbolTableSection<ELFT>::writeTo(uint8_t *buf) {
       eSym->st_other |= sym->stOther & STO_AARCH64_VARIANT_PCS;
 
     if (BssSection *commonSec = getCommonSec(sym)) {
-      // st_value is usually an address of a symbol, but that has a special
-      // meaning for uninstantiated common symbols (--no-define-common).
+      // When -r is specified, a COMMON symbol is not allocated. Its st_shndx
+      // holds SHN_COMMON and st_value holds the alignment.
       eSym->st_shndx = SHN_COMMON;
       eSym->st_value = commonSec->alignment;
       eSym->st_size = cast<Defined>(sym)->size;

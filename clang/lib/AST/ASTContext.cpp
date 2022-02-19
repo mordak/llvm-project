@@ -973,7 +973,8 @@ static bool isAddrSpaceMapManglingEnabled(const TargetInfo &TI,
 ASTContext::ASTContext(LangOptions &LOpts, SourceManager &SM,
                        IdentifierTable &idents, SelectorTable &sels,
                        Builtin::Context &builtins, TranslationUnitKind TUKind)
-    : ConstantArrayTypes(this_()), FunctionProtoTypes(this_()),
+    : ConstantArrayTypes(this_(), ConstantArrayTypesLog2InitSize),
+      FunctionProtoTypes(this_(), FunctionProtoTypesLog2InitSize),
       TemplateSpecializationTypes(this_()),
       DependentTemplateSpecializationTypes(this_()), AutoTypes(this_()),
       SubstTemplateTemplateParmPacks(this_()),
@@ -8547,21 +8548,18 @@ static TypedefDecl *CreateVoidPtrBuiltinVaListDecl(const ASTContext *Context) {
 
 static TypedefDecl *
 CreateAArch64ABIBuiltinVaListDecl(const ASTContext *Context) {
+  // struct __va_list
   RecordDecl *VaListTagDecl = Context->buildImplicitRecord("__va_list");
-  // namespace std { struct __va_list {
-  // Note that we create the namespace even in C. This is intentional so that
-  // the type is consistent between C and C++, which is important in cases where
-  // the types need to match between translation units (e.g. with
-  // -fsanitize=cfi-icall). Ideally we wouldn't have created this namespace at
-  // all, but it's now part of the ABI (e.g. in mangled names), so we can't
-  // change it.
-  auto *NS = NamespaceDecl::Create(
-      const_cast<ASTContext &>(*Context), Context->getTranslationUnitDecl(),
-      /*Inline*/ false, SourceLocation(), SourceLocation(),
-      &Context->Idents.get("std"),
-      /*PrevDecl*/ nullptr);
-  NS->setImplicit();
-  VaListTagDecl->setDeclContext(NS);
+  if (Context->getLangOpts().CPlusPlus) {
+    // namespace std { struct __va_list {
+    auto *NS = NamespaceDecl::Create(
+        const_cast<ASTContext &>(*Context), Context->getTranslationUnitDecl(),
+        /*Inline*/ false, SourceLocation(), SourceLocation(),
+        &Context->Idents.get("std"),
+        /*PrevDecl*/ nullptr);
+    NS->setImplicit();
+    VaListTagDecl->setDeclContext(NS);
+  }
 
   VaListTagDecl->startDefinition();
 
@@ -11959,8 +11957,13 @@ uint64_t ASTContext::getTargetNullPointerValue(QualType QT) const {
 }
 
 unsigned ASTContext::getTargetAddressSpace(QualType T) const {
-  return T->isFunctionType() ? getTargetInfo().getProgramAddressSpace()
-                             : getTargetAddressSpace(T.getQualifiers());
+  // Return the address space for the type. If the type is a
+  // function type without an address space qualifier, the
+  // program address space is used. Otherwise, the target picks
+  // the best address space based on the type information
+  return T->isFunctionType() && !T.hasAddressSpace()
+             ? getTargetInfo().getProgramAddressSpace()
+             : getTargetAddressSpace(T.getQualifiers());
 }
 
 unsigned ASTContext::getTargetAddressSpace(Qualifiers Q) const {
