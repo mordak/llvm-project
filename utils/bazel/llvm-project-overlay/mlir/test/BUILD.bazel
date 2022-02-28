@@ -396,7 +396,6 @@ cc_library(
         "//mlir:BufferizationTransforms",
         "//mlir:GPUDialect",
         "//mlir:IR",
-        "//mlir:LinalgBufferizableOpInterfaceImpl",
         "//mlir:LinalgOps",
         "//mlir:LinalgTransforms",
         "//mlir:MemRefDialect",
@@ -439,6 +438,7 @@ cc_library(
     deps = [
         ":TestDialect",
         "//mlir:Affine",
+        "//mlir:MemRefDialect",
         "//mlir:MemRefTransforms",
         "//mlir:Pass",
         "//mlir:Transforms",
