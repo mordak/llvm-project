@@ -104,8 +104,10 @@ public:
   /// Get base address of allocated/associated entity.
   mlir::Value readBaseAddress() {
     if (irBox) {
-      auto heapOrPtrTy = box.getBoxTy().getEleTy();
-      return builder.create<fir::BoxAddrOp>(loc, heapOrPtrTy, irBox);
+      auto memrefTy = box.getBoxTy().getEleTy();
+      if (!fir::isa_ref_type(memrefTy))
+        memrefTy = builder.getRefType(memrefTy);
+      return builder.create<fir::BoxAddrOp>(loc, memrefTy, irBox);
     }
     auto addrVar = box.getMutableProperties().addr;
     return builder.create<fir::LoadOp>(loc, addrVar);
@@ -144,7 +146,7 @@ public:
   /// also read into it.
   llvm::SmallVector<mlir::Value>
   readShape(llvm::SmallVectorImpl<mlir::Value> *lbounds = nullptr) {
-    llvm::SmallVector<mlir::Value> extents(box.rank());
+    llvm::SmallVector<mlir::Value> extents;
     auto rank = box.rank();
     for (decltype(rank) dim = 0; dim < rank; ++dim) {
       auto [lb, extent] = readShape(dim);
@@ -584,9 +586,9 @@ void fir::factory::associateMutableBoxWithRemap(
     for (auto [lb, ub] : llvm::zip(lbounds, ubounds)) {
       auto lbi = builder.createConvert(loc, idxTy, lb);
       auto ubi = builder.createConvert(loc, idxTy, ub);
-      auto diff = builder.create<arith::SubIOp>(loc, idxTy, ubi, lbi);
+      auto diff = builder.create<mlir::arith::SubIOp>(loc, idxTy, ubi, lbi);
       extents.emplace_back(
-          builder.create<arith::AddIOp>(loc, idxTy, diff, one));
+          builder.create<mlir::arith::AddIOp>(loc, idxTy, diff, one));
     }
   } else {
     // lbounds are default. Upper bounds and extents are the same.

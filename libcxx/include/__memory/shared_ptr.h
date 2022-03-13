@@ -24,6 +24,7 @@
 #include <__memory/unique_ptr.h>
 #include <__utility/forward.h>
 #include <__utility/move.h>
+#include <__utility/swap.h>
 #include <cstddef>
 #include <cstdlib> // abort
 #include <iosfwd>
@@ -40,7 +41,6 @@
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
-#  pragma clang include_instead(<memory>)
 #endif
 
 _LIBCPP_BEGIN_NAMESPACE_STD

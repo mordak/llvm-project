@@ -1847,15 +1847,27 @@ void AArch64FrameLowering::emitEpilogue(MachineFunction &MF,
   }
 
   if (hasFP(MF) && AFI->hasSwiftAsyncContext()) {
-    // We need to reset FP to its untagged state on return. Bit 60 is currently
-    // used to show the presence of an extended frame.
+    switch (MF.getTarget().Options.SwiftAsyncFramePointer) {
+    case SwiftAsyncFramePointerMode::DeploymentBased:
+      // Avoid the reload as it is GOT relative, and instead fall back to the
+      // hardcoded value below.  This allows a mismatch between the OS and
+      // application without immediately terminating on the difference.
+      LLVM_FALLTHROUGH;
+    case SwiftAsyncFramePointerMode::Always:
+      // We need to reset FP to its untagged state on return. Bit 60 is
+      // currently used to show the presence of an extended frame.
 
-    // BIC x29, x29, #0x1000_0000_0000_0000
-    BuildMI(MBB, MBB.getFirstTerminator(), DL, TII->get(AArch64::ANDXri),
-            AArch64::FP)
-        .addUse(AArch64::FP)
-        .addImm(0x10fe)
-        .setMIFlag(MachineInstr::FrameDestroy);
+      // BIC x29, x29, #0x1000_0000_0000_0000
+      BuildMI(MBB, MBB.getFirstTerminator(), DL, TII->get(AArch64::ANDXri),
+              AArch64::FP)
+          .addUse(AArch64::FP)
+          .addImm(0x10fe)
+          .setMIFlag(MachineInstr::FrameDestroy);
+      break;
+
+    case SwiftAsyncFramePointerMode::Never:
+      break;
+    }
   }
 
   const StackOffset &SVEStackSize = getSVEStackSize(MF);
@@ -2067,8 +2079,9 @@ StackOffset AArch64FrameLowering::resolveFrameOffsetReference(
   // right thing for the emergency spill slot.
   bool UseFP = false;
   if (AFI->hasStackFrame() && !isSVE) {
-    // We shouldn't prefer using the FP when there is an SVE area
-    // in between the FP and the non-SVE locals/spills.
+    // We shouldn't prefer using the FP to access fixed-sized stack objects when
+    // there are scalable (SVE) objects in between the FP and the fixed-sized
+    // objects.
     PreferFP &= !SVEStackSize;
 
     // Note: Keeping the following as multiple 'if' statements rather than
@@ -2089,7 +2102,7 @@ StackOffset AArch64FrameLowering::resolveFrameOffsetReference(
       // offsets is smaller than for positive ones. If an offset is available
       // via the FP and the SP, use whichever is closest.
       bool FPOffsetFits = !ForSimm || FPOffset >= -256;
-      PreferFP |= Offset > -FPOffset;
+      PreferFP |= Offset > -FPOffset && !SVEStackSize;
 
       if (MFI.hasVarSizedObjects()) {
         // If we have variable sized objects, we can use either FP or BP, as the

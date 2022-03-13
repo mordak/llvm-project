@@ -16,7 +16,7 @@
 
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/Parser.h"
+#include "mlir/Parser/Parser.h"
 #include "mlir/Support/FileUtilities.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/Optional.h"
@@ -53,6 +53,7 @@ struct LinalgOpMetadata {
   std::string cppClassName;
   Optional<std::string> doc;
   SmallVector<std::string> implements;
+  SmallVector<std::string> defines;
 };
 
 struct SerializedAffineMap {
@@ -66,6 +67,8 @@ enum class LinalgOperandDefKind {
   Scalar,
   OutputTensor,
   IndexAttr,
+  UnaryFnAttr,
+  BinaryFnAttr,
   TypeFnAttr
 };
 
@@ -208,6 +211,8 @@ struct ScalarEnumerationTraits<LinalgOperandDefKind> {
     io.enumCase(value, "scalar", LinalgOperandDefKind::Scalar);
     io.enumCase(value, "output_tensor", LinalgOperandDefKind::OutputTensor);
     io.enumCase(value, "index_attr", LinalgOperandDefKind::IndexAttr);
+    io.enumCase(value, "unary_fn_attr", LinalgOperandDefKind::UnaryFnAttr);
+    io.enumCase(value, "binary_fn_attr", LinalgOperandDefKind::BinaryFnAttr);
     io.enumCase(value, "type_fn_attr", LinalgOperandDefKind::TypeFnAttr);
   }
 };
@@ -229,6 +234,7 @@ struct MappingTraits<LinalgOpMetadata> {
     io.mapRequired("cpp_class_name", info.cppClassName);
     io.mapOptional("doc", info.doc);
     io.mapOptional("implements", info.implements);
+    io.mapOptional("defines", info.defines);
   }
 };
 
@@ -430,6 +436,46 @@ static ScalarAssign *findAssignment(StringRef name,
   return nullptr;
 }
 
+// Return true if the operand is a function attribute.
+static bool isFunctionAttribute(LinalgOperandDefKind kind) {
+  return kind == LinalgOperandDefKind::UnaryFnAttr ||
+         kind == LinalgOperandDefKind::BinaryFnAttr ||
+         kind == LinalgOperandDefKind::TypeFnAttr;
+}
+
+// Return true if the operand is an attribute.
+static bool isAttribute(LinalgOperandDefKind kind) {
+  return kind == LinalgOperandDefKind::IndexAttr || isFunctionAttribute(kind);
+}
+
+// Get the enum name for the given operand kind.
+std::string convertOperandKindToEnumName(LinalgOperandDefKind kind) {
+  switch (kind) {
+  case LinalgOperandDefKind::UnaryFnAttr:
+    return std::string("UnaryFn");
+  case LinalgOperandDefKind::BinaryFnAttr:
+    return std::string("BinaryFn");
+  case LinalgOperandDefKind::TypeFnAttr:
+    return std::string("TypeFn");
+  default:
+    break;
+  }
+  llvm_unreachable("unsupported function attribute kind");
+}
+
+// Get the enum name for the given function kind.
+std::string convertFunctionKindToEnumName(ScalarFnKind kind) {
+  switch (kind) {
+  case ScalarFnKind::Unary:
+    return std::string("UnaryFn");
+  case ScalarFnKind::Binary:
+    return std::string("BinaryFn");
+  case ScalarFnKind::Type:
+    return std::string("TypeFn");
+  }
+  llvm_unreachable("unsupported function kind");
+}
+
 //===----------------------------------------------------------------------===//
 // Templates
 //===----------------------------------------------------------------------===//
@@ -455,7 +501,8 @@ static const char bannerFormat[] = R"FMT(
 // {3}: documentation (summary + description)
 // {4}: op attribute list
 // {5}: builder methods taking standalone attribute parameters
-// {6}: additional methods for attributes used by indexing maps
+// {6}: additional method defintions
+// {7}: additional methods for attributes used by indexing maps
 static const char structuredOpOdsHeaderFormat[] = R"FMT(
 //===----------------------------------------------------------------------===//
 // Op definition for {0}
@@ -529,6 +576,7 @@ def {0} : LinalgStructuredBase_Op<"{1}", !listconcat([AttrSizedOperandSegments],
     ];
     let hasCustomAssemblyFormat = 1;
     let hasFolder = 1;
+    {6}
 
     let extraClassDeclaration = structuredOpsBaseDecls # [{{
       // Auto-generated.
@@ -545,7 +593,7 @@ def {0} : LinalgStructuredBase_Op<"{1}", !listconcat([AttrSizedOperandSegments],
       // Generic methods.
       static unsigned getNumRegionArgs();
       std::string getLibraryCallName();
-      {6}
+      {7}
     }];
 }
 )FMT";
@@ -630,7 +678,7 @@ ArrayAttr {0}::indexing_maps() {{
     getNumParallelLoops(), context);
   SmallVector<AffineMap> indexingMaps;
   for (OpOperand *opOperand : getInputAndOutputOperands())
-    indexingMaps.push_back(isScalar(opOperand) ? scalarMap : tensorMap);
+    indexingMaps.push_back(getRank(opOperand) == 0 ? scalarMap : tensorMap);
   return Builder(getContext()).getAffineMapArrayAttr(indexingMaps);
 }
 )FMT";
@@ -692,9 +740,14 @@ static LogicalResult generateNamedGenericOpOds(LinalgOpConfig &opConfig,
 
   interfaceNameList = interleaveToString(opConfig.metadata->implements, ", ");
 
+  std::string definitionList;
+  for (const std::string &definition : opConfig.metadata->defines) {
+    static const char definitionFmt[] = "let {0} = 1;\n";
+    definitionList.append(llvm::formatv(definitionFmt, definition));
+  }
+
   if (llvm::any_of(opConfig.structuredOp->args, [](LinalgOperandDef &arg) {
-        return arg.kind == LinalgOperandDefKind::IndexAttr ||
-               arg.kind == LinalgOperandDefKind::TypeFnAttr;
+        return isAttribute(arg.kind);
       })) {
     SmallVector<std::string> attrDefs;
     SmallVector<std::string> attrParams;
@@ -703,13 +756,14 @@ static LogicalResult generateNamedGenericOpOds(LinalgOpConfig &opConfig,
       static const char paramFmt[] = "\"Attribute\":${0}";
       static const char stmtFmt[] = "$_state.addAttribute(\"{0}\", {0});";
       // Add the type conversion attributes to the op definition and builders.
-      if (arg.kind == LinalgOperandDefKind::TypeFnAttr) {
+      if (isFunctionAttribute(arg.kind)) {
         assert(arg.defaultFn.hasValue());
-        static const char typeFmt[] = "TypeFn::{0}";
+        std::string enumName = convertOperandKindToEnumName(arg.kind);
+        static const char typeFmt[] = "{0}::{1}";
         static const char defFmt[] = "DefaultValuedAttr<{0}, \"{1}\">:${2}";
-        attrDefs.push_back(llvm::formatv(defFmt, "TypeFnAttr",
-                                         llvm::formatv(typeFmt, arg.defaultFn),
-                                         arg.name));
+        attrDefs.push_back(llvm::formatv(
+            defFmt, llvm::formatv("{0}Attr", enumName),
+            llvm::formatv(typeFmt, enumName, arg.defaultFn), arg.name));
         attrParams.push_back(llvm::formatv(paramFmt, arg.name));
         attrStmts.push_back(llvm::formatv(stmtFmt, arg.name));
       }
@@ -750,7 +804,7 @@ static LogicalResult generateNamedGenericOpOds(LinalgOpConfig &opConfig,
   os << llvm::formatv(structuredOpOdsHeaderFormat,
                       opConfig.metadata->cppClassName, opConfig.metadata->name,
                       interfaceNameList, doc, attrList, attrBuilder,
-                      attrMethods);
+                      definitionList, attrMethods);
 
   return success();
 }
@@ -1000,21 +1054,24 @@ void {0}::regionBuilder(ImplicitLocOpBuilder &b,
     SmallVector<std::string> attrs;
     SmallVector<std::string> stmts;
     for (LinalgOperandDef &arg : args) {
-      if (arg.kind != LinalgOperandDefKind::TypeFnAttr)
+      if (!isFunctionAttribute(arg.kind))
         continue;
       // Obtain the type function attribute values. Parameters.
-      // {0}: attribute name
-      // {1}: default type function name
+      // {0}: enum name
+      // {1}: attribute name
+      // {2}: default type function name
       static const char attrDef[] = R"FMT(
-TypeFn {0}Val = TypeFn::{1};
-auto {0}Iter = llvm::find_if(attrs, [&](const NamedAttribute &attr) {{
-                              return attr.getName() == "{0}"; });
-if ({0}Iter != attrs.end()) {{
-  if (auto attr = {0}Iter->getValue().dyn_cast<TypeFnAttr>())
-    {0}Val = attr.getValue();
+{0} {1}Val = {0}::{2};
+auto {1}Iter = llvm::find_if(attrs, [&](const NamedAttribute &attr) {{
+                              return attr.getName() == "{1}"; });
+if ({1}Iter != attrs.end()) {{
+  if (auto attr = {1}Iter->getValue().dyn_cast<{0}Attr>())
+    {1}Val = attr.getValue();
 }
 )FMT";
-      attrs.push_back(llvm::formatv(attrDef, arg.name, arg.defaultFn));
+      std::string enumName = convertOperandKindToEnumName(arg.kind);
+      attrs.push_back(
+          llvm::formatv(attrDef, enumName, arg.name, arg.defaultFn));
     }
     for (LinalgOperandDef &arg : args) {
       if (arg.kind != LinalgOperandDefKind::OutputTensor)
@@ -1056,11 +1113,47 @@ if ({0}Iter != attrs.end()) {{
                                         cppIdent, *expression.index));
           return cppIdent;
         }
-        if (expression.scalarFn &&
-            expression.scalarFn->kind != ScalarFnKind::Type) {
-          // Apply function.
-          // Recursively generate operands.
+        if (expression.scalarFn) {
+          std::string enumName =
+              convertFunctionKindToEnumName(expression.scalarFn->kind);
+
+          // Get the function or attribute name.
+          assert(expression.scalarFn->fnName || expression.scalarFn->attrName);
+          std::string funcType;
+          if (expression.scalarFn->fnName) {
+            funcType = llvm::formatv("{0}::{1}", enumName,
+                                     *expression.scalarFn->fnName);
+          }
+          if (expression.scalarFn->attrName) {
+            if (llvm::none_of(args, [&](LinalgOperandDef &arg) {
+                  return isFunctionAttribute(arg.kind) &&
+                         arg.name == expression.scalarFn->attrName.getValue();
+                })) {
+              emitError(genContext.getLoc())
+                  << "missing function attribute "
+                  << expression.scalarFn->attrName.getValue();
+            }
+            funcType = llvm::formatv("{0}Val", *expression.scalarFn->attrName);
+          }
+          assert(!funcType.empty());
+
+          // Add the optional type parameter to the operands.
           SmallVector<std::string> operandCppValues;
+          if (expression.scalarFn->kind == ScalarFnKind::Type) {
+            assert(expression.scalarFn->typeVar.hasValue());
+            Optional<std::string> typeCppValue =
+                findTypeValue(expression.scalarFn->typeVar.getValue(), args);
+            if (!typeCppValue) {
+              emitError(genContext.getLoc())
+                  << "type variable " << expression.scalarFn->typeVar.getValue()
+                  << ", used in a type conversion, must map to a predefined or "
+                  << "an argument type but it does not";
+              return None;
+            }
+            operandCppValues.push_back(typeCppValue.getValue());
+          }
+
+          // Collect the scalar operands.
           for (ScalarExpression &operand : expression.scalarFn->operands) {
             auto operandCppValue = generateExpression(operand);
             if (!operandCppValue)
@@ -1068,59 +1161,11 @@ if ({0}Iter != attrs.end()) {{
             operandCppValues.push_back(*operandCppValue);
           }
 
-          std::string prefix = expression.scalarFn->kind == ScalarFnKind::Unary
-                                   ? "unary"
-                                   : "binary";
-          std::string cppIdent = llvm::formatv("value{0}", ++localCounter);
-          stmts.push_back(
-              llvm::formatv("Value {0} = helper.{1}__{2}({3});", cppIdent,
-                            prefix, expression.scalarFn->fnName,
-                            interleaveToString(operandCppValues, ", ")));
-          return cppIdent;
-        }
-        if (expression.scalarFn &&
-            expression.scalarFn->kind == ScalarFnKind::Type) {
-          // Symbolic cast.
-          // Operands must be arity 1.
-          if (expression.scalarFn->operands.size() != 1) {
-            emitError(genContext.getLoc())
-                << "type conversion operand arity must be 1";
-            return None;
-          }
-          Optional<std::string> operandCppValue =
-              generateExpression(expression.scalarFn->operands[0]);
-          if (!operandCppValue)
-            return None;
-
-          assert(expression.scalarFn->typeVar.hasValue());
-          Optional<std::string> typeCppValue =
-              findTypeValue(expression.scalarFn->typeVar.getValue(), args);
-          if (!typeCppValue) {
-            emitError(genContext.getLoc())
-                << "type variable " << expression.scalarFn->typeVar.getValue()
-                << ", used in a type conversion, must map to a predefined or "
-                << "an argument type but it does not";
-            return None;
-          }
-
-          // Use the function name or the attribute to build the type function.
-          std::string typeFunc = llvm::formatv(
-              "TypeFn::{0}", expression.scalarFn->fnName.getValueOr(""));
-          if (expression.scalarFn->attrName) {
-            if (llvm::none_of(args, [&](LinalgOperandDef &arg) {
-                  return arg.kind == LinalgOperandDefKind::TypeFnAttr &&
-                         arg.name == expression.scalarFn->attrName.getValue();
-                })) {
-              emitError(genContext.getLoc())
-                  << "missing type function attribute "
-                  << expression.scalarFn->attrName.getValue();
-            }
-            typeFunc = llvm::formatv("{0}Val", *expression.scalarFn->attrName);
-          }
+          // Call the function builder.
           std::string cppIdent = llvm::formatv("value{0}", ++localCounter);
           stmts.push_back(llvm::formatv(
-              "Value {0} = helper.buildTypeFn({1}, {2}, {3});", cppIdent,
-              typeFunc, typeCppValue.getValue(), *operandCppValue));
+              "Value {0} = helper.build{1}({2}, {3});", cppIdent, enumName,
+              funcType, interleaveToString(operandCppValues, ", ")));
           return cppIdent;
         }
         emitError(genContext.getLoc()) << "unknown ScalarExpression type";

@@ -79,10 +79,13 @@ enum InstClassEnum {
   MIMG,
   TBUFFER_LOAD,
   TBUFFER_STORE,
-  GLOBAL_LOAD,
   GLOBAL_LOAD_SADDR,
-  GLOBAL_STORE,
-  GLOBAL_STORE_SADDR
+  GLOBAL_STORE_SADDR,
+  FLAT_LOAD,
+  FLAT_STORE,
+  GLOBAL_LOAD, // GLOBAL_LOAD/GLOBAL_STORE are never used as the InstClass of
+  GLOBAL_STORE // any CombineInfo, they are only ever returned by
+               // getCommonInstClass.
 };
 
 struct AddressRegs {
@@ -244,11 +247,11 @@ private:
   mergeTBufferStorePair(CombineInfo &CI, CombineInfo &Paired,
                         MachineBasicBlock::iterator InsertBefore);
   MachineBasicBlock::iterator
-  mergeGlobalLoadPair(CombineInfo &CI, CombineInfo &Paired,
-                      MachineBasicBlock::iterator InsertBefore);
+  mergeFlatLoadPair(CombineInfo &CI, CombineInfo &Paired,
+                    MachineBasicBlock::iterator InsertBefore);
   MachineBasicBlock::iterator
-  mergeGlobalStorePair(CombineInfo &CI, CombineInfo &Paired,
-                       MachineBasicBlock::iterator InsertBefore);
+  mergeFlatStorePair(CombineInfo &CI, CombineInfo &Paired,
+                     MachineBasicBlock::iterator InsertBefore);
 
   void updateBaseAndOffset(MachineInstr &I, Register NewBase,
                            int32_t NewOffset) const;
@@ -272,6 +275,9 @@ private:
 
   static MachineMemOperand *combineKnownAdjacentMMOs(const CombineInfo &CI,
                                                      const CombineInfo &Paired);
+
+  static InstClassEnum getCommonInstClass(const CombineInfo &CI,
+                                          const CombineInfo &Paired);
 
 public:
   static char ID;
@@ -323,23 +329,31 @@ static unsigned getOpcodeWidth(const MachineInstr &MI, const SIInstrInfo &TII) {
   case AMDGPU::GLOBAL_LOAD_DWORD_SADDR:
   case AMDGPU::GLOBAL_STORE_DWORD:
   case AMDGPU::GLOBAL_STORE_DWORD_SADDR:
+  case AMDGPU::FLAT_LOAD_DWORD:
+  case AMDGPU::FLAT_STORE_DWORD:
     return 1;
   case AMDGPU::S_BUFFER_LOAD_DWORDX2_IMM:
   case AMDGPU::GLOBAL_LOAD_DWORDX2:
   case AMDGPU::GLOBAL_LOAD_DWORDX2_SADDR:
   case AMDGPU::GLOBAL_STORE_DWORDX2:
   case AMDGPU::GLOBAL_STORE_DWORDX2_SADDR:
+  case AMDGPU::FLAT_LOAD_DWORDX2:
+  case AMDGPU::FLAT_STORE_DWORDX2:
     return 2;
   case AMDGPU::GLOBAL_LOAD_DWORDX3:
   case AMDGPU::GLOBAL_LOAD_DWORDX3_SADDR:
   case AMDGPU::GLOBAL_STORE_DWORDX3:
   case AMDGPU::GLOBAL_STORE_DWORDX3_SADDR:
+  case AMDGPU::FLAT_LOAD_DWORDX3:
+  case AMDGPU::FLAT_STORE_DWORDX3:
     return 3;
   case AMDGPU::S_BUFFER_LOAD_DWORDX4_IMM:
   case AMDGPU::GLOBAL_LOAD_DWORDX4:
   case AMDGPU::GLOBAL_LOAD_DWORDX4_SADDR:
   case AMDGPU::GLOBAL_STORE_DWORDX4:
   case AMDGPU::GLOBAL_STORE_DWORDX4_SADDR:
+  case AMDGPU::FLAT_LOAD_DWORDX4:
+  case AMDGPU::FLAT_STORE_DWORDX4:
     return 4;
   case AMDGPU::S_BUFFER_LOAD_DWORDX8_IMM:
     return 8;
@@ -428,7 +442,11 @@ static InstClassEnum getInstClass(unsigned Opc, const SIInstrInfo &TII) {
   case AMDGPU::GLOBAL_LOAD_DWORDX2:
   case AMDGPU::GLOBAL_LOAD_DWORDX3:
   case AMDGPU::GLOBAL_LOAD_DWORDX4:
-    return GLOBAL_LOAD;
+  case AMDGPU::FLAT_LOAD_DWORD:
+  case AMDGPU::FLAT_LOAD_DWORDX2:
+  case AMDGPU::FLAT_LOAD_DWORDX3:
+  case AMDGPU::FLAT_LOAD_DWORDX4:
+    return FLAT_LOAD;
   case AMDGPU::GLOBAL_LOAD_DWORD_SADDR:
   case AMDGPU::GLOBAL_LOAD_DWORDX2_SADDR:
   case AMDGPU::GLOBAL_LOAD_DWORDX3_SADDR:
@@ -438,7 +456,11 @@ static InstClassEnum getInstClass(unsigned Opc, const SIInstrInfo &TII) {
   case AMDGPU::GLOBAL_STORE_DWORDX2:
   case AMDGPU::GLOBAL_STORE_DWORDX3:
   case AMDGPU::GLOBAL_STORE_DWORDX4:
-    return GLOBAL_STORE;
+  case AMDGPU::FLAT_STORE_DWORD:
+  case AMDGPU::FLAT_STORE_DWORDX2:
+  case AMDGPU::FLAT_STORE_DWORDX3:
+  case AMDGPU::FLAT_STORE_DWORDX4:
+    return FLAT_STORE;
   case AMDGPU::GLOBAL_STORE_DWORD_SADDR:
   case AMDGPU::GLOBAL_STORE_DWORDX2_SADDR:
   case AMDGPU::GLOBAL_STORE_DWORDX3_SADDR:
@@ -481,7 +503,11 @@ static unsigned getInstSubclass(unsigned Opc, const SIInstrInfo &TII) {
   case AMDGPU::GLOBAL_LOAD_DWORDX2:
   case AMDGPU::GLOBAL_LOAD_DWORDX3:
   case AMDGPU::GLOBAL_LOAD_DWORDX4:
-    return AMDGPU::GLOBAL_LOAD_DWORD;
+  case AMDGPU::FLAT_LOAD_DWORD:
+  case AMDGPU::FLAT_LOAD_DWORDX2:
+  case AMDGPU::FLAT_LOAD_DWORDX3:
+  case AMDGPU::FLAT_LOAD_DWORDX4:
+    return AMDGPU::FLAT_LOAD_DWORD;
   case AMDGPU::GLOBAL_LOAD_DWORD_SADDR:
   case AMDGPU::GLOBAL_LOAD_DWORDX2_SADDR:
   case AMDGPU::GLOBAL_LOAD_DWORDX3_SADDR:
@@ -491,13 +517,35 @@ static unsigned getInstSubclass(unsigned Opc, const SIInstrInfo &TII) {
   case AMDGPU::GLOBAL_STORE_DWORDX2:
   case AMDGPU::GLOBAL_STORE_DWORDX3:
   case AMDGPU::GLOBAL_STORE_DWORDX4:
-    return AMDGPU::GLOBAL_STORE_DWORD;
+  case AMDGPU::FLAT_STORE_DWORD:
+  case AMDGPU::FLAT_STORE_DWORDX2:
+  case AMDGPU::FLAT_STORE_DWORDX3:
+  case AMDGPU::FLAT_STORE_DWORDX4:
+    return AMDGPU::FLAT_STORE_DWORD;
   case AMDGPU::GLOBAL_STORE_DWORD_SADDR:
   case AMDGPU::GLOBAL_STORE_DWORDX2_SADDR:
   case AMDGPU::GLOBAL_STORE_DWORDX3_SADDR:
   case AMDGPU::GLOBAL_STORE_DWORDX4_SADDR:
     return AMDGPU::GLOBAL_STORE_DWORD_SADDR;
   }
+}
+
+// GLOBAL loads and stores are classified as FLAT initially. If both combined
+// instructions are FLAT GLOBAL adjust the class to GLOBAL_LOAD or GLOBAL_STORE.
+// If either or both instructions are non segment specific FLAT the resulting
+// combined operation will be FLAT, potentially promoting one of the GLOBAL
+// operations to FLAT.
+// For other instructions return the original unmodified class.
+InstClassEnum
+SILoadStoreOptimizer::getCommonInstClass(const CombineInfo &CI,
+                                         const CombineInfo &Paired) {
+  assert(CI.InstClass == Paired.InstClass);
+
+  if ((CI.InstClass == FLAT_LOAD || CI.InstClass == FLAT_STORE) &&
+      SIInstrInfo::isFLATGlobal(*CI.I) && SIInstrInfo::isFLATGlobal(*Paired.I))
+    return (CI.InstClass == FLAT_STORE) ? GLOBAL_STORE : GLOBAL_LOAD;
+
+  return CI.InstClass;
 }
 
 static AddressRegs getRegs(unsigned Opc, const SIInstrInfo &TII) {
@@ -577,6 +625,14 @@ static AddressRegs getRegs(unsigned Opc, const SIInstrInfo &TII) {
   case AMDGPU::GLOBAL_STORE_DWORDX2:
   case AMDGPU::GLOBAL_STORE_DWORDX3:
   case AMDGPU::GLOBAL_STORE_DWORDX4:
+  case AMDGPU::FLAT_LOAD_DWORD:
+  case AMDGPU::FLAT_LOAD_DWORDX2:
+  case AMDGPU::FLAT_LOAD_DWORDX3:
+  case AMDGPU::FLAT_LOAD_DWORDX4:
+  case AMDGPU::FLAT_STORE_DWORD:
+  case AMDGPU::FLAT_STORE_DWORDX2:
+  case AMDGPU::FLAT_STORE_DWORDX3:
+  case AMDGPU::FLAT_STORE_DWORDX4:
     Result.VAddr = true;
     return Result;
   }
@@ -724,10 +780,15 @@ SILoadStoreOptimizer::combineKnownAdjacentMMOs(const CombineInfo &CI,
   // A base pointer for the combined operation is the same as the leading
   // operation's pointer.
   if (Paired < CI)
-    MMOa = MMOb;
+    std::swap(MMOa, MMOb);
+
+  MachinePointerInfo PtrInfo(MMOa->getPointerInfo());
+  // If merging FLAT and GLOBAL set address space to FLAT.
+  if (MMOb->getAddrSpace() == AMDGPUAS::FLAT_ADDRESS)
+    PtrInfo.AddrSpace = AMDGPUAS::FLAT_ADDRESS;
 
   MachineFunction *MF = CI.I->getMF();
-  return MF->getMachineMemOperand(MMOa, MMOa->getPointerInfo(), Size);
+  return MF->getMachineMemOperand(MMOa, PtrInfo, Size);
 }
 
 bool SILoadStoreOptimizer::dmasksCanBeCombined(const CombineInfo &CI,
@@ -1449,7 +1510,7 @@ MachineBasicBlock::iterator SILoadStoreOptimizer::mergeTBufferStorePair(
   return New;
 }
 
-MachineBasicBlock::iterator SILoadStoreOptimizer::mergeGlobalLoadPair(
+MachineBasicBlock::iterator SILoadStoreOptimizer::mergeFlatLoadPair(
     CombineInfo &CI, CombineInfo &Paired,
     MachineBasicBlock::iterator InsertBefore) {
   MachineBasicBlock *MBB = CI.I->getParent();
@@ -1492,7 +1553,7 @@ MachineBasicBlock::iterator SILoadStoreOptimizer::mergeGlobalLoadPair(
   return New;
 }
 
-MachineBasicBlock::iterator SILoadStoreOptimizer::mergeGlobalStorePair(
+MachineBasicBlock::iterator SILoadStoreOptimizer::mergeFlatStorePair(
     CombineInfo &CI, CombineInfo &Paired,
     MachineBasicBlock::iterator InsertBefore) {
   MachineBasicBlock *MBB = CI.I->getParent();
@@ -1538,7 +1599,7 @@ unsigned SILoadStoreOptimizer::getNewOpcode(const CombineInfo &CI,
                                             const CombineInfo &Paired) {
   const unsigned Width = CI.Width + Paired.Width;
 
-  switch (CI.InstClass) {
+  switch (getCommonInstClass(CI, Paired)) {
   default:
     assert(CI.InstClass == BUFFER_LOAD || CI.InstClass == BUFFER_STORE);
     // FIXME: Handle d16 correctly
@@ -1605,6 +1666,28 @@ unsigned SILoadStoreOptimizer::getNewOpcode(const CombineInfo &CI,
       return AMDGPU::GLOBAL_STORE_DWORDX3_SADDR;
     case 4:
       return AMDGPU::GLOBAL_STORE_DWORDX4_SADDR;
+    }
+  case FLAT_LOAD:
+    switch (Width) {
+    default:
+      return 0;
+    case 2:
+      return AMDGPU::FLAT_LOAD_DWORDX2;
+    case 3:
+      return AMDGPU::FLAT_LOAD_DWORDX3;
+    case 4:
+      return AMDGPU::FLAT_LOAD_DWORDX4;
+    }
+  case FLAT_STORE:
+    switch (Width) {
+    default:
+      return 0;
+    case 2:
+      return AMDGPU::FLAT_STORE_DWORDX2;
+    case 3:
+      return AMDGPU::FLAT_STORE_DWORDX3;
+    case 4:
+      return AMDGPU::FLAT_STORE_DWORDX4;
     }
   case MIMG:
     assert((countPopulation(CI.DMask | Paired.DMask) == Width) &&
@@ -2240,14 +2323,16 @@ SILoadStoreOptimizer::optimizeInstsWithSameBaseAddr(
       NewMI = mergeTBufferStorePair(CI, Paired, Where->I);
       OptimizeListAgain |= CI.Width + Paired.Width < 4;
       break;
+    case FLAT_LOAD:
     case GLOBAL_LOAD:
     case GLOBAL_LOAD_SADDR:
-      NewMI = mergeGlobalLoadPair(CI, Paired, Where->I);
+      NewMI = mergeFlatLoadPair(CI, Paired, Where->I);
       OptimizeListAgain |= CI.Width + Paired.Width < 4;
       break;
+    case FLAT_STORE:
     case GLOBAL_STORE:
     case GLOBAL_STORE_SADDR:
-      NewMI = mergeGlobalStorePair(CI, Paired, Where->I);
+      NewMI = mergeFlatStorePair(CI, Paired, Where->I);
       OptimizeListAgain |= CI.Width + Paired.Width < 4;
       break;
     }

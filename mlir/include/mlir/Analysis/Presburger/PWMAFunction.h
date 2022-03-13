@@ -16,8 +16,8 @@
 #ifndef MLIR_ANALYSIS_PRESBURGER_PWMAFUNCTION_H
 #define MLIR_ANALYSIS_PRESBURGER_PWMAFUNCTION_H
 
-#include "mlir/Analysis/Presburger/IntegerPolyhedron.h"
-#include "mlir/Analysis/Presburger/PresburgerSet.h"
+#include "mlir/Analysis/Presburger/IntegerRelation.h"
+#include "mlir/Analysis/Presburger/PresburgerRelation.h"
 
 namespace mlir {
 namespace presburger {
@@ -62,8 +62,8 @@ public:
 
   ~MultiAffineFunction() override = default;
   Kind getKind() const override { return Kind::MultiAffineFunction; }
-  bool classof(const IntegerPolyhedron *poly) const {
-    return poly->getKind() == Kind::MultiAffineFunction;
+  bool classof(const IntegerRelation *rel) const {
+    return rel->getKind() == Kind::MultiAffineFunction;
   }
 
   unsigned getNumInputs() const { return getNumDimAndSymbolIds(); }
@@ -84,7 +84,8 @@ public:
   void swapId(unsigned posA, unsigned posB) override;
 
   /// Remove the specified range of ids.
-  void removeIdRange(unsigned idStart, unsigned idLimit) override;
+  void removeIdRange(IdKind kind, unsigned idStart, unsigned idLimit) override;
+  using IntegerRelation::removeIdRange;
 
   /// Eliminate the `posB^th` local identifier, replacing every instance of it
   /// with the `posA^th` local identifier. This should be used when the two
@@ -150,7 +151,8 @@ private:
 class PWMAFunction : public PresburgerSpace {
 public:
   PWMAFunction(unsigned numDims, unsigned numSymbols, unsigned numOutputs)
-      : PresburgerSpace(numDims, numSymbols), numOutputs(numOutputs) {
+      : PresburgerSpace(/*numDomain=*/0, /*numRange=*/numDims, numSymbols),
+        numOutputs(numOutputs) {
     assert(numOutputs >= 1 && "The function must output something!");
   }
 

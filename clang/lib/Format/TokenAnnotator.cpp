@@ -686,12 +686,12 @@ private:
           // array of pointers, but if '[' starts a selector then '*' is a
           // binary operator.
           if (Parent && Parent->is(TT_PointerOrReference))
-            Parent->setType(TT_BinaryOperator);
+            Parent->overwriteFixedType(TT_BinaryOperator);
         }
         // An arrow after an ObjC method expression is not a lambda arrow.
         if (CurrentToken->getType() == TT_ObjCMethodExpr &&
             CurrentToken->Next && CurrentToken->Next->is(TT_LambdaArrow))
-          CurrentToken->Next->setType(TT_Unknown);
+          CurrentToken->Next->overwriteFixedType(TT_Unknown);
         Left->MatchingParen = CurrentToken;
         CurrentToken->MatchingParen = Left;
         // FirstObjCSelectorName is set when a colon is found. This does
@@ -814,7 +814,7 @@ private:
         }
         if (CurrentToken->is(tok::comma)) {
           if (Style.isJavaScript())
-            Left->setType(TT_DictLiteral);
+            Left->overwriteFixedType(TT_DictLiteral);
           ++CommaCount;
         }
         if (!consumeToken())
@@ -1419,7 +1419,8 @@ private:
 
     // Reset token type in case we have already looked at it and then
     // recovered from an error (e.g. failure to find the matching >).
-    if (!CurrentToken->isOneOf(
+    if (!CurrentToken->isTypeFinalized() &&
+        !CurrentToken->isOneOf(
             TT_LambdaLSquare, TT_LambdaLBrace, TT_AttributeMacro, TT_IfMacro,
             TT_ForEachMacro, TT_TypenameMacro, TT_FunctionLBrace,
             TT_ImplicitStringLiteral, TT_InlineASMBrace, TT_FatArrow,
@@ -1430,8 +1431,7 @@ private:
             TT_RecordLBrace, TT_StructLBrace, TT_UnionLBrace, TT_RequiresClause,
             TT_RequiresClauseInARequiresExpression, TT_RequiresExpression,
             TT_RequiresExpressionLParen, TT_RequiresExpressionLBrace,
-            TT_BinaryOperator, TT_CompoundRequirementLBrace,
-            TT_BracedListLBrace))
+            TT_CompoundRequirementLBrace, TT_BracedListLBrace))
       CurrentToken->setType(TT_Unknown);
     CurrentToken->Role.reset();
     CurrentToken->MatchingParen = nullptr;
@@ -1506,15 +1506,46 @@ private:
   };
 
   void modifyContext(const FormatToken &Current) {
-    if (Current.getPrecedence() == prec::Assignment &&
-        !Line.First->isOneOf(tok::kw_template, tok::kw_using, tok::kw_return) &&
-        // Type aliases use `type X = ...;` in TypeScript and can be exported
-        // using `export type ...`.
-        !(Style.isJavaScript() &&
+    auto AssignmentStartsExpression = [&]() {
+      if (Current.getPrecedence() != prec::Assignment)
+        return false;
+
+      if (Line.First->isOneOf(tok::kw_using, tok::kw_return))
+        return false;
+      if (Line.First->is(tok::kw_template)) {
+        // `template` keyword can start a variable template.
+        const FormatToken *Tok = Line.First->getNextNonComment();
+        assert(Tok); // Current token is on the same line.
+        if (Tok->isNot(TT_TemplateOpener)) {
+          // Explicit template instantiations do not have `<>`.
+          return false;
+        }
+
+        Tok = Tok->MatchingParen;
+        if (!Tok)
+          return false;
+        Tok = Tok->getNextNonComment();
+        if (!Tok)
+          return false;
+
+        if (Tok->isOneOf(tok::kw_class, tok::kw_enum, tok::kw_concept,
+                         tok::kw_struct, tok::kw_using))
+          return false;
+
+        return true;
+      }
+
+      // Type aliases use `type X = ...;` in TypeScript and can be exported
+      // using `export type ...`.
+      if (Style.isJavaScript() &&
           (Line.startsWith(Keywords.kw_type, tok::identifier) ||
-           Line.startsWith(tok::kw_export, Keywords.kw_type,
-                           tok::identifier))) &&
-        (!Current.Previous || Current.Previous->isNot(tok::kw_operator))) {
+           Line.startsWith(tok::kw_export, Keywords.kw_type, tok::identifier)))
+        return false;
+
+      return !Current.Previous || Current.Previous->isNot(tok::kw_operator);
+    };
+
+    if (AssignmentStartsExpression()) {
       Contexts.back().IsExpression = true;
       if (!Line.startsWith(TT_UnaryOperator)) {
         for (FormatToken *Previous = Current.Previous;
@@ -1650,9 +1681,9 @@ private:
                 : Current.Previous->is(tok::identifier);
         if (IsIdentifier ||
             Current.Previous->isOneOf(
-                tok::kw_namespace, tok::r_paren, tok::r_square, tok::r_brace,
-                tok::kw_false, tok::kw_true, Keywords.kw_type, Keywords.kw_get,
-                Keywords.kw_set) ||
+                tok::kw_default, tok::kw_namespace, tok::r_paren, tok::r_square,
+                tok::r_brace, tok::kw_false, tok::kw_true, Keywords.kw_type,
+                Keywords.kw_get, Keywords.kw_init, Keywords.kw_set) ||
             Current.Previous->Tok.isLiteral()) {
           Current.setType(TT_NonNullAssertion);
           return;
@@ -2089,6 +2120,10 @@ private:
       return TT_UnaryOperator;
 
     const FormatToken *NextToken = Tok.getNextNonComment();
+
+    if (InTemplateArgument && NextToken && NextToken->is(tok::kw_noexcept))
+      return TT_BinaryOperator;
+
     if (!NextToken ||
         NextToken->isOneOf(tok::arrow, tok::equal, tok::kw_noexcept) ||
         NextToken->canBePointerOrReferenceQualifier() ||
@@ -4410,6 +4445,14 @@ bool TokenAnnotator::canBreakBefore(const AnnotatedLine &Line,
     return false;
   if (Left.is(TT_TemplateCloser) && Right.is(TT_TemplateOpener))
     return true;
+  if ((Left.is(tok::greater) && Right.is(tok::greater)) ||
+      (Left.is(tok::less) && Right.is(tok::less)))
+    return false;
+  if (Right.is(TT_BinaryOperator) &&
+      Style.BreakBeforeBinaryOperators != FormatStyle::BOS_None &&
+      (Style.BreakBeforeBinaryOperators == FormatStyle::BOS_All ||
+       Right.getPrecedence() != prec::Assignment))
+    return true;
   if (Left.isOneOf(TT_TemplateCloser, TT_UnaryOperator) ||
       Left.is(tok::kw_operator))
     return false;
@@ -4482,14 +4525,6 @@ bool TokenAnnotator::canBreakBefore(const AnnotatedLine &Line,
     return false;
   if (Right.is(TT_InheritanceComma) &&
       Style.BreakInheritanceList == FormatStyle::BILS_BeforeComma)
-    return true;
-  if ((Left.is(tok::greater) && Right.is(tok::greater)) ||
-      (Left.is(tok::less) && Right.is(tok::less)))
-    return false;
-  if (Right.is(TT_BinaryOperator) &&
-      Style.BreakBeforeBinaryOperators != FormatStyle::BOS_None &&
-      (Style.BreakBeforeBinaryOperators == FormatStyle::BOS_All ||
-       Right.getPrecedence() != prec::Assignment))
     return true;
   if (Left.is(TT_ArrayInitializerLSquare))
     return true;

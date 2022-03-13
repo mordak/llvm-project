@@ -110,6 +110,7 @@ C2x Feature Support
 -------------------
 
 - Implemented `WG14 N2674 The noreturn attribute <http://www.open-std.org/jtc1/sc22/wg14/www/docs/n2764.pdf>`_.
+- Implemented `WG14 N2935 Make false and true first-class language features <http://www.open-std.org/jtc1/sc22/wg14/www/docs/n2935.pdf>`_.
 
 C++ Language Changes in Clang
 -----------------------------
@@ -118,11 +119,14 @@ C++ Language Changes in Clang
 
 C++20 Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
+- Diagnose consteval and constexpr issues that happen at namespace scope. This
+  partially addresses `Issue 51593 <https://github.com/llvm/llvm-project/issues/51593>`_.
 
 C++2b Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
 
 - Implemented `P2128R6: Multidimensional subscript operator <https://wg21.link/P2128R6>`_.
+- Implemented `P0849R8: auto(x): decay-copy in the language <https://wg21.link/P0849R8>`_.
 
 CUDA Language Changes in Clang
 ------------------------------

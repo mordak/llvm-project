@@ -265,8 +265,8 @@ class LinalgStructuredOpConfig(YAMLObject):
     for index in collected_indices:
       if index.dim_def.dimname not in self.affine_state.all_dims:
         raise ValueError(
-            f"The dimension {index.dim.dimname} is not part of the iteration "
-            f"domain {self.affine_state.all_dims}")
+            f"The dimension {index.dim_def.dimname} is not part of the "
+            f"iteration domain {self.affine_state.all_dims}")
       index.resolve_dimension_name(self.affine_state)
 
     # Generate the scalar assignments (used to build a body).
@@ -309,8 +309,8 @@ class LinalgStructuredOpConfig(YAMLObject):
   def add_operand(self, operand_def: OperandDef):
     if operand_def in self.operands:
       return
-    if (operand_def.kind == OperandKind.SCALAR or
-        operand_def.kind == OperandKind.TYPE_FN_ATTR):
+    if not (operand_def.is_tensor() or
+            operand_def.kind == OperandKind.INDEX_ATTR):
       self.operands[operand_def] = OperandDefConfig(operand_def)
       return
     with self.context:

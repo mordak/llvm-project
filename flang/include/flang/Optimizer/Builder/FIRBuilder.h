@@ -371,6 +371,12 @@ public:
   /// Generate code testing \p addr is a null address.
   mlir::Value genIsNull(mlir::Location loc, mlir::Value addr);
 
+  /// Compute the extent of (lb:ub:step) as max((ub-lb+step)/step, 0). See
+  /// Fortran 2018 9.5.3.3.2 section for more details.
+  mlir::Value genExtentFromTriplet(mlir::Location loc, mlir::Value lb,
+                                   mlir::Value ub, mlir::Value step,
+                                   mlir::Type type);
+
 private:
   const KindMapping &kindMap;
 };
@@ -419,6 +425,18 @@ llvm::SmallVector<mlir::Value> getExtents(fir::FirOpBuilder &builder,
 /// This must not be used on unlimited polymorphic and assumed rank entities.
 fir::ExtendedValue readBoxValue(fir::FirOpBuilder &builder, mlir::Location loc,
                                 const fir::BoxValue &box);
+
+/// Get non default (not all ones) lower bounds of \p exv. Returns empty
+/// vector if the lower bounds are all ones.
+llvm::SmallVector<mlir::Value>
+getNonDefaultLowerBounds(fir::FirOpBuilder &builder, mlir::Location loc,
+                         const fir::ExtendedValue &exv);
+
+/// Return length parameters associated to \p exv that are not deferred (that
+/// are available without having to read any fir.box values).
+/// Empty if \p exv has no length parameters or if they are all deferred.
+llvm::SmallVector<mlir::Value>
+getNonDeferredLengthParams(const fir::ExtendedValue &exv);
 
 //===----------------------------------------------------------------------===//
 // String literal helper helpers
@@ -487,6 +505,32 @@ fir::ExtendedValue arrayElementToExtendedValue(fir::FirOpBuilder &builder,
 fir::ExtendedValue arraySectionElementToExtendedValue(
     fir::FirOpBuilder &builder, mlir::Location loc,
     const fir::ExtendedValue &array, mlir::Value element, mlir::Value slice);
+
+/// Assign \p rhs to \p lhs. Both \p rhs and \p lhs must be scalars. The
+/// assignment follows Fortran intrinsic assignment semantic (10.2.1.3).
+void genScalarAssignment(fir::FirOpBuilder &builder, mlir::Location loc,
+                         const fir::ExtendedValue &lhs,
+                         const fir::ExtendedValue &rhs);
+/// Assign \p rhs to \p lhs. Both \p rhs and \p lhs must be scalar derived
+/// types. The assignment follows Fortran intrinsic assignment semantic for
+/// derived types (10.2.1.3 point 13).
+void genRecordAssignment(fir::FirOpBuilder &builder, mlir::Location loc,
+                         const fir::ExtendedValue &lhs,
+                         const fir::ExtendedValue &rhs);
+
+/// Generate the, possibly dynamic, LEN of a CHARACTER. \p arrLoad determines
+/// the base array. After applying \p path, the result must be a reference to a
+/// `!fir.char` type object. \p substring must have 0, 1, or 2 members. The
+/// first member is the starting offset. The second is the ending offset.
+mlir::Value genLenOfCharacter(fir::FirOpBuilder &builder, mlir::Location loc,
+                              fir::ArrayLoadOp arrLoad,
+                              llvm::ArrayRef<mlir::Value> path,
+                              llvm::ArrayRef<mlir::Value> substring);
+mlir::Value genLenOfCharacter(fir::FirOpBuilder &builder, mlir::Location loc,
+                              fir::SequenceType seqTy, mlir::Value memref,
+                              llvm::ArrayRef<mlir::Value> typeParams,
+                              llvm::ArrayRef<mlir::Value> path,
+                              llvm::ArrayRef<mlir::Value> substring);
 
 } // namespace fir::factory
 

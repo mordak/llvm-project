@@ -16,12 +16,11 @@
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
-#  pragma clang include_instead(<algorithm>)
 #endif
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
-#ifndef _LIBCPP_HAS_NO_CONCEPTS
+#if _LIBCPP_STD_VER > 17
 
 namespace ranges {
 template <class _I1, class _O1, class _O2>
@@ -46,7 +45,7 @@ struct in_out_out_result {
 };
 } // namespace ranges
 
-#endif // _LIBCPP_HAS_NO_CONCEPTS
+#endif // _LIBCPP_STD_VER > 17
 
 _LIBCPP_END_NAMESPACE_STD
 

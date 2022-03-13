@@ -356,3 +356,12 @@ Tool *OpenBSD::buildAssembler() const {
 Tool *OpenBSD::buildLinker() const { return new tools::openbsd::Linker(*this); }
 
 bool OpenBSD::HasNativeLLVMSupport() const { return true; }
+
+bool OpenBSD::IsUnwindTablesDefault(const ArgList &Args) const {
+    switch (getArch()) {
+      case llvm::Triple::arm:
+        return false;
+      default:
+        return true;
+    }
+}

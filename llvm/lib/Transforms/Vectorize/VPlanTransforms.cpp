@@ -13,6 +13,7 @@
 
 #include "VPlanTransforms.h"
 #include "llvm/ADT/PostOrderIterator.h"
+#include "llvm/ADT/SetVector.h"
 
 using namespace llvm;
 
@@ -47,8 +48,8 @@ void VPlanTransforms::VPInstructionsToVPRecipes(
         auto *Phi = cast<PHINode>(VPPhi->getUnderlyingValue());
         if (const auto *II = GetIntOrFpInductionDescriptor(Phi)) {
           VPValue *Start = Plan->getOrAddVPValue(II->getStartValue());
-          NewRecipe =
-              new VPWidenIntOrFpInductionRecipe(Phi, Start, *II, false, true);
+          NewRecipe = new VPWidenIntOrFpInductionRecipe(Phi, Start, *II, false,
+                                                        true, SE);
         } else {
           Plan->addVPValue(Phi, VPPhi);
           continue;
@@ -359,6 +360,27 @@ void VPlanTransforms::removeRedundantCanonicalIVs(VPlan &Plan) {
   }
 }
 
+// Check for live-out users currently not modeled in VPlan.
+// Note that exit values of inductions are generated independent of
+// the recipe. This means  VPWidenIntOrFpInductionRecipe &
+// VPScalarIVStepsRecipe can be removed, independent of uses outside
+// the loop.
+// TODO: Remove once live-outs are modeled in VPlan.
+static bool hasOutsideUser(Instruction &I, Loop &OrigLoop) {
+  return any_of(I.users(), [&OrigLoop](User *U) {
+    if (!OrigLoop.contains(cast<Instruction>(U)))
+      return true;
+
+    // Look through single-value phis in the loop, as they won't be modeled in
+    // VPlan and may be used outside the loop.
+    if (auto *PN = dyn_cast<PHINode>(U))
+      if (PN->getNumIncomingValues() == 1)
+        return hasOutsideUser(*PN, OrigLoop);
+
+    return false;
+  });
+}
+
 void VPlanTransforms::removeDeadRecipes(VPlan &Plan, Loop &OrigLoop) {
   VPBasicBlock *Header = Plan.getVectorLoopRegion()->getEntryBasicBlock();
   // Remove dead recipes in header block. The recipes in the block are processed
@@ -368,13 +390,67 @@ void VPlanTransforms::removeDeadRecipes(VPlan &Plan, Loop &OrigLoop) {
     if (R.mayHaveSideEffects() ||
         any_of(R.definedValues(),
                [](VPValue *V) { return V->getNumUsers() > 0; }) ||
-        (R.getUnderlyingInstr() &&
-         any_of(R.getUnderlyingInstr()->users(), [&OrigLoop](User *U) {
-           // Check for live-out users currently not modeled in VPlan.
-           // TODO: Remove once live-outs are modeled in VPlan.
-           return !OrigLoop.contains(cast<Instruction>(U));
-         })))
+        (!isa<VPWidenIntOrFpInductionRecipe>(&R) &&
+         !isa<VPScalarIVStepsRecipe>(&R) && R.getUnderlyingInstr() &&
+         hasOutsideUser(*R.getUnderlyingInstr(), OrigLoop)))
       continue;
     R.eraseFromParent();
+  }
+}
+
+void VPlanTransforms::optimizeInductions(VPlan &Plan, ScalarEvolution &SE) {
+  SmallVector<VPRecipeBase *> ToRemove;
+  VPBasicBlock *HeaderVPBB = Plan.getVectorLoopRegion()->getEntryBasicBlock();
+  for (VPRecipeBase &Phi : HeaderVPBB->phis()) {
+    auto *IV = dyn_cast<VPWidenIntOrFpInductionRecipe>(&Phi);
+    if (!IV || !IV->needsScalarIV())
+      continue;
+
+    const InductionDescriptor &ID = IV->getInductionDescriptor();
+    const SCEV *StepSCEV = ID.getStep();
+    VPValue *Step = nullptr;
+    if (auto *E = dyn_cast<SCEVConstant>(StepSCEV)) {
+      Step = new VPValue(E->getValue());
+      Plan.addExternalDef(Step);
+    } else if (auto *E = dyn_cast<SCEVUnknown>(StepSCEV)) {
+      Step = new VPValue(E->getValue());
+      Plan.addExternalDef(Step);
+    } else {
+      Step = new VPExpandSCEVRecipe(StepSCEV, SE);
+    }
+
+    Instruction *TruncI = IV->getTruncInst();
+    VPScalarIVStepsRecipe *Steps = new VPScalarIVStepsRecipe(
+        IV->getPHINode()->getType(), ID, Plan.getCanonicalIV(),
+        IV->getStartValue(), Step, TruncI ? TruncI->getType() : nullptr);
+
+    HeaderVPBB->insert(Steps, HeaderVPBB->getFirstNonPhi());
+    if (Step->getDef()) {
+      // TODO: Place the step in the preheader, once it is explicitly modeled in
+      // VPlan.
+      HeaderVPBB->insert(cast<VPRecipeBase>(Step->getDef()),
+                         HeaderVPBB->getFirstNonPhi());
+    }
+
+    // If there are no vector users of IV, simply update all users to use Step
+    // instead.
+    if (!IV->needsVectorIV()) {
+      IV->replaceAllUsesWith(Steps);
+      continue;
+    }
+
+    // Otherwise only update scalar users of IV to use Step instead. Use
+    // SetVector to ensure the list of users doesn't contain duplicates.
+    SetVector<VPUser *> Users(IV->user_begin(), IV->user_end());
+    for (VPUser *U : Users) {
+      VPRecipeBase *R = cast<VPRecipeBase>(U);
+      if (!R->usesScalars(IV))
+        continue;
+      for (unsigned I = 0, E = R->getNumOperands(); I != E; I++) {
+        if (R->getOperand(I) != IV)
+          continue;
+        R->setOperand(I, Steps);
+      }
+    }
   }
 }

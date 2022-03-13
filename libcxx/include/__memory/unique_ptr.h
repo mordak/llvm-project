@@ -26,7 +26,6 @@
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
-#  pragma clang include_instead(<memory>)
 #endif
 
 _LIBCPP_BEGIN_NAMESPACE_STD
@@ -47,10 +46,8 @@ struct _LIBCPP_TEMPLATE_VIS default_delete {
                      0) _NOEXCEPT {}
 
   _LIBCPP_INLINE_VISIBILITY void operator()(_Tp* __ptr) const _NOEXCEPT {
-    static_assert(sizeof(_Tp) > 0,
-                  "default_delete can not delete incomplete type");
-    static_assert(!is_void<_Tp>::value,
-                  "default_delete can not delete incomplete type");
+    static_assert(sizeof(_Tp) >= 0, "cannot delete an incomplete type");
+    static_assert(!is_void<_Tp>::value, "cannot delete an incomplete type");
     delete __ptr;
   }
 };
@@ -78,10 +75,7 @@ public:
   _LIBCPP_INLINE_VISIBILITY
   typename _EnableIfConvertible<_Up>::type
   operator()(_Up* __ptr) const _NOEXCEPT {
-    static_assert(sizeof(_Tp) > 0,
-                  "default_delete can not delete incomplete type");
-    static_assert(!is_void<_Tp>::value,
-                  "default_delete can not delete void type");
+    static_assert(sizeof(_Up) >= 0, "cannot delete an incomplete type");
     delete[] __ptr;
   }
 };

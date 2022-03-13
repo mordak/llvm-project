@@ -13,6 +13,7 @@
 #include <__algorithm/min.h>
 #include <__config>
 #include <__utility/forward.h>
+#include <__utility/swap.h>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -20,8 +21,6 @@
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
-#  pragma clang include_instead(<map>)
-#  pragma clang include_instead(<set>)
 #endif
 
 _LIBCPP_PUSH_MACROS

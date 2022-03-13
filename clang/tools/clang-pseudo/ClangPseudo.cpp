@@ -7,10 +7,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Basic/LangOptions.h"
+#include "clang/Tooling/Syntax/Pseudo/DirectiveMap.h"
 #include "clang/Tooling/Syntax/Pseudo/Grammar.h"
 #include "clang/Tooling/Syntax/Pseudo/LRGraph.h"
 #include "clang/Tooling/Syntax/Pseudo/LRTable.h"
-#include "clang/Tooling/Syntax/Pseudo/Preprocess.h"
 #include "clang/Tooling/Syntax/Pseudo/Token.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/CommandLine.h"
@@ -24,6 +24,7 @@ using llvm::cl::opt;
 
 static opt<std::string>
     Grammar("grammar", desc("Parse and check a BNF grammar file."), init(""));
+static opt<bool> PrintGrammar("print-grammar", desc("Print the grammar."));
 static opt<bool> PrintGraph("print-graph",
                             desc("Print the LR graph for the grammar"));
 static opt<bool> PrintTable("print-table",
@@ -32,8 +33,8 @@ static opt<std::string> Source("source", desc("Source file"));
 static opt<bool> PrintSource("print-source", desc("Print token stream"));
 static opt<bool> PrintTokens("print-tokens", desc("Print detailed token info"));
 static opt<bool>
-    PrintPPStructure("print-pp-structure",
-                     desc("Print directive structure of source code"));
+    PrintDirectiveMap("print-directive-map",
+                      desc("Print directive structure of source code"));
 
 static std::string readOrDie(llvm::StringRef Path) {
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> Text =
@@ -60,6 +61,8 @@ int main(int argc, char *argv[]) {
     }
     llvm::outs() << llvm::formatv("grammar file {0} is parsed successfully\n",
                                   Grammar);
+    if (PrintGrammar)
+      llvm::outs() << G->dump();
     if (PrintGraph)
       llvm::outs() << clang::syntax::pseudo::LRGraph::buildLR0(*G).dumpForTests(
           *G);
@@ -73,9 +76,9 @@ int main(int argc, char *argv[]) {
     std::string Text = readOrDie(Source);
     clang::LangOptions LangOpts; // FIXME: use real options.
     auto Stream = clang::syntax::pseudo::lex(Text, LangOpts);
-    auto Structure = clang::syntax::pseudo::PPStructure::parse(Stream);
+    auto Structure = clang::syntax::pseudo::DirectiveMap::parse(Stream);
 
-    if (PrintPPStructure)
+    if (PrintDirectiveMap)
       llvm::outs() << Structure;
     if (PrintSource)
       Stream.print(llvm::outs());

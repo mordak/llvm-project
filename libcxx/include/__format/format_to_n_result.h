@@ -15,18 +15,11 @@
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
-#  pragma clang include_instead(<format>)
 #endif
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 #if _LIBCPP_STD_VER > 17
-
-// TODO FMT Remove this once we require compilers with proper C++20 support.
-// If the compiler has no concepts support, the format header will be disabled.
-// Without concepts support enable_if needs to be used and that too much effort
-// to support compilers with partial C++20 support.
-#if !defined(_LIBCPP_HAS_NO_CONCEPTS)
 
 template <class _OutIt>
 struct _LIBCPP_TEMPLATE_VIS format_to_n_result {
@@ -34,7 +27,6 @@ struct _LIBCPP_TEMPLATE_VIS format_to_n_result {
   iter_difference_t<_OutIt> size;
 };
 
-#endif // !defined(_LIBCPP_HAS_NO_CONCEPTS)
 #endif //_LIBCPP_STD_VER > 17
 
 _LIBCPP_END_NAMESPACE_STD

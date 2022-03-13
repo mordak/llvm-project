@@ -18,7 +18,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
-#include "mlir/Support/MlirOptMain.h"
+#include "mlir/Tools/mlir-opt/MlirOptMain.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
@@ -45,10 +45,10 @@ void registerTestLoopPermutationPass();
 void registerTestMatchers();
 void registerTestOperationEqualPass();
 void registerTestPrintDefUsePass();
+void registerTestPrintInvalidPass();
 void registerTestPrintNestingPass();
 void registerTestReducer();
 void registerTestSpirvEntryPointABIPass();
-void registerTestSpirvGLSLCanonicalizationPass();
 void registerTestSpirvModuleCombinerPass();
 void registerTestTraitsPass();
 void registerTosaTestQuantUtilAPIPass();
@@ -81,7 +81,6 @@ void registerTestGenericIRVisitorsPass();
 void registerTestGenericIRVisitorsInterruptPass();
 void registerTestInterfaces();
 void registerTestLinalgCodegenStrategy();
-void registerTestLinalgDistribution();
 void registerTestLinalgElementwiseFusion();
 void registerTestLinalgFusionTransforms();
 void registerTestLinalgTensorFusionTransforms();
@@ -133,10 +132,10 @@ void registerTestPasses() {
   registerTestMatchers();
   registerTestOperationEqualPass();
   registerTestPrintDefUsePass();
+  registerTestPrintInvalidPass();
   registerTestPrintNestingPass();
   registerTestReducer();
   registerTestSpirvEntryPointABIPass();
-  registerTestSpirvGLSLCanonicalizationPass();
   registerTestSpirvModuleCombinerPass();
   registerTestTraitsPass();
   registerVectorizerTestPass();
@@ -171,7 +170,6 @@ void registerTestPasses() {
   mlir::test::registerTestGenericIRVisitorsPass();
   mlir::test::registerTestInterfaces();
   mlir::test::registerTestLinalgCodegenStrategy();
-  mlir::test::registerTestLinalgDistribution();
   mlir::test::registerTestLinalgElementwiseFusion();
   mlir::test::registerTestLinalgFusionTransforms();
   mlir::test::registerTestLinalgTensorFusionTransforms();

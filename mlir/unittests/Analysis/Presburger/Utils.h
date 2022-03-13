@@ -14,8 +14,8 @@
 #define MLIR_UNITTESTS_ANALYSIS_PRESBURGER_UTILS_H
 
 #include "../../Dialect/Affine/Analysis/AffineStructuresParser.h"
-#include "mlir/Analysis/Presburger/IntegerPolyhedron.h"
-#include "mlir/Analysis/Presburger/PresburgerSet.h"
+#include "mlir/Analysis/Presburger/IntegerRelation.h"
+#include "mlir/Analysis/Presburger/PresburgerRelation.h"
 #include "mlir/IR/MLIRContext.h"
 
 #include <gtest/gtest.h>

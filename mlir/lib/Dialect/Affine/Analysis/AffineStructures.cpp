@@ -17,7 +17,6 @@
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/IR/AffineValueMap.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/AffineExprVisitor.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/Support/LLVM.h"
@@ -721,10 +720,12 @@ bool FlatAffineValueConstraints::hasConsistentState() const {
          values.size() == getNumIds();
 }
 
-void FlatAffineValueConstraints::removeIdRange(unsigned idStart,
+void FlatAffineValueConstraints::removeIdRange(IdKind kind, unsigned idStart,
                                                unsigned idLimit) {
-  FlatAffineConstraints::removeIdRange(idStart, idLimit);
-  values.erase(values.begin() + idStart, values.begin() + idLimit);
+  FlatAffineConstraints::removeIdRange(kind, idStart, idLimit);
+  unsigned offset = getIdKindOffset(kind);
+  values.erase(values.begin() + idStart + offset,
+               values.begin() + idLimit + offset);
 }
 
 // Determine whether the identifier at 'pos' (say id_r) can be expressed as
@@ -1366,7 +1367,7 @@ void FlatAffineConstraints::printSpace(raw_ostream &os) const {
   os << " const)\n";
 }
 
-void FlatAffineConstraints::clearAndCopyFrom(const IntegerPolyhedron &other) {
+void FlatAffineConstraints::clearAndCopyFrom(const IntegerRelation &other) {
   if (auto *otherValueSet = dyn_cast<const FlatAffineValueConstraints>(&other))
     assert(!otherValueSet->hasValues() &&
            "cannot copy associated Values into FlatAffineConstraints");
@@ -1376,11 +1377,11 @@ void FlatAffineConstraints::clearAndCopyFrom(const IntegerPolyhedron &other) {
   if (auto *otherValueSet = dyn_cast<const FlatAffineConstraints>(&other))
     *this = *otherValueSet;
   else
-    *static_cast<IntegerPolyhedron *>(this) = other;
+    *static_cast<IntegerRelation *>(this) = other;
 }
 
 void FlatAffineValueConstraints::clearAndCopyFrom(
-    const IntegerPolyhedron &other) {
+    const IntegerRelation &other) {
 
   if (auto *otherValueSet =
           dyn_cast<const FlatAffineValueConstraints>(&other)) {
@@ -1391,7 +1392,7 @@ void FlatAffineValueConstraints::clearAndCopyFrom(
   if (auto *otherValueSet = dyn_cast<const FlatAffineValueConstraints>(&other))
     *static_cast<FlatAffineConstraints *>(this) = *otherValueSet;
   else
-    *static_cast<IntegerPolyhedron *>(this) = other;
+    *static_cast<IntegerRelation *>(this) = other;
 
   values.clear();
   values.resize(getNumIds(), None);
@@ -1724,8 +1725,16 @@ void FlatAffineRelation::appendRangeId(unsigned num) {
   numRangeDims += num;
 }
 
-void FlatAffineRelation::removeIdRange(unsigned idStart, unsigned idLimit) {
+void FlatAffineRelation::removeIdRange(IdKind kind, unsigned idStart,
+                                       unsigned idLimit) {
+  assert(idLimit <= getNumIdKind(kind));
   if (idStart >= idLimit)
+    return;
+
+  FlatAffineValueConstraints::removeIdRange(kind, idStart, idLimit);
+
+  // If kind is not SetDim, domain and range don't need to be updated.
+  if (kind != IdKind::SetDim)
     return;
 
   // Compute number of domain and range identifiers to remove. This is done by
@@ -1734,8 +1743,6 @@ void FlatAffineRelation::removeIdRange(unsigned idStart, unsigned idLimit) {
   unsigned intersectDomainRHS = idStart;
   unsigned intersectRangeLHS = std::min(idLimit, getNumDimIds());
   unsigned intersectRangeRHS = std::max(idStart, getNumDomainDims());
-
-  FlatAffineValueConstraints::removeIdRange(idStart, idLimit);
 
   if (intersectDomainLHS > intersectDomainRHS)
     numDomainDims -= intersectDomainLHS - intersectDomainRHS;

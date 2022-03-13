@@ -8,9 +8,12 @@ add_flang_library(FortranLower
   ConvertExpr.cpp
   ConvertType.cpp
   ConvertVariable.cpp
-  IntrinsicCall.cpp
   ComponentPath.cpp
+  CustomIntrinsicCall.cpp
   DumpEvaluateExpr.cpp
+  HostAssociations.cpp
+  IntrinsicCall.cpp
+  IO.cpp
   IterationSpace.cpp
   Mangler.cpp
   OpenACC.cpp
@@ -37,9 +40,9 @@ add_flang_library(FortranLower
   FortranEvaluate
   FortranSemantics
   MLIRAffineToStandard
+  MLIRFunc
   MLIRLLVMIR
   MLIRSCFToControlFlow
-  MLIRStandard
 
   LINK_COMPONENTS
   Support
