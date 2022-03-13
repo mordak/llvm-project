@@ -956,7 +956,6 @@ DEFINE_LIBUNWIND_FUNCTION(__unw_getcontext)
   l.sw     132(r3), r0
 
 #elif defined(__hexagon__)
-
 #
 # extern int unw_getcontext(unw_context_t* thread_state)
 #
