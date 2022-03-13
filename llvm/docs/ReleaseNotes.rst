@@ -105,7 +105,59 @@ Changes to the Hexagon Target
 Changes to the PowerPC Target
 -----------------------------
 
-During this release ...
+Linux improvements:
+
+* Provided a number of builtins for compatibility with the XL compiler.
+* Allow MMA builtin types in pre-P10 compilation units.
+* Add support for Return Oriented Programming (ROP) protection for 32 bit.
+* Refactored code to use more inclusive language.
+* Switched to LLD as the default linker for pre-built Linux binaries.
+* Enabled IEEE quad long double on Linux via ``PPC_LINUX_DEFAULT_IEEELONGDOUBLE``
+  in cmake config.
+
+  * Added ``__ibm128`` type to represent IBM double-double format, also available
+    as ``__attribute__((mode(IF)))``.
+  * ``-mfloat128`` can now be used in Linux subtargets with VSX enabled.
+
+* Added quadword atomic load/store support in codegen; not enabled by default.
+* Codegen improvements for splat load, byval parameter, stack lowering, etc.
+* Implemented P10 instruction scheduling model.
+* Implemented P10 instruction fusion pairs.
+* Improved handling of ``#pragma clang loop unroll_and_jam``.
+* Various bug fixes.
+
+AIX Support/improvements:
+
+* Variadic (ellipsis) functions with C complex types are now supported.
+* Added toc-data support for AIX 64-bit.
+* Added toc-data support for read-only globals.
+* Updated default target on AIX from pwr4 to pwr7.
+* AIX 64-bit code generation now uses fast-isel for O0.
+* Added DWARF support for 32-bit XCOFF.
+
+Changes to the RISC-V Target
+----------------------------
+
+* Codegen improvements for RV64 around the selection of addw/subw/mulw/slliw
+  instructions and removal of redundant sext.w instructions (using the new
+  RISCVSExtWRemoval pass).
+* The various RISC-V vector extensions were updated to version 1.0 and are no
+  longer experimental.
+* The Zba, Zbb, Zbc, and Zbs bit-manipulation extensions were updated to
+  version 1.0 and are no longer experimental.
+* Added MC layer support for the ratified scalar cryptography extensions.
+* The Zfh and Zfhmin extensions for half-precision floating point were updated
+  to version 1.0 and are no longer experimental.
+* Added support for the ``.insn`` directive.
+* Various improvements to immediate materialisation, including when
+  bit-manipulation extensions are enabled. Additionally, the constant pool is
+  now used for large integers.
+* Added support for constrained FP intrinsics for scalar types.
+* Added support for CSRs introduced in the Sscofpmf, Smstateen, and Sstc
+  extensions.
+* The experimental 'Zbproposedc' extension was removed, as was the 'B'
+  extension (including all bit-manipulation sub-extensions). Individual 'Zb*'
+  extensions should be used instead.
 
 Changes to the X86 Target
 -------------------------
@@ -224,6 +276,13 @@ Changes to the LLVM tools
 * llvm-readobj now supports several dump styles (``--needed-libs, --relocs, --syms``) for XCOFF.
 * llvm-symbolizer now supports `--debuginfod <https://llvm.org/docs/CommandGuide/llvm-symbolizer.html>`.
   (`D113717 <https://reviews.llvm.org/D113717>`_)
+* ``llvm-cov`` now accepts "allowlist" spelling for ``-name-allowlist``.
+* ``llvm-nm`` now supports XCOFF object files.
+* Added ``--needed-libs``, aux header, and symbols support in ``llvm-readobj``.
+* Added ``--symbolize-operands`` support in ``llvm-objdump``.
+* Tools that read archive files now support reading AIX big format archive files.
+* Added dump section support in ``obj2yaml``.
+* Added ``yaml2obj`` support for 64-bit XCOFF.
 
 Changes to LLDB
 ---------------------------------

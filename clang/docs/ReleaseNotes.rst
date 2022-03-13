@@ -51,7 +51,21 @@ Major New Features
   For more details refer to :ref:`the SPIR-V support section <spir-v>`.
 - Completed support of OpenCL C 3.0 and C++ for OpenCL 2021 at experimental
   state.
--  ...
+
+- Prebuilt AIX7.2 TL5 SP3+ binary available with following notes and
+  limitations:
+
+  - C++ driver modes use the system libc++ headers. These headers are included
+    in the optional ``libc++.adt.include`` fileset on AIX.
+  - LTO, although not disabled, is not meaningfully functional for practical
+    use.
+  - Shared libraries builds (``-shared``) must use explicit symbol export
+    options and/or export lists (e.g., with ``-bE:``) on the link step. Clang
+    currently will not automatically generate symbol export lists as implicit
+    linker inputs.
+
+- ``float.h`` now exposes (in hosted mode) extensions made available from the
+  AIX system header.
 
 Improvements to Clang's diagnostics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -76,6 +90,12 @@ Non-comprehensive list of changes in this release
 - Configuration file syntax extended with ``<CFGDIR>`` token. This expands to
   the base path of the current config file. See :ref:`configuration-files` for
   details.
+- The ``-E -P`` preprocessor output now always omits blank lines, matching
+  gcc behaviour. Previously, up to 8 consecutive blank lines could appear
+  in the output.
+- AIX platform-related predefined macros added:
+  ``_ARCH_PPC64``, ``__HOS_AIX__``, ``__PPC``, ``__THW_BIG_ENDIAN__``,
+  ``__THW_PPC__``, and ``__powerpc``
 
 New Compiler Flags
 ------------------
@@ -91,6 +111,16 @@ New Compiler Flags
   outside of such a region.
 - ``-falign-loops=N`` (N is a power of 2) is now supported for non-LTO cases.
   (`D106701 <https://reviews.llvm.org/D106701>`_)
+- The ``-fminimize-whitespace`` flag allows removing redundant whitespace
+  from preprocessor output (``-E`` flag). When combined with ``-P``, this
+  includes newlines. Otherwise, only indention is removed (other horizontal
+  whitespace is always collapsed).
+  The motivation is to improve compiler cache hit rate by becoming invariant
+  to whitespace changes, such as reformatting using clang-format. Patches
+  for `ccache <https://github.com/ccache/ccache/pull/815>`_ and
+  `sccache <https://github.com/mozilla/sccache/pull/1055>`_ are under review.
+
+- Clang now accepts "allowlist" spelling for ``-objcmt-allowlist-dir-path``.
 
 Deprecated Compiler Flags
 -------------------------
@@ -157,6 +187,8 @@ Attribute Changes in Clang
   ``__has_c_attribute``) where it would previously expand to ``0`` for all
   attributes, but will now issue an error due to the expansion of the
   predefined ``__clang__`` macro.
+
+- Improved handling of ``__attribute__((__aligned__))`` on AIX to match GCC.
 
 Windows Support
 ---------------
@@ -305,12 +337,6 @@ ABI Changes in Clang
   it is now mangled using a dedicated production. Note: the ABI for ``_BitInt(N)``
   is still in the process of being stabilized, so this type should not yet be
   used in interfaces that require ABI stability.
-
-- GCC doesn't pack non-POD members in packed structs unless the packed
-  attribute is also specified on the member. Clang historically did perform
-  such packing. Clang now matches the gcc behavior (except on Darwin and PS4).
-  You can switch back to the old ABI behavior with the flag:
-  ``-fclang-abi-compat=13.0``.
 
 OpenMP Support in Clang
 -----------------------
