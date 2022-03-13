@@ -752,20 +752,6 @@ bool CFI_Parser<A>::parseFDEInstructions(A &addressSpace,
         } break;
 #endif
 
-#if defined(_LIBUNWIND_TARGET_SPARC64)
-      case REGISTERS_SPARC64:
-        // Hardcodes windowed registers for SPARC
-        for (reg = 16; reg < 32; reg++) {
-          if (reg == 31)
-            results->savedRegisters[reg].location = kRegisterInCFADecrypt;
-          else
-            results->savedRegisters[reg].location = kRegisterInCFA;
-          results->savedRegisters[reg].value = (reg - 16) * sizeof(pint_t);
-        }
-        _LIBUNWIND_TRACE_DWARF("DW_CFA_GNU_window_save");
-        break;
-#endif
-
 #if defined(_LIBUNWIND_TARGET_SPARC)
         // case DW_CFA_GNU_window_save:
         case REGISTERS_SPARC:

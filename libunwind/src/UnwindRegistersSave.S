@@ -956,7 +956,6 @@ DEFINE_LIBUNWIND_FUNCTION(__unw_getcontext)
   l.sw     132(r3), r0
 
 #elif defined(__hexagon__)
-
 #
 # extern int unw_getcontext(unw_context_t* thread_state)
 #
@@ -1015,7 +1014,6 @@ DEFINE_LIBUNWIND_FUNCTION(__unw_getcontext)
   .register %g3, #scratch
   .register %g6, #scratch
   .register %g7, #scratch
->>>>>>> origin/main
   stx  %g1, [%o0 + 0x08]
   stx  %g2, [%o0 + 0x10]
   stx  %g3, [%o0 + 0x18]
