@@ -41,15 +41,21 @@ extern char **environ;
 
 namespace __sanitizer {
 
+extern "C" void *_thread_sys_mmap(void *addr, size_t len, int prot, int flags,
+                                  int fd, off_t offset);
 uptr internal_mmap(void *addr, size_t length, int prot, int flags, int fd,
                    u64 offset) {
-  return (uptr)mmap(addr, length, prot, flags, fd, offset);
+  return (uptr)_thread_sys_mmap(addr, length, prot, flags, fd, offset);
 }
 
-uptr internal_munmap(void *addr, uptr length) { return munmap(addr, length); }
+extern "C" int _thread_sys_munmap(void *addr, size_t len);
+uptr internal_munmap(void *addr, uptr length) {
+  return _thread_sys_munmap(addr, length);
+}
 
+extern "C" int _thread_sys_mprotect(void *addr, uptr length, int prot);
 int internal_mprotect(void *addr, uptr length, int prot) {
-  return mprotect(addr, length, prot);
+  return _thread_sys_mprotect(addr, length, prot);
 }
 
 int internal_sysctlbyname(const char *sname, void *oldp, uptr *oldlenp,

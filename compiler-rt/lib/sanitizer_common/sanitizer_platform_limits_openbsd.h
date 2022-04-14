@@ -16,6 +16,7 @@
 
 #if SANITIZER_OPENBSD
 
+#include <stddef.h>
 #include "sanitizer_internal_defs.h"
 #include "sanitizer_platform.h"
 
@@ -273,11 +274,7 @@ struct __sanitizer_dl_phdr_info {
 #endif
   const char *dlpi_name;
   const void *dlpi_phdr;
-#if SANITIZER_WORDSIZE == 64
-  u32 dlpi_phnum;
-#else
   u16 dlpi_phnum;
-#endif
 };
 
 extern unsigned struct_ElfW_Phdr_sz;
@@ -310,9 +307,9 @@ struct __sanitizer_pollfd {
 typedef unsigned __sanitizer_nfds_t;
 
 struct __sanitizer_glob_t {
-  int gl_pathc;
-  int gl_matchc;
-  int gl_offs;
+  size_t gl_pathc;
+  size_t gl_matchc;
+  size_t gl_offs;
   int gl_flags;
   char **gl_pathv;
   void **gl_statv;

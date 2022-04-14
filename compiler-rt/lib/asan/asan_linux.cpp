@@ -13,7 +13,7 @@
 
 #include "sanitizer_common/sanitizer_platform.h"
 #if SANITIZER_FREEBSD || SANITIZER_LINUX || SANITIZER_NETBSD || \
-    SANITIZER_SOLARIS
+    SANITIZER_OPENBSD || SANITIZER_SOLARIS
 
 #include "asan_interceptors.h"
 #include "asan_internal.h"
@@ -52,6 +52,8 @@ extern "C" void* _DYNAMIC;
 #include <link_elf.h>
 #include <ucontext.h>
 extern Elf_Dyn _DYNAMIC;
+#elif SANITIZER_OPENBSD
+#include <link_elf.h>
 #else
 #include <sys/ucontext.h>
 #include <link.h>
@@ -156,7 +158,7 @@ static int FindFirstDSOCallback(struct dl_phdr_info *info, size_t size,
   if (internal_strncmp(info->dlpi_name, "linux-", sizeof("linux-") - 1) == 0)
     return 0;
 
-#if SANITIZER_FREEBSD || SANITIZER_NETBSD
+#if SANITIZER_FREEBSD || SANITIZER_NETBSD || SANITIZER_OPENBSD
   // Ignore first entry (the main program)
   char **p = (char **)data;
   if (!(*p)) {
@@ -231,7 +233,7 @@ void AsanCheckIncompatibleRT() {
 }
 #endif // SANITIZER_ANDROID
 
-#if !SANITIZER_ANDROID
+#if !SANITIZER_ANDROID && !SANITIZER_OPENBSD
 void ReadContextStack(void *context, uptr *stack, uptr *ssize) {
   ucontext_t *ucp = (ucontext_t*)context;
   *stack = (uptr)ucp->uc_stack.ss_sp;
@@ -256,5 +258,5 @@ bool HandleDlopenInit() {
 
 } // namespace __asan
 
-#endif  // SANITIZER_FREEBSD || SANITIZER_LINUX || SANITIZER_NETBSD ||
-        // SANITIZER_SOLARIS
+#endif  // SANITIZER_FREEBSD || SANITIZER_LINUX || SANITIZER_NETBSD || \
+	// SANITIZER_OPENBSD || SANITIZER_SOLARIS
