@@ -871,11 +871,16 @@ void CoroCloner::create() {
                                   OrigF.getParent()->end(), ActiveSuspend);
   }
 
-  // Replace all args with undefs. The buildCoroutineFrame algorithm already
-  // rewritten access to the args that occurs after suspend points with loads
-  // and stores to/from the coroutine frame.
-  for (Argument &A : OrigF.args())
-    VMap[&A] = UndefValue::get(A.getType());
+  // Replace all args with dummy instructions. If an argument is the old frame
+  // pointer, the dummy will be replaced by the new frame pointer once it is
+  // computed below. Uses of all other arguments should have already been
+  // rewritten by buildCoroutineFrame() to use loads/stores on the coroutine
+  // frame.
+  SmallVector<Instruction *> DummyArgs;
+  for (Argument &A : OrigF.args()) {
+    DummyArgs.push_back(new FreezeInst(UndefValue::get(A.getType())));
+    VMap[&A] = DummyArgs.back();
+  }
 
   SmallVector<ReturnInst *, 4> Returns;
 
@@ -934,7 +939,8 @@ void CoroCloner::create() {
   case coro::ABI::Switch:
     // Bootstrap attributes by copying function attributes from the
     // original function.  This should include optimization settings and so on.
-    NewAttrs = NewAttrs.addFnAttributes(Context, AttrBuilder(Context, OrigAttrs.getFnAttrs()));
+    NewAttrs = NewAttrs.addFnAttributes(
+        Context, AttrBuilder(Context, OrigAttrs.getFnAttrs()));
 
     addFramePointerAttrs(NewAttrs, Context, 0,
                          Shape.FrameSize, Shape.FrameAlign);
@@ -1015,7 +1021,15 @@ void CoroCloner::create() {
   auto *NewVFrame = Builder.CreateBitCast(
       NewFramePtr, Type::getInt8PtrTy(Builder.getContext()), "vFrame");
   Value *OldVFrame = cast<Value>(VMap[Shape.CoroBegin]);
-  OldVFrame->replaceAllUsesWith(NewVFrame);
+  if (OldVFrame != NewVFrame)
+    OldVFrame->replaceAllUsesWith(NewVFrame);
+
+  // All uses of the arguments should have been resolved by this point,
+  // so we can safely remove the dummy values.
+  for (Instruction *DummyArg : DummyArgs) {
+    DummyArg->replaceAllUsesWith(UndefValue::get(DummyArg->getType()));
+    DummyArg->deleteValue();
+  }
 
   switch (Shape.ABI) {
   case coro::ABI::Switch:
@@ -2208,16 +2222,13 @@ PreservedAnalyses CoroSplitPass::run(LazyCallGraph::SCC &C,
   auto &FAM =
       AM.getResult<FunctionAnalysisManagerCGSCCProxy>(C, CG).getManager();
 
-  if (!declaresCoroSplitIntrinsics(M))
-    return PreservedAnalyses::all();
-
   // Check for uses of llvm.coro.prepare.retcon/async.
   SmallVector<Function *, 2> PrepareFns;
   addPrepareFunction(M, PrepareFns, "llvm.coro.prepare.retcon");
   addPrepareFunction(M, PrepareFns, "llvm.coro.prepare.async");
 
   // Find coroutines for processing.
-  SmallVector<LazyCallGraph::Node *, 4> Coroutines;
+  SmallVector<LazyCallGraph::Node *> Coroutines;
   for (LazyCallGraph::Node &N : C)
     if (N.getFunction().hasFnAttribute(CORO_PRESPLIT_ATTR))
       Coroutines.push_back(&N);

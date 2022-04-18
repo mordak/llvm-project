@@ -499,7 +499,7 @@ const Symbol *RuntimeTableBuilder::DescribeType(Scope &dtScope) {
     for (const auto &pair : dtScope) {
       const Symbol &symbol{*pair.second};
       auto locationRestorer{common::ScopedSet(location_, symbol.name())};
-      std::visit(
+      common::visit(
           common::visitors{
               [&](const TypeParamDetails &) {
                 // already handled above in declaration order
@@ -794,11 +794,12 @@ evaluate::StructureConstructor RuntimeTableBuilder::DescribeComponent(
     std::vector<evaluate::StructureConstructor> bounds;
     evaluate::NamedEntity entity{symbol};
     for (int j{0}; j < rank; ++j) {
-      bounds.emplace_back(GetValue(std::make_optional(evaluate::GetLowerBound(
-                                       foldingContext, entity, j)),
-          parameters));
+      bounds.emplace_back(
+          GetValue(std::make_optional(
+                       evaluate::GetRawLowerBound(foldingContext, entity, j)),
+              parameters));
       bounds.emplace_back(GetValue(
-          evaluate::GetUpperBound(foldingContext, entity, j), parameters));
+          evaluate::GetRawUpperBound(foldingContext, entity, j), parameters));
     }
     AddValue(values, componentSchema_, "bounds"s,
         SaveDerivedPointerTarget(scope,
@@ -978,30 +979,30 @@ RuntimeTableBuilder::DescribeBindings(const Scope &dtScope, Scope &scope) {
 
 void RuntimeTableBuilder::DescribeGeneric(const GenericDetails &generic,
     std::map<int, evaluate::StructureConstructor> &specials) {
-  std::visit(common::visitors{
-                 [&](const GenericKind::OtherKind &k) {
-                   if (k == GenericKind::OtherKind::Assignment) {
-                     for (auto ref : generic.specificProcs()) {
-                       DescribeSpecialProc(specials, *ref, true,
-                           false /*!final*/, std::nullopt);
-                     }
-                   }
-                 },
-                 [&](const GenericKind::DefinedIo &io) {
-                   switch (io) {
-                   case GenericKind::DefinedIo::ReadFormatted:
-                   case GenericKind::DefinedIo::ReadUnformatted:
-                   case GenericKind::DefinedIo::WriteFormatted:
-                   case GenericKind::DefinedIo::WriteUnformatted:
-                     for (auto ref : generic.specificProcs()) {
-                       DescribeSpecialProc(
-                           specials, *ref, false, false /*!final*/, io);
-                     }
-                     break;
-                   }
-                 },
-                 [](const auto &) {},
-             },
+  common::visit(common::visitors{
+                    [&](const GenericKind::OtherKind &k) {
+                      if (k == GenericKind::OtherKind::Assignment) {
+                        for (auto ref : generic.specificProcs()) {
+                          DescribeSpecialProc(specials, *ref, true,
+                              false /*!final*/, std::nullopt);
+                        }
+                      }
+                    },
+                    [&](const GenericKind::DefinedIo &io) {
+                      switch (io) {
+                      case GenericKind::DefinedIo::ReadFormatted:
+                      case GenericKind::DefinedIo::ReadUnformatted:
+                      case GenericKind::DefinedIo::WriteFormatted:
+                      case GenericKind::DefinedIo::WriteUnformatted:
+                        for (auto ref : generic.specificProcs()) {
+                          DescribeSpecialProc(
+                              specials, *ref, false, false /*!final*/, io);
+                        }
+                        break;
+                      }
+                    },
+                    [](const auto &) {},
+                },
       generic.kind().u);
 }
 

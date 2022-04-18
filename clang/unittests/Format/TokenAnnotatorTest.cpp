@@ -170,6 +170,24 @@ TEST_F(TokenAnnotatorTest, UnderstandsDelete) {
   EXPECT_TOKEN(Tokens[7], tok::r_paren, TT_CastRParen);
 }
 
+TEST_F(TokenAnnotatorTest, UnderstandsFunctionRefQualifiers) {
+  auto Tokens = annotate("void f() &;");
+  EXPECT_EQ(Tokens.size(), 7u) << Tokens;
+  EXPECT_TOKEN(Tokens[4], tok::amp, TT_PointerOrReference);
+
+  Tokens = annotate("void operator=(T) &&;");
+  EXPECT_EQ(Tokens.size(), 9u) << Tokens;
+  EXPECT_TOKEN(Tokens[6], tok::ampamp, TT_PointerOrReference);
+
+  Tokens = annotate("template <typename T> void f() &;");
+  EXPECT_EQ(Tokens.size(), 12u) << Tokens;
+  EXPECT_TOKEN(Tokens[9], tok::amp, TT_PointerOrReference);
+
+  Tokens = annotate("template <typename T> void operator=(T) &;");
+  EXPECT_EQ(Tokens.size(), 14u) << Tokens;
+  EXPECT_TOKEN(Tokens[11], tok::amp, TT_PointerOrReference);
+}
+
 TEST_F(TokenAnnotatorTest, UnderstandsRequiresClausesAndConcepts) {
   auto Tokens = annotate("template <typename T>\n"
                          "concept C = (Foo && Bar) && (Bar && Baz);");
@@ -356,6 +374,14 @@ TEST_F(TokenAnnotatorTest, UnderstandsRequiresExpressions) {
   EXPECT_TOKEN(Tokens[13], tok::l_brace, TT_RequiresExpressionLBrace);
   EXPECT_TOKEN(Tokens[29], tok::kw_requires,
                TT_RequiresClauseInARequiresExpression);
+
+  // Invalid Code, but we don't want to crash. See http://llvm.org/PR54350.
+  Tokens = annotate("bool r10 = requires (struct new_struct { int x; } s) { "
+                    "requires true; };");
+  ASSERT_EQ(Tokens.size(), 21u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::kw_requires, TT_RequiresExpression);
+  EXPECT_TOKEN(Tokens[4], tok::l_paren, TT_RequiresExpressionLParen);
+  EXPECT_TOKEN(Tokens[14], tok::l_brace, TT_RequiresExpressionLBrace);
 }
 
 TEST_F(TokenAnnotatorTest, RequiresDoesNotChangeParsingOfTheRest) {
@@ -592,6 +618,32 @@ TEST_F(TokenAnnotatorTest, RequiresDoesNotChangeParsingOfTheRest) {
       EXPECT_EQ(*BaseTokens[I],
                 *ConstrainedTokens[I + NumberOfAdditionalRequiresClauseTokens])
           << I;
+}
+
+TEST_F(TokenAnnotatorTest, UnderstandsAsm) {
+  auto Tokens = annotate("__asm{\n"
+                         "a:\n"
+                         "};");
+  ASSERT_EQ(Tokens.size(), 7u) << Tokens;
+  EXPECT_TOKEN(Tokens[0], tok::kw_asm, TT_Unknown);
+  EXPECT_TOKEN(Tokens[1], tok::l_brace, TT_InlineASMBrace);
+  EXPECT_TOKEN(Tokens[4], tok::r_brace, TT_InlineASMBrace);
+}
+
+TEST_F(TokenAnnotatorTest, UnderstandsObjCBlock) {
+  auto Tokens = annotate("int (^)() = ^ ()\n"
+                         "  external_source_symbol() { //\n"
+                         "  return 1;\n"
+                         "};");
+  ASSERT_EQ(Tokens.size(), 21u) << Tokens;
+  EXPECT_TOKEN(Tokens[1], tok::l_paren, TT_ObjCBlockLParen);
+  EXPECT_TOKEN(Tokens[13], tok::l_brace, TT_ObjCBlockLBrace);
+
+  Tokens = annotate("int *p = ^int*(){ //\n"
+                    "  return nullptr;\n"
+                    "}();");
+  ASSERT_EQ(Tokens.size(), 19u) << Tokens;
+  EXPECT_TOKEN(Tokens[9], tok::l_brace, TT_ObjCBlockLBrace);
 }
 
 } // namespace

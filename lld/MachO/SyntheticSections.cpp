@@ -235,6 +235,8 @@ void macho::addNonLazyBindingEntries(const Symbol *sym,
     in.rebase->addEntry(isec, offset);
     if (defined->isExternalWeakDef())
       in.weakBinding->addEntry(sym, isec, offset, addend);
+    else if (defined->interposable)
+      in.binding->addEntry(sym, isec, offset, addend);
   } else {
     // Undefined symbols are filtered out in scanRelocations(); we should never
     // get here
@@ -417,6 +419,13 @@ static int16_t ordinalForDylibSymbol(const DylibSymbol &dysym) {
   return dysym.getFile()->ordinal;
 }
 
+static int16_t ordinalForSymbol(const Symbol &sym) {
+  if (const auto *dysym = dyn_cast<DylibSymbol>(&sym))
+    return ordinalForDylibSymbol(*dysym);
+  assert(cast<Defined>(&sym)->interposable);
+  return BIND_SPECIAL_DYLIB_FLAT_LOOKUP;
+}
+
 static void encodeDylibOrdinal(int16_t ordinal, raw_svector_ostream &os) {
   if (ordinal <= 0) {
     os << static_cast<uint8_t>(BIND_OPCODE_SET_DYLIB_SPECIAL_IMM |
@@ -486,14 +495,14 @@ void BindingSection::finalizeContents() {
   int16_t lastOrdinal = 0;
 
   for (auto &p : sortBindings(bindingsMap)) {
-    const DylibSymbol *sym = p.first;
+    const Symbol *sym = p.first;
     std::vector<BindingEntry> &bindings = p.second;
     uint8_t flags = BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM;
     if (sym->isWeakRef())
       flags |= BIND_SYMBOL_FLAGS_WEAK_IMPORT;
     os << flags << sym->getName() << '\0'
        << static_cast<uint8_t>(BIND_OPCODE_SET_TYPE_IMM | BIND_TYPE_POINTER);
-    int16_t ordinal = ordinalForDylibSymbol(*sym);
+    int16_t ordinal = ordinalForSymbol(*sym);
     if (ordinal != lastOrdinal) {
       encodeDylibOrdinal(ordinal, os);
       lastOrdinal = ordinal;
@@ -596,7 +605,7 @@ bool StubHelperSection::isNeeded() const { return in.lazyBinding->isNeeded(); }
 void StubHelperSection::writeTo(uint8_t *buf) const {
   target->writeStubHelperHeader(buf);
   size_t off = target->stubHelperHeaderSize;
-  for (const DylibSymbol *sym : in.lazyBinding->getEntries()) {
+  for (const Symbol *sym : in.lazyBinding->getEntries()) {
     target->writeStubHelperEntry(buf + off, *sym, addr + off);
     off += target->stubHelperEntrySize;
   }
@@ -625,6 +634,7 @@ void StubHelperSection::setup() {
       make<Defined>("__dyld_private", nullptr, in.imageLoaderCache, 0, 0,
                     /*isWeakDef=*/false,
                     /*isExternal=*/false, /*isPrivateExtern=*/false,
+                    /*includeInSymtab=*/true,
                     /*isThumb=*/false, /*isReferencedDynamically=*/false,
                     /*noDeadStrip=*/false);
   dyldPrivate->used = true;
@@ -667,7 +677,7 @@ LazyBindingSection::LazyBindingSection()
 void LazyBindingSection::finalizeContents() {
   // TODO: Just precompute output size here instead of writing to a temporary
   // buffer
-  for (DylibSymbol *sym : entries)
+  for (Symbol *sym : entries)
     sym->lazyBindOffset = encode(*sym);
 }
 
@@ -675,11 +685,11 @@ void LazyBindingSection::writeTo(uint8_t *buf) const {
   memcpy(buf, contents.data(), contents.size());
 }
 
-void LazyBindingSection::addEntry(DylibSymbol *dysym) {
-  if (entries.insert(dysym)) {
-    dysym->stubsHelperIndex = entries.size() - 1;
+void LazyBindingSection::addEntry(Symbol *sym) {
+  if (entries.insert(sym)) {
+    sym->stubsHelperIndex = entries.size() - 1;
     in.rebase->addEntry(in.lazyPointers->isec,
-                        dysym->stubsIndex * target->wordSize);
+                        sym->stubsIndex * target->wordSize);
   }
 }
 
@@ -689,7 +699,7 @@ void LazyBindingSection::addEntry(DylibSymbol *dysym) {
 // BIND_OPCODE_DONE terminator. As such, unlike in the non-lazy-binding case,
 // we cannot encode just the differences between symbols; we have to emit the
 // complete bind information for each symbol.
-uint32_t LazyBindingSection::encode(const DylibSymbol &sym) {
+uint32_t LazyBindingSection::encode(const Symbol &sym) {
   uint32_t opstreamOffset = contents.size();
   OutputSegment *dataSeg = in.lazyPointers->parent;
   os << static_cast<uint8_t>(BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB |
@@ -697,7 +707,7 @@ uint32_t LazyBindingSection::encode(const DylibSymbol &sym) {
   uint64_t offset = in.lazyPointers->addr - dataSeg->addr +
                     sym.stubsIndex * target->wordSize;
   encodeULEB128(offset, os);
-  encodeDylibOrdinal(ordinalForDylibSymbol(sym), os);
+  encodeDylibOrdinal(ordinalForSymbol(sym), os);
 
   uint8_t flags = BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM;
   if (sym.isWeakRef())
@@ -761,7 +771,7 @@ static std::vector<MachO::data_in_code_entry> collectDataInCodeEntries() {
             [](const MachO::data_in_code_entry &entry, uint64_t addr) {
               return entry.offset < addr;
             });
-        const uint64_t endAddr = beginAddr + isec->getFileSize();
+        const uint64_t endAddr = beginAddr + isec->getSize();
         for (const auto end = entries.end();
              it != end && it->offset + it->length <= endAddr; ++it)
           dataInCodeEntries.push_back(
@@ -887,12 +897,22 @@ void SymtabSection::emitStabs() {
     assert(sym->isLive() &&
            "dead symbols should not be in localSymbols, externalSymbols");
     if (auto *defined = dyn_cast<Defined>(sym)) {
+      // Excluded symbols should have been filtered out in finalizeContents().
+      assert(defined->includeInSymtab);
+
       if (defined->isAbsolute())
         continue;
+
+      // Constant-folded symbols go in the executable's symbol table, but don't
+      // get a stabs entry.
+      if (defined->wasIdenticalCodeFolded)
+        continue;
+
       InputSection *isec = defined->isec;
       ObjFile *file = dyn_cast_or_null<ObjFile>(isec->getFile());
       if (!file || !file->compileUnit)
         continue;
+
       symbolsNeedingStabs.push_back(defined);
     }
   }
@@ -949,11 +969,10 @@ void SymtabSection::finalizeContents() {
     if (auto *objFile = dyn_cast<ObjFile>(file)) {
       for (Symbol *sym : objFile->symbols) {
         if (auto *defined = dyn_cast_or_null<Defined>(sym)) {
-          if (!defined->isExternal() && defined->isLive()) {
-            StringRef name = defined->getName();
-            if (!name.startswith("l") && !name.startswith("L"))
-              addSymbol(localSymbols, sym);
-          }
+          if (defined->isExternal() || !defined->isLive() ||
+              !defined->includeInSymtab)
+            continue;
+          addSymbol(localSymbols, sym);
         }
       }
     }
@@ -1193,7 +1212,7 @@ void CodeSignatureSection::writeHashes(uint8_t *buf) const {
                     std::min(codeEnd - code, static_cast<ssize_t>(blockSize)));
     SHA256 hasher;
     hasher.update(block);
-    StringRef hash = hasher.final();
+    std::array<uint8_t, 32> hash = hasher.final();
     assert(hash.size() == hashSize);
     memcpy(hashes, hash.data(), hashSize);
     code += blockSize;
@@ -1421,7 +1440,7 @@ void DeduplicatedCStringSection::finalizeContents() {
       assert(it != stringOffsetMap.end());
       StringOffset &offsetInfo = it->second;
       if (offsetInfo.outSecOff == UINT64_MAX) {
-        offsetInfo.outSecOff = alignTo(size, 1 << offsetInfo.trailingZeros);
+        offsetInfo.outSecOff = alignTo(size, 1ULL << offsetInfo.trailingZeros);
         size = offsetInfo.outSecOff + s.size();
       }
       isec->pieces[i].outSecOff = offsetInfo.outSecOff;

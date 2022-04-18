@@ -308,7 +308,7 @@ private:
           // Find the last line with lower level.
           auto J = I - 1;
           for (; J != AnnotatedLines.begin(); --J)
-            if ((*J)->Level < TheLine->Level)
+            if (!(*J)->InPPDirective && (*J)->Level < TheLine->Level)
               break;
           if ((*J)->Level >= TheLine->Level)
             return false;
@@ -1431,8 +1431,10 @@ void UnwrappedLineFormatter::formatFirstToken(
   if (Newlines)
     Indent = NewlineIndent;
 
-  // Preprocessor directives get indented before the hash only if specified
-  if (Style.IndentPPDirectives != FormatStyle::PPDIS_BeforeHash &&
+  // Preprocessor directives get indented before the hash only if specified. In
+  // Javascript import statements are indented like normal statements.
+  if (!Style.isJavaScript() &&
+      Style.IndentPPDirectives != FormatStyle::PPDIS_BeforeHash &&
       (Line.Type == LT_PreprocessorDirective ||
        Line.Type == LT_ImportStatement))
     Indent = 0;

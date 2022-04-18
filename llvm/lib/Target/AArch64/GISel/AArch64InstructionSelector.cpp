@@ -30,6 +30,7 @@
 #include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -436,6 +437,9 @@ private:
                      int OpIdx = -1) const;
   void renderFPImm64(MachineInstrBuilder &MIB, const MachineInstr &MI,
                      int OpIdx = -1) const;
+  void renderFPImm32SIMDModImmType4(MachineInstrBuilder &MIB,
+                                    const MachineInstr &MI,
+                                    int OpIdx = -1) const;
 
   // Materialize a GlobalValue or BlockAddress using a movz+movk sequence.
   void materializeLargeCMVal(MachineInstr &I, const Value *V, unsigned OpFlags);
@@ -3046,10 +3050,6 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
       }
     }
     LLVM_FALLTHROUGH;
-  case TargetOpcode::G_FADD:
-  case TargetOpcode::G_FSUB:
-  case TargetOpcode::G_FMUL:
-  case TargetOpcode::G_FDIV:
   case TargetOpcode::G_OR: {
     // Reject the various things we don't support yet.
     if (unsupportedBinOp(I, RBI, MRI, TRI))
@@ -3372,6 +3372,7 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
 
     I.setDesc(TII.get(NewOpc));
     constrainSelectedInstRegOperands(I, TII, TRI, RBI);
+    I.setFlags(MachineInstr::NoFPExcept);
 
     return true;
   }
@@ -4697,6 +4698,7 @@ AArch64InstructionSelector::emitFPCompare(Register LHS, Register RHS,
   // Partially build the compare. Decide if we need to add a use for the
   // third operand based off whether or not we're comparing against 0.0.
   auto CmpMI = MIRBuilder.buildInstr(CmpOpc).addUse(LHS);
+  CmpMI.setMIFlags(MachineInstr::NoFPExcept);
   if (!ShouldUseImm)
     CmpMI.addUse(RHS);
   constrainSelectedInstRegOperands(*CmpMI, TII, TRI, RBI);
@@ -6851,6 +6853,17 @@ void AArch64InstructionSelector::renderFPImm64(MachineInstrBuilder &MIB,
          "Expected G_FCONSTANT");
   MIB.addImm(
       AArch64_AM::getFP64Imm(MI.getOperand(1).getFPImm()->getValueAPF()));
+}
+
+void AArch64InstructionSelector::renderFPImm32SIMDModImmType4(
+    MachineInstrBuilder &MIB, const MachineInstr &MI, int OpIdx) const {
+  assert(MI.getOpcode() == TargetOpcode::G_FCONSTANT && OpIdx == -1 &&
+         "Expected G_FCONSTANT");
+  MIB.addImm(AArch64_AM::encodeAdvSIMDModImmType4(MI.getOperand(1)
+                                                      .getFPImm()
+                                                      ->getValueAPF()
+                                                      .bitcastToAPInt()
+                                                      .getZExtValue()));
 }
 
 bool AArch64InstructionSelector::isLoadStoreOfNumBytes(
