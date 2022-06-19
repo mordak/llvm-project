@@ -260,7 +260,7 @@ static Optional<AllocFnsTy> getAllocationSize(const Value *V,
   Result.AllocTy = MallocLike;
   Result.NumParams = Callee->getNumOperands();
   Result.FstParam = Args.first;
-  Result.SndParam = Args.second.getValueOr(-1);
+  Result.SndParam = Args.second.value_or(-1);
   // Allocsize has no way to specify an alignment argument
   Result.AlignParam = -1;
   return Result;
@@ -385,7 +385,7 @@ llvm::getAllocSize(const CallBase *CB,
       if (!Arg)
         return None;
 
-      APInt MaxSize = Arg->getValue().zextOrSelf(IntTyBits);
+      APInt MaxSize = Arg->getValue().zext(IntTyBits);
       if (Size.ugt(MaxSize))
         Size = MaxSize + 1;
     }
@@ -445,6 +445,7 @@ struct FreeFnsTy {
 // clang-format off
 static const std::pair<LibFunc, FreeFnsTy> FreeFnData[] = {
     {LibFunc_free,                               {1, MallocFamily::Malloc}},
+    {LibFunc_vec_free,                           {1, MallocFamily::VecMalloc}},
     {LibFunc_ZdlPv,                              {1, MallocFamily::CPPNew}},             // operator delete(void*)
     {LibFunc_ZdaPv,                              {1, MallocFamily::CPPNewArray}},        // operator delete[](void*)
     {LibFunc_msvc_delete_ptr32,                  {1, MallocFamily::MSVCNew}},            // operator delete(void*)

@@ -1633,6 +1633,9 @@ public:
     /// Parameter for captured context
     CapturedContext,
 
+    /// Parameter for Thread private variable
+    ThreadPrivateVar,
+
     /// Other implicit parameter
     Other,
   };
@@ -2246,6 +2249,13 @@ public:
       DeclAsWritten = Pattern;
     return !(DeclAsWritten->isDeleted() ||
              DeclAsWritten->getCanonicalDecl()->isDefaulted());
+  }
+
+  bool isIneligibleOrNotSelected() const {
+    return FunctionDeclBits.IsIneligibleOrNotSelected;
+  }
+  void setIneligibleOrNotSelected(bool II) {
+    FunctionDeclBits.IsIneligibleOrNotSelected = II;
   }
 
   /// Whether falling off this function implicitly returns null/zero.
@@ -4069,7 +4079,7 @@ public:
 
   void setIsRandomized(bool V) { RecordDeclBits.IsRandomized = V; }
 
-  void reorderFields(const SmallVectorImpl<Decl *> &Fields);
+  void reorderDecls(const SmallVectorImpl<Decl *> &Decls);
 
   /// Determines whether this declaration represents the
   /// injected class name.

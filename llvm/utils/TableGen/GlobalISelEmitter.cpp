@@ -466,7 +466,7 @@ public:
   MatchTableRecord(Optional<unsigned> LabelID_, StringRef EmitStr,
                    unsigned NumElements, unsigned Flags,
                    int64_t RawValue = std::numeric_limits<int64_t>::min())
-      : LabelID(LabelID_.getValueOr(~0u)), EmitStr(EmitStr),
+      : LabelID(LabelID_.value_or(~0u)), EmitStr(EmitStr),
         NumElements(NumElements), Flags(Flags), RawValue(RawValue) {
     assert((!LabelID_.hasValue() || LabelID != ~0u) &&
            "This value is reserved for non-labels");
@@ -3816,12 +3816,15 @@ Expected<InstructionMatcher &> GlobalISelEmitter::addBuiltinPredicates(
       if (!ParsedAddrSpaces.empty()) {
         InsnMatcher.addPredicate<MemoryAddressSpacePredicateMatcher>(
             0, ParsedAddrSpaces);
+        return InsnMatcher;
       }
     }
 
     int64_t MinAlign = Predicate.getMinAlignment();
-    if (MinAlign > 0)
+    if (MinAlign > 0) {
       InsnMatcher.addPredicate<MemoryAlignmentPredicateMatcher>(0, MinAlign);
+      return InsnMatcher;
+    }
   }
 
   // G_LOAD is used for both non-extending and any-extending loads.
