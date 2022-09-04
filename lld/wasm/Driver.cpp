@@ -234,7 +234,7 @@ std::vector<MemoryBufferRef> static getArchiveMembers(MemoryBufferRef mb) {
 
 void LinkerDriver::addFile(StringRef path) {
   Optional<MemoryBufferRef> buffer = readFile(path);
-  if (!buffer.hasValue())
+  if (!buffer)
     return;
   MemoryBufferRef mbref = *buffer;
 
@@ -655,6 +655,17 @@ static void createSyntheticSymbols() {
         make<SyntheticFunction>(
             is64 ? i64ArgSignature : i32ArgSignature,
             "__wasm_init_tls"));
+  }
+
+  if (config->isPic ||
+      config->unresolvedSymbols == UnresolvedPolicy::ImportDynamic) {
+    // For PIC code, or when dynamically importing addresses, we create
+    // synthetic functions that apply relocations.  These get called from
+    // __wasm_call_ctors before the user-level constructors.
+    WasmSym::applyDataRelocs = symtab->addSyntheticFunction(
+        "__wasm_apply_data_relocs",
+        WASM_SYMBOL_VISIBILITY_DEFAULT | WASM_SYMBOL_EXPORTED,
+        make<SyntheticFunction>(nullSignature, "__wasm_apply_data_relocs"));
   }
 }
 

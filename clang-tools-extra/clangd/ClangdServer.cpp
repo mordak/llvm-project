@@ -97,7 +97,7 @@ struct UpdateIndexCallbacks : public ParsingCallbacks {
     if (FIndex)
       FIndex->updateMain(Path, AST);
 
-    assert(AST.getDiagnostics().hasValue() &&
+    assert(AST.getDiagnostics() &&
            "We issue callback only with fresh preambles");
     std::vector<Diag> Diagnostics = *AST.getDiagnostics();
     if (ServerCallbacks)
@@ -166,6 +166,7 @@ ClangdServer::Options::operator TUScheduler::Options() const {
   Opts.StorePreamblesInMemory = StorePreamblesInMemory;
   Opts.UpdateDebounce = UpdateDebounce;
   Opts.ContextProvider = ContextProvider;
+  Opts.PreambleThrottler = PreambleThrottler;
   return Opts;
 }
 
@@ -411,10 +412,10 @@ void ClangdServer::codeComplete(PathRef File, Position Pos,
       clang::clangd::trace::Span Tracer("Completion results callback");
       CB(std::move(Result));
     }
-    if (SpecFuzzyFind && SpecFuzzyFind->NewReq.hasValue()) {
+    if (SpecFuzzyFind && SpecFuzzyFind->NewReq) {
       std::lock_guard<std::mutex> Lock(CachedCompletionFuzzyFindRequestMutex);
       CachedCompletionFuzzyFindRequestByFile[File] =
-          SpecFuzzyFind->NewReq.getValue();
+          SpecFuzzyFind->NewReq.value();
     }
     // SpecFuzzyFind is only destroyed after speculative fuzzy find finishes.
     // We don't want `codeComplete` to wait for the async call if it doesn't use
@@ -672,7 +673,7 @@ void ClangdServer::applyTweak(PathRef File, Range Sel, StringRef TweakID,
       }
       Effect = T.takeError();
     }
-    assert(Effect.hasValue() && "Expected at least one selection");
+    assert(Effect && "Expected at least one selection");
     if (*Effect && (*Effect)->FormatEdits) {
       // Format tweaks that require it centrally here.
       for (auto &It : (*Effect)->ApplyEdits) {
@@ -750,7 +751,7 @@ void ClangdServer::findHover(PathRef File, Position Pos,
 
 void ClangdServer::typeHierarchy(PathRef File, Position Pos, int Resolve,
                                  TypeHierarchyDirection Direction,
-                                 Callback<Optional<TypeHierarchyItem>> CB) {
+                                 Callback<std::vector<TypeHierarchyItem>> CB) {
   auto Action = [File = File.str(), Pos, Resolve, Direction, CB = std::move(CB),
                  this](Expected<InputsAndAST> InpAST) mutable {
     if (!InpAST)
@@ -760,6 +761,22 @@ void ClangdServer::typeHierarchy(PathRef File, Position Pos, int Resolve,
   };
 
   WorkScheduler->runWithAST("TypeHierarchy", File, std::move(Action));
+}
+
+void ClangdServer::superTypes(
+    const TypeHierarchyItem &Item,
+    Callback<llvm::Optional<std::vector<TypeHierarchyItem>>> CB) {
+  WorkScheduler->run("typeHierarchy/superTypes", /*Path=*/"",
+                     [=, CB = std::move(CB)]() mutable {
+                       CB(clangd::superTypes(Item, Index));
+                     });
+}
+
+void ClangdServer::subTypes(const TypeHierarchyItem &Item,
+                            Callback<std::vector<TypeHierarchyItem>> CB) {
+  WorkScheduler->run(
+      "typeHierarchy/subTypes", /*Path=*/"",
+      [=, CB = std::move(CB)]() mutable { CB(clangd::subTypes(Item, Index)); });
 }
 
 void ClangdServer::resolveTypeHierarchy(

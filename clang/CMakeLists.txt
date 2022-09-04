@@ -366,6 +366,10 @@ endif()
 # The libdir suffix must exactly match whatever LLVM's configuration used.
 set(CLANG_LIBDIR_SUFFIX "${LLVM_LIBDIR_SUFFIX}")
 
+set(CLANG_TOOLS_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}" CACHE PATH
+    "Path for binary subdirectory (defaults to '${CMAKE_INSTALL_BINDIR}')")
+mark_as_advanced(CLANG_TOOLS_INSTALL_DIR)
+
 set(CLANG_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(CLANG_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -511,6 +515,12 @@ endif()
 if(CLANG_ENABLE_ARCMT)
   set(CLANG_ENABLE_OBJC_REWRITER ON)
 endif()
+
+# This option is a stop-gap, we should commit to removing this as
+# soon as possible. See discussion:
+# https://discourse.llvm.org/t/rationale-for-removing-versioned-libclang-middle-ground-to-keep-it-behind-option/
+option(CLANG_FORCE_MATCHING_LIBCLANG_SOVERSION
+  "Force the SOVERSION of libclang to be equal to CLANG_MAJOR" ON)
 
 # Clang version information
 set(CLANG_EXECUTABLE_VERSION

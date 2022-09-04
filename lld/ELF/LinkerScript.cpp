@@ -113,9 +113,9 @@ static StringRef getOutputSectionName(const InputSectionBase *s) {
 
 uint64_t ExprValue::getValue() const {
   if (sec)
-    return alignTo(sec->getOutputSection()->addr + sec->getOffset(val),
-                   alignment);
-  return alignTo(val, alignment);
+    return alignToPowerOf2(sec->getOutputSection()->addr + sec->getOffset(val),
+                           alignment);
+  return alignToPowerOf2(val, alignment);
 }
 
 uint64_t ExprValue::getSecAddr() const {
@@ -994,7 +994,7 @@ void LinkerScript::assignOffsets(OutputSection *sec) {
     // sec->alignment is the max of ALIGN and the maximum of input
     // section alignments.
     const uint64_t pos = dot;
-    dot = alignTo(dot, sec->alignment);
+    dot = alignToPowerOf2(dot, sec->alignment);
     sec->addr = dot;
     expandMemoryRegions(dot - pos);
   }
@@ -1008,7 +1008,7 @@ void LinkerScript::assignOffsets(OutputSection *sec) {
   if (sec->lmaExpr) {
     ctx->lmaOffset = sec->lmaExpr().getValue() - dot;
   } else if (MemoryRegion *mr = sec->lmaRegion) {
-    uint64_t lmaStart = alignTo(mr->curPos, sec->alignment);
+    uint64_t lmaStart = alignToPowerOf2(mr->curPos, sec->alignment);
     if (mr->curPos < lmaStart)
       expandMemoryRegion(mr, lmaStart - mr->curPos, sec->name);
     ctx->lmaOffset = lmaStart - dot;
@@ -1053,7 +1053,7 @@ void LinkerScript::assignOffsets(OutputSection *sec) {
     for (InputSection *isec : cast<InputSectionDescription>(cmd)->sections) {
       assert(isec->getParent() == sec);
       const uint64_t pos = dot;
-      dot = alignTo(dot, isec->alignment);
+      dot = alignToPowerOf2(dot, isec->alignment);
       isec->outSecOff = dot - sec->addr;
       dot += isec->getSize();
 
@@ -1357,7 +1357,7 @@ SmallVector<PhdrEntry *, 0> LinkerScript::createPhdrs() {
     // Assign headers specified by linker script
     for (size_t id : getPhdrIndices(sec)) {
       ret[id]->add(sec);
-      if (!phdrsCommands[id].flags.hasValue())
+      if (!phdrsCommands[id].flags)
         ret[id]->p_flags |= sec->getPhdrFlags();
     }
   }

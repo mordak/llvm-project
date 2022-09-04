@@ -40,6 +40,7 @@ Using Clang as a Compiler
    SafeStack
    ShadowCallStack
    SourceBasedCodeCoverage
+   StandardCPlusPlusModules
    Modules
    MSVCCompatibility
    MisExpect
@@ -49,6 +50,7 @@ Using Clang as a Compiler
    HLSLSupport
    ThinLTO
    APINotes
+   DebuggingCoroutines
    CommandGuide/index
    FAQ
 

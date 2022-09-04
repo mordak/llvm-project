@@ -29,6 +29,7 @@
 #include "lld/Common/DWARF.h"
 #include "lld/Common/Strings.h"
 #include "lld/Common/Version.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetOperations.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/Dwarf.h"
@@ -497,7 +498,7 @@ void EhFrameSection::iterateFDEWithLSDA(
 static void writeCieFde(uint8_t *buf, ArrayRef<uint8_t> d) {
   memcpy(buf, d.data(), d.size());
 
-  size_t aligned = alignTo(d.size(), config->wordsize);
+  size_t aligned = alignToPowerOf2(d.size(), config->wordsize);
   assert(std::all_of(buf + d.size(), buf + aligned,
                      [](uint8_t c) { return c == 0; }));
 
@@ -532,11 +533,11 @@ void EhFrameSection::finalizeContents() {
   size_t off = 0;
   for (CieRecord *rec : cieRecords) {
     rec->cie->outputOff = off;
-    off += alignTo(rec->cie->size, config->wordsize);
+    off += alignToPowerOf2(rec->cie->size, config->wordsize);
 
     for (EhSectionPiece *fde : rec->fdes) {
       fde->outputOff = off;
-      off += alignTo(fde->size, config->wordsize);
+      off += alignToPowerOf2(fde->size, config->wordsize);
     }
   }
 
@@ -711,6 +712,9 @@ bool GotSection::isNeeded() const {
 }
 
 void GotSection::writeTo(uint8_t *buf) {
+  // On PPC64 .got may be needed but empty. Skip the write.
+  if (size == 0)
+    return;
   target->writeGotHeader(buf);
   relocateAlloc(buf, buf + size);
 }
@@ -918,7 +922,7 @@ void MipsGotSection::build() {
       for (SectionCommand *cmd : os->commands) {
         if (auto *isd = dyn_cast<InputSectionDescription>(cmd))
           for (InputSection *isec : isd->sections) {
-            uint64_t off = alignTo(secSize, isec->alignment);
+            uint64_t off = alignToPowerOf2(secSize, isec->alignment);
             secSize = off + isec->getSize();
           }
       }
@@ -1336,7 +1340,7 @@ DynamicSection<ELFT>::computeContents() {
     addInt(config->enableNewDtags ? DT_RUNPATH : DT_RPATH,
            part.dynStrTab->addString(config->rpath));
 
-  for (SharedFile *file : sharedFiles)
+  for (SharedFile *file : ctx->sharedFiles)
     if (file->isNeeded)
       addInt(DT_NEEDED, part.dynStrTab->addString(file->soName));
 
@@ -1505,7 +1509,7 @@ DynamicSection<ELFT>::computeContents() {
   if (part.verNeed && part.verNeed->isNeeded()) {
     addInSec(DT_VERNEED, *part.verNeed);
     unsigned needNum = 0;
-    for (SharedFile *f : sharedFiles)
+    for (SharedFile *f : ctx->sharedFiles)
       if (!f->vernauxs.empty())
         ++needNum;
     addInt(DT_VERNEEDNUM, needNum);
@@ -1703,7 +1707,7 @@ void RelocationBaseSection::computeRels() {
     parallelSort(relocs.begin(), nonRelative,
                  [&](auto &a, auto &b) { return a.r_offset < b.r_offset; });
     // Non-relative relocations are few, so don't bother with parallelSort.
-    std::sort(nonRelative, relocs.end(), [&](auto &a, auto &b) {
+    llvm::sort(nonRelative, relocs.end(), [&](auto &a, auto &b) {
       return std::tie(a.r_sym, a.r_offset) < std::tie(b.r_sym, b.r_offset);
     });
   }
@@ -2039,7 +2043,7 @@ template <class ELFT> bool RelrSection<ELFT>::updateAllocSize() {
   std::unique_ptr<uint64_t[]> offsets(new uint64_t[relocs.size()]);
   for (auto it : llvm::enumerate(relocs))
     offsets[it.index()] = it.value().getOffset();
-  std::sort(offsets.get(), offsets.get() + relocs.size());
+  llvm::sort(offsets.get(), offsets.get() + relocs.size());
 
   // For each leading relocation, find following ones that can be folded
   // as a bitmap and fold them.
@@ -2841,7 +2845,7 @@ static SmallVector<GdbIndexSection::GdbSymbol, 0> createSymbols(
   // Instantiate GdbSymbols while uniqufying them by name.
   auto symbols = std::make_unique<SmallVector<GdbSymbol, 0>[]>(numShards);
 
-  parallelForEachN(0, concurrency, [&](size_t threadId) {
+  parallelFor(0, concurrency, [&](size_t threadId) {
     uint32_t i = 0;
     for (ArrayRef<NameAttrEntry> entries : nameAttrs) {
       for (const NameAttrEntry &ent : entries) {
@@ -2921,7 +2925,7 @@ template <class ELFT> GdbIndexSection *GdbIndexSection::create() {
   SmallVector<GdbChunk, 0> chunks(files.size());
   SmallVector<SmallVector<NameAttrEntry, 0>, 0> nameAttrs(files.size());
 
-  parallelForEachN(0, files.size(), [&](size_t i) {
+  parallelFor(0, files.size(), [&](size_t i) {
     // To keep memory usage low, we don't want to keep cached DWARFContext, so
     // avoid getDwarf() here.
     ObjFile<ELFT> *file = cast<ObjFile<ELFT>>(files[i]);
@@ -3179,7 +3183,7 @@ VersionNeedSection<ELFT>::VersionNeedSection()
                        ".gnu.version_r") {}
 
 template <class ELFT> void VersionNeedSection<ELFT>::finalizeContents() {
-  for (SharedFile *f : sharedFiles) {
+  for (SharedFile *f : ctx->sharedFiles) {
     if (f->vernauxs.empty())
       continue;
     verneeds.emplace_back();
@@ -3287,8 +3291,8 @@ void MergeTailSection::finalizeContents() {
 }
 
 void MergeNoTailSection::writeTo(uint8_t *buf) {
-  parallelForEachN(0, numShards,
-                   [&](size_t i) { shards[i].write(buf + shardOffsets[i]); });
+  parallelFor(0, numShards,
+              [&](size_t i) { shards[i].write(buf + shardOffsets[i]); });
 }
 
 // This function is very hot (i.e. it can take several seconds to finish)
@@ -3312,7 +3316,7 @@ void MergeNoTailSection::finalizeContents() {
                        numShards));
 
   // Add section pieces to the builders.
-  parallelForEachN(0, concurrency, [&](size_t threadId) {
+  parallelFor(0, concurrency, [&](size_t threadId) {
     for (MergeInputSection *sec : sections) {
       for (size_t i = 0, e = sec->pieces.size(); i != e; ++i) {
         if (!sec->pieces[i].live)
@@ -3329,7 +3333,7 @@ void MergeNoTailSection::finalizeContents() {
   for (size_t i = 0; i < numShards; ++i) {
     shards[i].finalizeInOrder();
     if (shards[i].getSize() > 0)
-      off = alignTo(off, alignment);
+      off = alignToPowerOf2(off, alignment);
     shardOffsets[i] = off;
     off += shards[i].getSize();
   }
@@ -3349,7 +3353,7 @@ template <class ELFT> void elf::splitSections() {
   llvm::TimeTraceScope timeScope("Split sections");
   // splitIntoPieces needs to be called on each MergeInputSection
   // before calling finalizeContents().
-  parallelForEach(objectFiles, [](ELFFileBase *file) {
+  parallelForEach(ctx->objectFiles, [](ELFFileBase *file) {
     for (InputSectionBase *sec : file->getSections()) {
       if (!sec)
         continue;
@@ -3611,7 +3615,7 @@ InputSection *ThunkSection::getTargetInputSection() const {
 bool ThunkSection::assignOffsets() {
   uint64_t off = 0;
   for (Thunk *t : thunks) {
-    off = alignTo(off, t->alignment);
+    off = alignToPowerOf2(off, t->alignment);
     t->setOffset(off);
     uint32_t size = t->size();
     t->getThunkTargetSym()->size = size;
@@ -3717,9 +3721,9 @@ static uint8_t getAbiVersion() {
     return 0;
   }
 
-  if (config->emachine == EM_AMDGPU && !objectFiles.empty()) {
-    uint8_t ver = objectFiles[0]->abiVersion;
-    for (InputFile *file : makeArrayRef(objectFiles).slice(1))
+  if (config->emachine == EM_AMDGPU && !ctx->objectFiles.empty()) {
+    uint8_t ver = ctx->objectFiles[0]->abiVersion;
+    for (InputFile *file : makeArrayRef(ctx->objectFiles).slice(1))
       if (file->abiVersion != ver)
         error("incompatible ABI version: " + toString(file));
     return ver;
@@ -3855,7 +3859,8 @@ void InStruct::reset() {
 
 constexpr char kMemtagAndroidNoteName[] = "Android";
 void MemtagAndroidNote::writeTo(uint8_t *buf) {
-  assert(sizeof(kMemtagAndroidNoteName) == 8); // ABI check for Android 11 & 12.
+  static_assert(sizeof(kMemtagAndroidNoteName) == 8,
+                "ABI check for Android 11 & 12.");
   assert((config->androidMemtagStack || config->androidMemtagHeap) &&
          "Should only be synthesizing a note if heap || stack is enabled.");
 
@@ -3880,6 +3885,20 @@ size_t MemtagAndroidNote::getSize() const {
   return sizeof(llvm::ELF::Elf64_Nhdr) +
          /*namesz=*/sizeof(kMemtagAndroidNoteName) +
          /*descsz=*/sizeof(uint32_t);
+}
+
+void PackageMetadataNote::writeTo(uint8_t *buf) {
+  write32(buf, 4);
+  write32(buf + 4, config->packageMetadata.size() + 1);
+  write32(buf + 8, FDO_PACKAGING_METADATA);
+  memcpy(buf + 12, "FDO", 4);
+  memcpy(buf + 16, config->packageMetadata.data(),
+         config->packageMetadata.size());
+}
+
+size_t PackageMetadataNote::getSize() const {
+  return sizeof(llvm::ELF::Elf64_Nhdr) + 4 +
+         alignTo(config->packageMetadata.size() + 1, 4);
 }
 
 InStruct elf::in;

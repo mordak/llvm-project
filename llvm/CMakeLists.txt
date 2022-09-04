@@ -25,7 +25,7 @@ if(NOT DEFINED LLVM_VERSION_PATCH)
   set(LLVM_VERSION_PATCH 0)
 endif()
 if(NOT DEFINED LLVM_VERSION_SUFFIX)
-  set(LLVM_VERSION_SUFFIX git)
+  set(LLVM_VERSION_SUFFIX)
 endif()
 
 if (NOT PACKAGE_VERSION)
@@ -200,7 +200,7 @@ if(LLVM_CCACHE_BUILD)
       # RULE_LAUNCH_COMPILE should work with Ninja but currently has issues
       # with cmd.exe and some MSVC tools other than cl.exe
       set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
-      set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})     
+      set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
     endif()
   else()
     message(FATAL_ERROR "Unable to find the program ccache. Set LLVM_CCACHE_BUILD to OFF")
@@ -322,6 +322,12 @@ endif()
 
 set(LLVM_LIBDIR_SUFFIX "" CACHE STRING "Define suffix of library directory name (32/64)" )
 
+# LLVM_INSTALL_PACKAGE_DIR needs to be declared prior to adding the tools
+# subdirectory in order to have the value available for llvm-config.
+include(GNUInstallPackageDir)
+set(LLVM_INSTALL_PACKAGE_DIR "${CMAKE_INSTALL_PACKAGEDIR}/llvm" CACHE STRING
+  "Path for CMake subdirectory for LLVM (defaults to '${CMAKE_INSTALL_PACKAGEDIR}/llvm')")
+
 set(LLVM_TOOLS_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}" CACHE STRING
     "Path for binary subdirectory (defaults to '${CMAKE_INSTALL_BINDIR}')")
 mark_as_advanced(LLVM_TOOLS_INSTALL_DIR)
@@ -438,7 +444,11 @@ endif()
 
 set(LLVM_ENABLE_ZLIB "ON" CACHE STRING "Use zlib for compression/decompression if available. Can be ON, OFF, or FORCE_ON")
 
+set(LLVM_ENABLE_ZSTD "ON" CACHE STRING "Use zstd for compression/decompression if available. Can be ON, OFF, or FORCE_ON")
+
 set(LLVM_ENABLE_CURL "OFF" CACHE STRING "Use libcurl for the HTTP client if available. Can be ON, OFF, or FORCE_ON")
+
+set(LLVM_ENABLE_HTTPLIB "OFF" CACHE STRING "Use cpp-httplib HTTP server library if available. Can be ON, OFF, or FORCE_ON")
 
 set(LLVM_Z3_INSTALL_DIR "" CACHE STRING "Install directory of the Z3 solver.")
 
@@ -746,7 +756,8 @@ endif()
 set(LLVM_TARGET_TRIPLE_ENV CACHE STRING "The name of environment variable to override default target. Disabled by blank.")
 mark_as_advanced(LLVM_TARGET_TRIPLE_ENV)
 
-if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+# Per target dir not yet supported on Arm 32 bit due to arm vs armhf handling
+if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
   set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default ON)
 else()
   set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default OFF)
@@ -1106,6 +1117,7 @@ if( LLVM_INCLUDE_UTILS )
   add_subdirectory(utils/PerfectShuffle)
   add_subdirectory(utils/count)
   add_subdirectory(utils/not)
+  add_subdirectory(utils/UnicodeData)
   add_subdirectory(utils/yaml-bench)
 else()
   if ( LLVM_INCLUDE_TESTS )

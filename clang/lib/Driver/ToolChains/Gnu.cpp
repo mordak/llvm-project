@@ -596,13 +596,9 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   // to generate executables. As Fortran runtime depends on the C runtime,
   // these dependencies need to be listed before the C runtime below (i.e.
   // AddRuntTimeLibs).
-  //
-  // NOTE: Generating executables by Flang is considered an "experimental"
-  // feature and hence this is guarded with a command line option.
-  // TODO: Make this work unconditionally once Flang is mature enough.
-  if (D.IsFlangMode() && Args.hasArg(options::OPT_flang_experimental_exec)) {
+  if (D.IsFlangMode()) {
     addFortranRuntimeLibraryPath(ToolChain, Args, CmdArgs);
-    addFortranRuntimeLibs(CmdArgs);
+    addFortranRuntimeLibs(ToolChain, CmdArgs);
     CmdArgs.push_back("-lm");
   }
 
@@ -634,6 +630,16 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         WantPthread = true;
 
       AddRunTimeLibs(ToolChain, D, CmdArgs, Args);
+
+      // LLVM support for atomics on 32-bit SPARC V8+ is incomplete, so
+      // forcibly link with libatomic as a workaround.
+      // TODO: Issue #41880 and D118021.
+      if (getToolChain().getTriple().getArch() == llvm::Triple::sparc) {
+        CmdArgs.push_back("--push-state");
+        CmdArgs.push_back("--as-needed");
+        CmdArgs.push_back("-latomic");
+        CmdArgs.push_back("--pop-state");
+      }
 
       if (WantPthread && !isAndroid)
         CmdArgs.push_back("-lpthread");
@@ -2090,8 +2096,8 @@ void Generic_GCC::GCCInstallationDetector::print(raw_ostream &OS) const {
 }
 
 bool Generic_GCC::GCCInstallationDetector::getBiarchSibling(Multilib &M) const {
-  if (BiarchSibling.hasValue()) {
-    M = BiarchSibling.getValue();
+  if (BiarchSibling) {
+    M = BiarchSibling.value();
     return true;
   }
   return false;

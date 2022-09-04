@@ -1043,13 +1043,15 @@ public:
                     bool AlwaysInline, bool isTailCall,
                     MachinePointerInfo DstPtrInfo,
                     MachinePointerInfo SrcPtrInfo,
-                    const AAMDNodes &AAInfo = AAMDNodes());
+                    const AAMDNodes &AAInfo = AAMDNodes(),
+                    AAResults *AA = nullptr);
 
   SDValue getMemmove(SDValue Chain, const SDLoc &dl, SDValue Dst, SDValue Src,
                      SDValue Size, Align Alignment, bool isVol, bool isTailCall,
                      MachinePointerInfo DstPtrInfo,
                      MachinePointerInfo SrcPtrInfo,
-                     const AAMDNodes &AAInfo = AAMDNodes());
+                     const AAMDNodes &AAInfo = AAMDNodes(),
+                     AAResults *AA = nullptr);
 
   SDValue getMemset(SDValue Chain, const SDLoc &dl, SDValue Dst, SDValue Src,
                     SDValue Size, Align Alignment, bool isVol,
@@ -1862,16 +1864,6 @@ public:
   /// simplify nodes with multiple uses more aggressively.)
   SDValue GetDemandedBits(SDValue V, const APInt &DemandedBits);
 
-  /// See if the specified operand can be simplified with the knowledge that
-  /// only the bits specified by DemandedBits are used in the elements specified
-  /// by DemandedElts.  If so, return the simpler operand, otherwise return a
-  /// null SDValue.
-  ///
-  /// (This exists alongside SimplifyDemandedBits because GetDemandedBits can
-  /// simplify nodes with multiple uses more aggressively.)
-  SDValue GetDemandedBits(SDValue V, const APInt &DemandedBits,
-                          const APInt &DemandedElts);
-
   /// Return true if the sign bit of Op is known to be zero.
   /// We use this predicate to simplify operations downstream.
   bool SignBitIsZero(SDValue Op, unsigned Depth = 0) const;
@@ -1887,6 +1879,11 @@ public:
   /// known to be the same type.
   bool MaskedValueIsZero(SDValue Op, const APInt &Mask,
                          const APInt &DemandedElts, unsigned Depth = 0) const;
+
+  /// Return true if 'Op' is known to be zero in DemandedElts.  We
+  /// use this predicate to simplify operations downstream.
+  bool MaskedVectorIsZero(SDValue Op, const APInt &DemandedElts,
+                          unsigned Depth = 0) const;
 
   /// Return true if '(Op & Mask) == Mask'.
   /// Op and Mask are known to be the same type.

@@ -1607,7 +1607,7 @@ lldb::user_id_t ObjectFileELF::GetSectionIndexByName(const char *name) {
 }
 
 static SectionType GetSectionTypeFromName(llvm::StringRef Name) {
-  if (Name.consume_front(".debug_") || Name.consume_front(".zdebug_")) {
+  if (Name.consume_front(".debug_")) {
     return llvm::StringSwitch<SectionType>(Name)
         .Case("abbrev", eSectionTypeDWARFDebugAbbrev)
         .Case("abbrev.dwo", eSectionTypeDWARFDebugAbbrevDwo)
@@ -3367,8 +3367,7 @@ size_t ObjectFileELF::ReadSectionData(Section *section,
     return section->GetObjectFile()->ReadSectionData(section, section_data);
 
   size_t result = ObjectFile::ReadSectionData(section, section_data);
-  if (result == 0 || !llvm::object::Decompressor::isCompressedELFSection(
-                         section->Get(), section->GetName().GetStringRef()))
+  if (result == 0 || !(section->Get() & llvm::ELF::SHF_COMPRESSED))
     return result;
 
   auto Decompressor = llvm::object::Decompressor::create(
@@ -3388,8 +3387,7 @@ size_t ObjectFileELF::ReadSectionData(Section *section,
   auto buffer_sp =
       std::make_shared<DataBufferHeap>(Decompressor->getDecompressedSize(), 0);
   if (auto error = Decompressor->decompress(
-          {reinterpret_cast<char *>(buffer_sp->GetBytes()),
-           size_t(buffer_sp->GetByteSize())})) {
+          {buffer_sp->GetBytes(), size_t(buffer_sp->GetByteSize())})) {
     GetModule()->ReportWarning(
         "Decompression of section '%s' failed: %s",
         section->GetName().GetCString(),

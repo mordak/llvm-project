@@ -12,6 +12,7 @@
 #include "Arch/M68k.h"
 #include "Arch/Mips.h"
 #include "Arch/PPC.h"
+#include "Arch/Sparc.h"
 #include "Arch/SystemZ.h"
 #include "Arch/VE.h"
 #include "Arch/X86.h"
@@ -431,14 +432,14 @@ std::string tools::getCPUName(const Driver &D, const ArgList &Args,
 
   case llvm::Triple::bpfel:
   case llvm::Triple::bpfeb:
+    if (const Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
+      return A->getValue();
+    return "";
+
   case llvm::Triple::sparc:
   case llvm::Triple::sparcel:
   case llvm::Triple::sparcv9:
-    if (const Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
-      return A->getValue();
-    if (T.getArch() == llvm::Triple::sparc && T.isOSSolaris())
-      return "v9";
-    return "";
+    return sparc::getSparcTargetCPU(D, Args, T);
 
   case llvm::Triple::x86:
   case llvm::Triple::x86_64:
@@ -727,7 +728,8 @@ bool tools::addOpenMPRuntime(ArgStringList &CmdArgs, const ToolChain &TC,
   if (IsOffloadingHost)
     CmdArgs.push_back("-lomptarget");
 
-  if (IsOffloadingHost && TC.getDriver().isUsingLTO(/* IsOffload */ true))
+  if (IsOffloadingHost && TC.getDriver().isUsingLTO(/* IsOffload */ true) &&
+      !Args.hasArg(options::OPT_nogpulib))
     CmdArgs.push_back("-lomptarget.devicertl");
 
   addArchSpecificRPath(TC, Args, CmdArgs);
@@ -739,15 +741,28 @@ bool tools::addOpenMPRuntime(ArgStringList &CmdArgs, const ToolChain &TC,
   return true;
 }
 
-void tools::addFortranRuntimeLibs(llvm::opt::ArgStringList &CmdArgs) {
-  CmdArgs.push_back("-lFortran_main");
-  CmdArgs.push_back("-lFortranRuntime");
-  CmdArgs.push_back("-lFortranDecimal");
+void tools::addFortranRuntimeLibs(const ToolChain &TC,
+                                  llvm::opt::ArgStringList &CmdArgs) {
+  if (TC.getTriple().isKnownWindowsMSVCEnvironment()) {
+    CmdArgs.push_back("Fortran_main.lib");
+    CmdArgs.push_back("FortranRuntime.lib");
+    CmdArgs.push_back("FortranDecimal.lib");
+  } else {
+    CmdArgs.push_back("-lFortran_main");
+    CmdArgs.push_back("-lFortranRuntime");
+    CmdArgs.push_back("-lFortranDecimal");
+  }
 }
 
 void tools::addFortranRuntimeLibraryPath(const ToolChain &TC,
                                          const llvm::opt::ArgList &Args,
                                          ArgStringList &CmdArgs) {
+  // NOTE: Generating executables by Flang is considered an "experimental"
+  // feature and hence this is guarded with a command line option.
+  // TODO: Make this work unconditionally once Flang is mature enough.
+  if (!Args.hasArg(options::OPT_flang_experimental_exec))
+    return;
+
   // Default to the <driver-path>/../lib directory. This works fine on the
   // platforms that we have tested so far. We will probably have to re-fine
   // this in the future. In particular, on some platforms, we may need to use
@@ -755,7 +770,10 @@ void tools::addFortranRuntimeLibraryPath(const ToolChain &TC,
   SmallString<256> DefaultLibPath =
       llvm::sys::path::parent_path(TC.getDriver().Dir);
   llvm::sys::path::append(DefaultLibPath, "lib");
-  CmdArgs.push_back(Args.MakeArgString("-L" + DefaultLibPath));
+  if (TC.getTriple().isKnownWindowsMSVCEnvironment())
+    CmdArgs.push_back(Args.MakeArgString("-libpath:" + DefaultLibPath));
+  else
+    CmdArgs.push_back(Args.MakeArgString("-L" + DefaultLibPath));
 }
 
 static void addSanitizerRuntime(const ToolChain &TC, const ArgList &Args,
@@ -1494,7 +1512,8 @@ static void AddUnwindLibrary(const ToolChain &TC, const Driver &D,
     return;
 
   LibGccType LGT = getLibGccType(TC, D, Args);
-  bool AsNeeded = LGT == LibGccType::UnspecifiedLibGcc && !D.CCCIsCXX() &&
+  bool AsNeeded = LGT == LibGccType::UnspecifiedLibGcc &&
+                  (UNW == ToolChain::UNW_CompilerRT || !D.CCCIsCXX()) &&
                   !TC.getTriple().isAndroid() &&
                   !TC.getTriple().isOSCygMing() && !TC.getTriple().isOSAIX();
   if (AsNeeded)

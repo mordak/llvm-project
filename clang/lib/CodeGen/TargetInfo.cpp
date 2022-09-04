@@ -35,7 +35,7 @@
 #include "llvm/IR/Type.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include <algorithm> // std::sort
+#include <algorithm>
 
 using namespace clang;
 using namespace CodeGen;
@@ -442,6 +442,9 @@ static Address emitMergePHI(CodeGenFunction &CGF,
   CharUnits Align = std::min(Addr1.getAlignment(), Addr2.getAlignment());
   return Address(PHI, Addr1.getElementType(), Align);
 }
+
+TargetCodeGenInfo::TargetCodeGenInfo(std::unique_ptr<ABIInfo> Info)
+    : Info(std::move(Info)) {}
 
 TargetCodeGenInfo::~TargetCodeGenInfo() = default;
 
@@ -2868,7 +2871,7 @@ void X86_64ABIInfo::classify(QualType Ty, uint64_t OffsetBase, Class &Lo,
     } else if (k >= BuiltinType::Bool && k <= BuiltinType::LongLong) {
       Current = Integer;
     } else if (k == BuiltinType::Float || k == BuiltinType::Double ||
-               k == BuiltinType::Float16) {
+               k == BuiltinType::Float16 || k == BuiltinType::BFloat16) {
       Current = SSE;
     } else if (k == BuiltinType::LongDouble) {
       const llvm::fltSemantics *LDF = &getTarget().getLongDoubleFormat();
@@ -2999,7 +3002,8 @@ void X86_64ABIInfo::classify(QualType Ty, uint64_t OffsetBase, Class &Lo,
         Current = Integer;
       else if (Size <= 128)
         Lo = Hi = Integer;
-    } else if (ET->isFloat16Type() || ET == getContext().FloatTy) {
+    } else if (ET->isFloat16Type() || ET == getContext().FloatTy ||
+               ET->isBFloat16Type()) {
       Current = SSE;
     } else if (ET == getContext().DoubleTy) {
       Lo = Hi = SSE;
@@ -3471,9 +3475,9 @@ GetSSETypeAtOffset(llvm::Type *IRType, unsigned IROffset,
   if (SourceSize > T0Size)
       T1 = getFPTypeAtOffset(IRType, IROffset + T0Size, TD);
   if (T1 == nullptr) {
-    // Check if IRType is a half + float. float type will be in IROffset+4 due
+    // Check if IRType is a half/bfloat + float. float type will be in IROffset+4 due
     // to its alignment.
-    if (T0->isHalfTy() && SourceSize > 4)
+    if (T0->is16bitFPTy() && SourceSize > 4)
       T1 = getFPTypeAtOffset(IRType, IROffset + 4, TD);
     // If we can't get a second FP type, return a simple half or float.
     // avx512fp16-abi.c:pr51813_2 shows it works to return float for
@@ -3485,7 +3489,7 @@ GetSSETypeAtOffset(llvm::Type *IRType, unsigned IROffset,
   if (T0->isFloatTy() && T1->isFloatTy())
     return llvm::FixedVectorType::get(T0, 2);
 
-  if (T0->isHalfTy() && T1->isHalfTy()) {
+  if (T0->is16bitFPTy() && T1->is16bitFPTy()) {
     llvm::Type *T2 = nullptr;
     if (SourceSize > 4)
       T2 = getFPTypeAtOffset(IRType, IROffset + 4, TD);
@@ -3494,7 +3498,7 @@ GetSSETypeAtOffset(llvm::Type *IRType, unsigned IROffset,
     return llvm::FixedVectorType::get(T0, 4);
   }
 
-  if (T0->isHalfTy() || T1->isHalfTy())
+  if (T0->is16bitFPTy() || T1->is16bitFPTy())
     return llvm::FixedVectorType::get(llvm::Type::getHalfTy(getVMContext()), 4);
 
   return llvm::Type::getDoubleTy(getVMContext());
@@ -9495,7 +9499,7 @@ AMDGPUTargetCodeGenInfo::getGlobalVarAddressSpace(CodeGenModule &CGM,
   if (CGM.isTypeConstant(D->getType(), false) &&
       D->hasConstantInitialization()) {
     if (auto ConstAS = CGM.getTarget().getConstantAddressSpace())
-      return ConstAS.getValue();
+      return *ConstAS;
   }
   return DefaultGlobalAS;
 }
@@ -10446,6 +10450,15 @@ ABIArgInfo SPIRVABIInfo::classifyKernelArgumentType(QualType Ty) const {
       LTy = llvm::PointerType::getWithSamePointeeType(PtrTy, GlobalAS);
       return ABIArgInfo::getDirect(LTy, 0, nullptr, false);
     }
+
+    // Force copying aggregate type in kernel arguments by value when
+    // compiling CUDA targeting SPIR-V. This is required for the object
+    // copied to be valid on the device.
+    // This behavior follows the CUDA spec
+    // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#global-function-argument-processing,
+    // and matches the NVPTX implementation.
+    if (isAggregateTypeForABI(Ty))
+      return getNaturalAlignIndirect(Ty, /* byval */ true);
   }
   return classifyArgumentType(Ty);
 }
@@ -10989,9 +11002,22 @@ bool RISCVABIInfo::detectFPCCEligibleStructHelper(QualType Ty, CharUnits CurOff,
     // Unions aren't eligible unless they're empty (which is caught above).
     if (RD->isUnion())
       return false;
+    const ASTRecordLayout &Layout = getContext().getASTRecordLayout(RD);
+    // If this is a C++ record, check the bases first.
+    if (const CXXRecordDecl *CXXRD = dyn_cast<CXXRecordDecl>(RD)) {
+      for (const CXXBaseSpecifier &B : CXXRD->bases()) {
+        const auto *BDecl =
+            cast<CXXRecordDecl>(B.getType()->castAs<RecordType>()->getDecl());
+        CharUnits BaseOff = Layout.getBaseClassOffset(BDecl);
+        bool Ret = detectFPCCEligibleStructHelper(B.getType(), CurOff + BaseOff,
+                                                  Field1Ty, Field1Off, Field2Ty,
+                                                  Field2Off);
+        if (!Ret)
+          return false;
+      }
+    }
     int ZeroWidthBitFieldCount = 0;
     for (const FieldDecl *FD : RD->fields()) {
-      const ASTRecordLayout &Layout = getContext().getASTRecordLayout(RD);
       uint64_t FieldOffInBits = Layout.getFieldOffset(FD->getFieldIndex());
       QualType QTy = FD->getType();
       if (FD->isBitField()) {

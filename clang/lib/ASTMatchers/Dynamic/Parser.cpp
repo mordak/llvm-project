@@ -397,9 +397,9 @@ bool Parser::parseIdentifierPrefixImpl(VariantValue *Value) {
       assert(NamedValue.isMatcher());
       llvm::Optional<DynTypedMatcher> Result =
           NamedValue.getMatcher().getSingleMatcher();
-      if (Result.hasValue()) {
+      if (Result) {
         llvm::Optional<DynTypedMatcher> Bound = Result->tryBind(BindID);
-        if (Bound.hasValue()) {
+        if (Bound) {
           *Value = VariantMatcher::SingleMatcher(*Bound);
           return true;
         }
@@ -917,7 +917,7 @@ Parser::parseMatcherExpression(StringRef &Code, Sema *S,
   }
   llvm::Optional<DynTypedMatcher> Result =
       Value.getMatcher().getSingleMatcher();
-  if (!Result.hasValue()) {
+  if (!Result) {
     Error->addError(SourceRange(), Error->ET_ParserOverloadedType)
         << Value.getTypeAsString();
   }

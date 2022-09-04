@@ -163,12 +163,12 @@ public:
   bool preferPredicateOverEpilogue(Loop *L, LoopInfo *LI, ScalarEvolution &SE,
                                    AssumptionCache &AC, TargetLibraryInfo *TLI,
                                    DominatorTree *DT,
-                                   const LoopAccessInfo *LAI) const {
+                                   LoopVectorizationLegality *LVL) const {
     return false;
   }
 
-  bool emitGetActiveLaneMask() const {
-    return false;
+  PredicationStyle emitGetActiveLaneMask() const {
+    return PredicationStyle::None;
   }
 
   Optional<Instruction *> instCombineIntrinsic(InstCombiner &IC,
@@ -279,6 +279,11 @@ public:
 
   bool isLegalMaskedCompressStore(Type *DataType) const { return false; }
 
+  bool isLegalAltInstr(VectorType *VecTy, unsigned Opcode0, unsigned Opcode1,
+                       const SmallBitVector &OpcodeMask) const {
+    return false;
+  }
+
   bool isLegalMaskedExpandLoad(Type *DataType) const { return false; }
 
   bool enableOrderedReductions() const { return false; }
@@ -334,6 +339,8 @@ public:
   }
 
   bool supportsEfficientVectorElementLoadStore() const { return false; }
+
+  bool supportsTailCalls() const { return true; }
 
   bool enableAggressiveInterleaving(bool LoopHasReductions) const {
     return false;
@@ -795,6 +802,8 @@ public:
   bool shouldExpandReduction(const IntrinsicInst *II) const { return true; }
 
   unsigned getGISelRematGlobalCost() const { return 1; }
+
+  unsigned getMinTripCountTailFoldingThreshold() const { return 0; }
 
   bool supportsScalableVectors() const { return false; }
 

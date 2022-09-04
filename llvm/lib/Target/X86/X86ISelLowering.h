@@ -1160,6 +1160,19 @@ namespace llvm {
                                    APInt &UndefElts,
                                    unsigned Depth) const override;
 
+    bool isTargetCanonicalConstantNode(SDValue Op) const override {
+      // Peek through bitcasts/extracts/inserts to see if we have a broadcast
+      // vector from memory.
+      while (Op.getOpcode() == ISD::BITCAST ||
+             Op.getOpcode() == ISD::EXTRACT_SUBVECTOR ||
+             (Op.getOpcode() == ISD::INSERT_SUBVECTOR &&
+              Op.getOperand(0).isUndef()))
+        Op = Op.getOperand(Op.getOpcode() == ISD::INSERT_SUBVECTOR ? 1 : 0);
+
+      return Op.getOpcode() == X86ISD::VBROADCAST_LOAD ||
+             TargetLowering::isTargetCanonicalConstantNode(Op);
+    }
+
     const Constant *getTargetConstantFromLoad(LoadSDNode *LD) const override;
 
     SDValue unwrapAddress(SDValue N) const override;
@@ -1396,7 +1409,7 @@ namespace llvm {
     Register
     getExceptionSelectorRegister(const Constant *PersonalityFn) const override;
 
-    virtual bool needsFixedCatchObjects() const override;
+    bool needsFixedCatchObjects() const override;
 
     /// This method returns a target specific FastISel object,
     /// or null if the target does not support "fast" ISel.
@@ -1585,6 +1598,7 @@ namespace llvm {
     SDValue lowerFaddFsub(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_EXTEND(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_ROUND(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerFP_TO_BF16(SDValue Op, SelectionDAG &DAG) const;
 
     SDValue
     LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
@@ -1607,6 +1621,17 @@ namespace llvm {
     void insertCopiesSplitCSR(
       MachineBasicBlock *Entry,
       const SmallVectorImpl<MachineBasicBlock *> &Exits) const override;
+
+    bool
+    splitValueIntoRegisterParts(SelectionDAG &DAG, const SDLoc &DL, SDValue Val,
+                                SDValue *Parts, unsigned NumParts, MVT PartVT,
+                                Optional<CallingConv::ID> CC) const override;
+
+    SDValue
+    joinRegisterPartsIntoValue(SelectionDAG &DAG, const SDLoc &DL,
+                               const SDValue *Parts, unsigned NumParts,
+                               MVT PartVT, EVT ValueVT,
+                               Optional<CallingConv::ID> CC) const override;
 
     bool isUsedByReturnOnly(SDNode *N, SDValue &Chain) const override;
 
