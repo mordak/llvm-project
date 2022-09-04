@@ -68,13 +68,13 @@ UUID MinidumpParser::GetModuleUUID(const minidump::Module *module) {
       return UUID();
     if (GetArchitecture().GetTriple().isOSBinFormatELF()) {
       if (pdb70_uuid->Age != 0)
-        return UUID::fromOptionalData(pdb70_uuid, sizeof(*pdb70_uuid));
-      return UUID::fromOptionalData(&pdb70_uuid->Uuid,
+        return UUID(pdb70_uuid, sizeof(*pdb70_uuid));
+      return UUID(&pdb70_uuid->Uuid,
                                     sizeof(pdb70_uuid->Uuid));
     }
-    return UUID::fromCvRecord(*pdb70_uuid);
+    return UUID(*pdb70_uuid);
   } else if (cv_signature == CvSignature::ElfBuildId)
-    return UUID::fromOptionalData(cv_record);
+    return UUID(cv_record);
 
   return UUID();
 }
@@ -236,7 +236,7 @@ llvm::Optional<lldb::pid_t> MinidumpParser::GetPid() {
   }
 
   llvm::Optional<LinuxProcStatus> proc_status = GetLinuxProcStatus();
-  if (proc_status.hasValue()) {
+  if (proc_status) {
     return proc_status->GetPid();
   }
 

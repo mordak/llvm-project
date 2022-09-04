@@ -26,6 +26,11 @@ struct ConstantOpInterface
                           const BufferizationOptions &options) const {
     auto constantOp = cast<arith::ConstantOp>(op);
 
+    // TODO: Implement memory space for this op. E.g., by adding a memory_space
+    // attribute to ConstantOp.
+    if (options.defaultMemorySpace != static_cast<unsigned>(0))
+      return op->emitError("memory space not implemented yet");
+
     // Only ranked tensors are supported.
     if (!constantOp.getType().isa<RankedTensorType>())
       return failure();
@@ -41,9 +46,9 @@ struct ConstantOpInterface
         getGlobalFor(constantOp, options.bufferAlignment);
     if (failed(globalOp))
       return failure();
-    memref::GlobalOp globalMemref = globalOp.getValue();
+    memref::GlobalOp globalMemref = *globalOp;
     replaceOpWithNewBufferizedOp<memref::GetGlobalOp>(
-        rewriter, op, globalMemref.type(), globalMemref.getName());
+        rewriter, op, globalMemref.getType(), globalMemref.getName());
 
     return success();
   }
@@ -84,8 +89,10 @@ struct IndexCastOpInterface
     auto castOp = cast<arith::IndexCastOp>(op);
     auto resultTensorType = castOp.getType().cast<TensorType>();
 
-    Value source = getBuffer(rewriter, castOp.getIn(), options);
-    auto sourceType = source.getType().cast<BaseMemRefType>();
+    FailureOr<Value> source = getBuffer(rewriter, castOp.getIn(), options);
+    if (failed(source))
+      return failure();
+    auto sourceType = source->getType().cast<BaseMemRefType>();
 
     // Result type should have same layout and address space as the source type.
     BaseMemRefType resultType;
@@ -100,7 +107,7 @@ struct IndexCastOpInterface
     }
 
     replaceOpWithNewBufferizedOp<arith::IndexCastOp>(rewriter, op, resultType,
-                                                     source);
+                                                     *source);
     return success();
   }
 };
@@ -140,30 +147,57 @@ struct SelectOpInterface
     // instead of its OpOperands. In the worst case, 2 copies are inserted at
     // the moment (one for each tensor). When copying the op result, only one
     // copy would be needed.
-    Value trueBuffer = getBuffer(rewriter, selectOp.getTrueValue(), options);
-    Value falseBuffer = getBuffer(rewriter, selectOp.getFalseValue(), options);
+    FailureOr<Value> maybeTrueBuffer =
+        getBuffer(rewriter, selectOp.getTrueValue(), options);
+    FailureOr<Value> maybeFalseBuffer =
+        getBuffer(rewriter, selectOp.getFalseValue(), options);
+    if (failed(maybeTrueBuffer) || failed(maybeFalseBuffer))
+      return failure();
+    Value trueBuffer = *maybeTrueBuffer;
+    Value falseBuffer = *maybeFalseBuffer;
 
     // The "true" and the "false" operands must have the same type. If the
     // buffers have different types, they differ only in their layout map. Cast
     // both of them to the most dynamic MemRef type.
     if (trueBuffer.getType() != falseBuffer.getType()) {
-      auto trueType = trueBuffer.getType().cast<MemRefType>();
-      int64_t dynamicOffset = ShapedType::kDynamicStrideOrOffset;
-      SmallVector<int64_t> dynamicStrides(trueType.getRank(),
-                                          ShapedType::kDynamicStrideOrOffset);
-      AffineMap stridedLayout = makeStridedLinearLayoutMap(
-          dynamicStrides, dynamicOffset, op->getContext());
-      auto castedType =
-          MemRefType::get(trueType.getShape(), trueType.getElementType(),
-                          stridedLayout, trueType.getMemorySpaceAsInt());
-      trueBuffer = rewriter.create<memref::CastOp>(loc, castedType, trueBuffer);
+      auto targetType =
+          bufferization::getBufferType(selectOp.getResult(), options);
+      if (failed(targetType))
+        return failure();
+      trueBuffer =
+          rewriter.create<memref::CastOp>(loc, *targetType, trueBuffer);
       falseBuffer =
-          rewriter.create<memref::CastOp>(loc, castedType, falseBuffer);
+          rewriter.create<memref::CastOp>(loc, *targetType, falseBuffer);
     }
 
     replaceOpWithNewBufferizedOp<arith::SelectOp>(
         rewriter, op, selectOp.getCondition(), trueBuffer, falseBuffer);
     return success();
+  }
+
+  FailureOr<BaseMemRefType>
+  getBufferType(Operation *op, Value value, const BufferizationOptions &options,
+                const DenseMap<Value, BaseMemRefType> &fixedTypes) const {
+    auto selectOp = cast<arith::SelectOp>(op);
+    assert(value == selectOp.getResult() && "invalid value");
+    auto trueType = bufferization::getBufferType(selectOp.getTrueValue(),
+                                                 options, fixedTypes);
+    auto falseType = bufferization::getBufferType(selectOp.getFalseValue(),
+                                                  options, fixedTypes);
+    if (failed(trueType) || failed(falseType))
+      return failure();
+    if (*trueType == *falseType)
+      return *trueType;
+    if (trueType->getMemorySpaceAsInt() != falseType->getMemorySpaceAsInt())
+      return op->emitError("inconsistent memory space on true/false operands");
+
+    // If the buffers have different types, they differ only in their layout
+    // map.
+    auto memrefType = trueType->cast<MemRefType>();
+    return getMemRefTypeWithFullyDynamicLayout(
+        RankedTensorType::get(memrefType.getShape(),
+                              memrefType.getElementType()),
+        memrefType.getMemorySpaceAsInt());
   }
 
   BufferRelation bufferRelation(Operation *op, OpResult opResult,

@@ -32,17 +32,13 @@ public:
     ASSERT_TRUE(error.Success());
 
     Socket *accept_socket;
-    std::future<Status> accept_error = std::async(std::launch::async, [&] {
-      return listen_socket_up->Accept(accept_socket);
-    });
-
     std::unique_ptr<TCPSocket> connect_socket_up(
         new TCPSocket(true, child_processes_inherit));
     error = connect_socket_up->Connect(
         llvm::formatv("localhost:{0}", listen_socket_up->GetLocalPortNumber())
             .str());
     ASSERT_TRUE(error.Success());
-    ASSERT_TRUE(accept_error.get().Success());
+    ASSERT_TRUE(listen_socket_up->Accept(accept_socket).Success());
 
     callback_count = 0;
     socketpair[0] = std::move(connect_socket_up);
@@ -98,6 +94,56 @@ TEST_F(MainLoopTest, TerminatesImmediately) {
   ASSERT_EQ(1u, callback_count);
 }
 
+TEST_F(MainLoopTest, PendingCallback) {
+  char X = 'X';
+  size_t len = sizeof(X);
+  ASSERT_TRUE(socketpair[0]->Write(&X, len).Success());
+
+  MainLoop loop;
+  Status error;
+  auto handle = loop.RegisterReadObject(
+      socketpair[1],
+      [&](MainLoopBase &loop) {
+        // Both callbacks should be called before the loop terminates.
+        loop.AddPendingCallback(make_callback());
+        loop.AddPendingCallback(make_callback());
+        loop.RequestTermination();
+      },
+      error);
+  ASSERT_TRUE(error.Success());
+  ASSERT_TRUE(handle);
+  ASSERT_TRUE(loop.Run().Success());
+  ASSERT_EQ(2u, callback_count);
+}
+
+TEST_F(MainLoopTest, PendingCallbackCalledOnlyOnce) {
+  char X = 'X';
+  size_t len = sizeof(X);
+  ASSERT_TRUE(socketpair[0]->Write(&X, len).Success());
+
+  MainLoop loop;
+  Status error;
+  auto handle = loop.RegisterReadObject(
+      socketpair[1],
+      [&](MainLoopBase &loop) {
+        // Add one pending callback on the first iteration.
+        if (callback_count == 0) {
+          loop.AddPendingCallback([&](MainLoopBase &loop) {
+            callback_count++;
+          });
+        }
+        // Terminate the loop on second iteration.
+        if (callback_count++ >= 1)
+          loop.RequestTermination();
+      },
+      error);
+  ASSERT_TRUE(error.Success());
+  ASSERT_TRUE(handle);
+  ASSERT_TRUE(loop.Run().Success());
+  // 2 iterations of read callback + 1 call of pending callback.
+  ASSERT_EQ(3u, callback_count);
+}
+
 #ifdef LLVM_ON_UNIX
 TEST_F(MainLoopTest, DetectsEOF) {
 
@@ -124,7 +170,7 @@ TEST_F(MainLoopTest, Signal) {
 
   auto handle = loop.RegisterSignal(SIGUSR1, make_callback(), error);
   ASSERT_TRUE(error.Success());
-  kill(getpid(), SIGUSR1);
+  pthread_kill(pthread_self(), SIGUSR1);
   ASSERT_TRUE(loop.Run().Success());
   ASSERT_EQ(1u, callback_count);
 }
@@ -142,14 +188,9 @@ TEST_F(MainLoopTest, UnmonitoredSignal) {
 
   auto handle = loop.RegisterSignal(SIGUSR1, make_callback(), error);
   ASSERT_TRUE(error.Success());
-  std::thread killer([]() {
-    sleep(1);
-    kill(getpid(), SIGUSR2);
-    sleep(1);
-    kill(getpid(), SIGUSR1);
-  });
+  pthread_kill(pthread_self(), SIGUSR2);
+  pthread_kill(pthread_self(), SIGUSR1);
   ASSERT_TRUE(loop.Run().Success());
-  killer.join();
   ASSERT_EQ(1u, callback_count);
 }
 
@@ -170,7 +211,7 @@ TEST_F(MainLoopTest, TwoSignalCallbacks) {
         SIGUSR1, [&](MainLoopBase &loop) { ++callback2_count; }, error);
     ASSERT_TRUE(error.Success());
 
-    kill(getpid(), SIGUSR1);
+    pthread_kill(pthread_self(), SIGUSR1);
     ASSERT_TRUE(loop.Run().Success());
     ASSERT_EQ(1u, callback_count);
     ASSERT_EQ(1u, callback2_count);
@@ -183,7 +224,7 @@ TEST_F(MainLoopTest, TwoSignalCallbacks) {
         SIGUSR1, [&](MainLoopBase &loop) { ++callback3_count; }, error);
     ASSERT_TRUE(error.Success());
 
-    kill(getpid(), SIGUSR1);
+    pthread_kill(pthread_self(), SIGUSR1);
     ASSERT_TRUE(loop.Run().Success());
     ASSERT_EQ(2u, callback_count);
     ASSERT_EQ(1u, callback2_count);
@@ -191,7 +232,7 @@ TEST_F(MainLoopTest, TwoSignalCallbacks) {
   }
 
   // Both extra callbacks should be unregistered now.
-  kill(getpid(), SIGUSR1);
+  pthread_kill(pthread_self(), SIGUSR1);
   ASSERT_TRUE(loop.Run().Success());
   ASSERT_EQ(3u, callback_count);
   ASSERT_EQ(1u, callback2_count);

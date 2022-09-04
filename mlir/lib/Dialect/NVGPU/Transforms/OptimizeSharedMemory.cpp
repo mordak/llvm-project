@@ -9,18 +9,26 @@
 // This file implements transforms to optimize accesses to shared memory.
 //
 //===----------------------------------------------------------------------===//
-#include "PassDetail.h"
+
+#include "mlir/Dialect/NVGPU/Passes.h"
+
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/NVGPU/IR/NVGPUDialect.h"
-#include "mlir/Dialect/NVGPU/Passes.h"
 #include "mlir/Dialect/NVGPU/Transforms/Transforms.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/MathExtras.h"
+
+namespace mlir {
+namespace nvgpu {
+#define GEN_PASS_DEF_OPTIMIZESHAREDMEMORY
+#include "mlir/Dialect/NVGPU/Passes.h.inc"
+} // namespace nvgpu
+} // namespace mlir
 
 using namespace mlir;
 using namespace mlir::nvgpu;
@@ -105,9 +113,9 @@ Operation::operand_range getIndices(Operation *op) {
   if (auto copyOp = dyn_cast<DeviceAsyncCopyOp>(op))
     return copyOp.getDstIndices();
   if (auto loadOp = dyn_cast<memref::LoadOp>(op))
-    return loadOp.indices();
+    return loadOp.getIndices();
   if (auto storeOp = dyn_cast<memref::StoreOp>(op))
-    return storeOp.indices();
+    return storeOp.getIndices();
   if (auto vectorReadOp = dyn_cast<vector::LoadOp>(op))
     return vectorReadOp.getIndices();
   if (auto vectorStoreOp = dyn_cast<vector::StoreOp>(op))
@@ -121,9 +129,9 @@ void setIndices(Operation *op, ArrayRef<Value> indices) {
   if (auto copyOp = dyn_cast<DeviceAsyncCopyOp>(op))
     return copyOp.getDstIndicesMutable().assign(indices);
   if (auto loadOp = dyn_cast<memref::LoadOp>(op))
-    return loadOp.indicesMutable().assign(indices);
+    return loadOp.getIndicesMutable().assign(indices);
   if (auto storeOp = dyn_cast<memref::StoreOp>(op))
-    return storeOp.indicesMutable().assign(indices);
+    return storeOp.getIndicesMutable().assign(indices);
   if (auto vectorReadOp = dyn_cast<vector::LoadOp>(op))
     return vectorReadOp.getIndicesMutable().assign(indices);
   if (auto vectorStoreOp = dyn_cast<vector::StoreOp>(op))
@@ -242,7 +250,7 @@ mlir::nvgpu::optimizeSharedMemoryReadsAndWrites(Operation *parentOp,
 
 namespace {
 class OptimizeSharedMemoryPass
-    : public OptimizeSharedMemoryBase<OptimizeSharedMemoryPass> {
+    : public nvgpu::impl::OptimizeSharedMemoryBase<OptimizeSharedMemoryPass> {
 public:
   OptimizeSharedMemoryPass() = default;
 
@@ -250,14 +258,17 @@ public:
     Operation *op = getOperation();
     SmallVector<memref::AllocOp> shmAllocOps;
     op->walk([&](memref::AllocOp allocOp) {
-      if (allocOp.memref().getType().cast<MemRefType>().getMemorySpaceAsInt() !=
+      if (allocOp.getMemref()
+              .getType()
+              .cast<MemRefType>()
+              .getMemorySpaceAsInt() !=
           gpu::GPUDialect::getWorkgroupAddressSpace())
         return;
       shmAllocOps.push_back(allocOp);
     });
     for (auto allocOp : shmAllocOps) {
       if (failed(optimizeSharedMemoryReadsAndWrites(getOperation(),
-                                                    allocOp.memref())))
+                                                    allocOp.getMemref())))
         return;
     }
   }

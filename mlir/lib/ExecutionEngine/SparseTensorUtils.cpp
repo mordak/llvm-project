@@ -914,6 +914,7 @@ public:
       : dimSizes(dimSizes), dimTypes(sparsity), nnz(getRank()) {
     assert(dimSizes.size() == dimTypes.size() && "Rank mismatch");
     bool uncompressed = true;
+    (void)uncompressed;
     uint64_t sz = 1; // the product of all `dimSizes` strictly less than `r`.
     for (uint64_t rank = getRank(), r = 0; r < rank; r++) {
       switch (dimTypes[r]) {
@@ -933,8 +934,11 @@ public:
         // when adding support for multiple compressed dimensions or
         // for dense-after-compressed.
         break;
+      default:
+        FATAL("unsupported dimension level type");
       }
       sz = checkedMul(sz, dimSizes[r]);
+
     }
   }
 
@@ -1366,7 +1370,7 @@ openSparseTensorCOO(char *filename, uint64_t rank, const uint64_t *shape,
   if ((valueKind == SparseTensorFile::ValueKind::kReal && tensorIsInteger) ||
       (valueKind == SparseTensorFile::ValueKind::kComplex && tensorIsReal)) {
     FATAL("Tensor element type %d not compatible with values in file %s\n",
-          valTp, filename);
+          static_cast<int>(valTp), filename);
   }
   stfile.assertMatchesShape(rank, shape);
   // Prepare sparse tensor object with per-dimension sizes

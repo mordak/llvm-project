@@ -2,9 +2,7 @@
 Test SBTarget APIs.
 """
 
-from __future__ import print_function
-
-
+import re
 import unittest2
 import os
 import lldb
@@ -118,7 +116,7 @@ class TargetAPITestCase(TestBase):
 
         abi_pre_launch = target.GetABIName()
         self.assertTrue(len(abi_pre_launch) != 0, "Got an ABI string")
-        
+
         breakpoint = target.BreakpointCreateByLocation(
             "main.c", self.line_main)
         self.assertTrue(breakpoint, VALID_BREAKPOINT)
@@ -178,7 +176,7 @@ class TargetAPITestCase(TestBase):
         process = target.LaunchSimple(
             ['foo', 'bar'], ['baz'], self.get_process_working_directory())
         process.Continue()
-        self.assertEqual(process.GetState(), lldb.eStateExited)
+        self.assertState(process.GetState(), lldb.eStateExited)
         output = process.GetSTDOUT(9999)
         self.assertIn('arg: foo', output)
         self.assertIn('arg: bar', output)
@@ -189,7 +187,7 @@ class TargetAPITestCase(TestBase):
         process = target.LaunchSimple(None, None,
                                       self.get_process_working_directory())
         process.Continue()
-        self.assertEqual(process.GetState(), lldb.eStateExited)
+        self.assertState(process.GetState(), lldb.eStateExited)
         output = process.GetSTDOUT(9999)
         self.assertIn('arg: foo', output)
         self.assertIn('env: bar=baz', output)
@@ -198,7 +196,7 @@ class TargetAPITestCase(TestBase):
         process = target.LaunchSimple(
             None, None, self.get_process_working_directory())
         process.Continue()
-        self.assertEqual(process.GetState(), lldb.eStateExited)
+        self.assertState(process.GetState(), lldb.eStateExited)
         output = process.GetSTDOUT(9999)
         self.assertEqual(output, "")
 
@@ -519,3 +517,14 @@ class TargetAPITestCase(TestBase):
             module = target.GetModuleAtIndex(i)
             self.assertTrue(target.IsLoaded(module), "Running the target should "
                             "have loaded its modules.")
+
+    def test_module_subscript_regex(self):
+        """Exercise SBTarget.module subscripting with regex."""
+        self.build()
+        exe = self.getBuildArtifact("a.out")
+        target = self.dbg.CreateTarget(exe)
+        self.assertTrue(target, VALID_TARGET)
+        modules = target.module[re.compile(r"/a[.]out$")]
+        self.assertEqual(len(modules), 1)
+        exe_mod = modules[0]
+        self.assertEqual(exe_mod.file.fullpath, exe)
