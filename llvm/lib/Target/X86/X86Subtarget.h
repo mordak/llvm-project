@@ -78,9 +78,6 @@ class X86Subtarget final : public X86GenSubtargetInfo {
 
   Align TileConfigAlignment = Align(4);
 
-  /// Whether function prologues should save register arguments on the stack.
-  bool SaveArgs = false;
-
   /// Max. memset / memcpy size that is turned into rep/movs, rep/stos ops.
   ///
   // FIXME: this is a known good value for Yonah. How about others?
