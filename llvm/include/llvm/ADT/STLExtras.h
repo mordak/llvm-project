@@ -19,7 +19,6 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/STLArrayExtras.h"
 #include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/identity.h"
@@ -253,6 +252,7 @@ void adl_swap(T &&lhs, T &&rhs) noexcept(
 
 /// Test whether \p RangeOrContainer is empty. Similar to C++17 std::empty.
 template <typename T>
+LLVM_DEPRECATED("Use x.empty() instead", "empty")
 constexpr bool empty(const T &RangeOrContainer) {
   return adl_begin(RangeOrContainer) == adl_end(RangeOrContainer);
 }
@@ -391,9 +391,9 @@ class filter_iterator_base
     : public iterator_adaptor_base<
           filter_iterator_base<WrappedIteratorT, PredicateT, IterTag>,
           WrappedIteratorT,
-          typename std::common_type<
-              IterTag, typename std::iterator_traits<
-                           WrappedIteratorT>::iterator_category>::type> {
+          std::common_type_t<IterTag,
+                             typename std::iterator_traits<
+                                 WrappedIteratorT>::iterator_category>> {
   using BaseT = typename filter_iterator_base::iterator_adaptor_base;
 
 protected:
@@ -619,9 +619,9 @@ template<typename... Iters> struct ZipTupleType {
 template <typename ZipType, typename... Iters>
 using zip_traits = iterator_facade_base<
     ZipType,
-    typename std::common_type<
+    std::common_type_t<
         std::bidirectional_iterator_tag,
-        typename std::iterator_traits<Iters>::iterator_category...>::type,
+        typename std::iterator_traits<Iters>::iterator_category...>,
     // ^ TODO: Implement random access methods.
     typename ZipTupleType<Iters...>::type,
     typename std::iterator_traits<
@@ -1789,24 +1789,6 @@ template <typename R> bool all_equal(R &&Range) {
 // is empty.
 template <typename T> bool all_equal(std::initializer_list<T> Values) {
   return all_equal<std::initializer_list<T>>(std::move(Values));
-}
-
-/// Returns true if Range consists of the same value repeated multiple times.
-template <typename R>
-LLVM_DEPRECATED(
-    "Use 'all_equal(Range)' or '!empty(Range) && all_equal(Range)' instead.",
-    "all_equal")
-bool is_splat(R &&Range) {
-  return !llvm::empty(Range) && all_equal(Range);
-}
-
-/// Returns true if Values consists of the same value repeated multiple times.
-template <typename T>
-LLVM_DEPRECATED(
-    "Use 'all_equal(Values)' or '!empty(Values) && all_equal(Values)' instead.",
-    "all_equal")
-bool is_splat(std::initializer_list<T> Values) {
-  return is_splat<std::initializer_list<T>>(std::move(Values));
 }
 
 /// Provide a container algorithm similar to C++ Library Fundamentals v2's

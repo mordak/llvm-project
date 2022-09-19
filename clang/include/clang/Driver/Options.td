@@ -899,11 +899,13 @@ def cl_ext_EQ : CommaJoined<["-"], "cl-ext=">, Group<opencl_Group>, Flags<[CC1Op
 def client__name : JoinedOrSeparate<["-"], "client_name">;
 def combine : Flag<["-", "--"], "combine">, Flags<[NoXarchOption, Unsupported]>;
 def compatibility__version : JoinedOrSeparate<["-"], "compatibility_version">;
-def config : Separate<["--"], "config">, Flags<[NoXarchOption]>,
+def config : Separate<["--"], "config">, Flags<[NoXarchOption, CoreOption]>,
   HelpText<"Specifies configuration file">;
-def config_system_dir_EQ : Joined<["--"], "config-system-dir=">, Flags<[NoXarchOption, HelpHidden]>,
+def no_default_config : Flag<["--"], "no-default-config">, Flags<[NoXarchOption, CoreOption]>,
+  HelpText<"Disable loading default configuration files">;
+def config_system_dir_EQ : Joined<["--"], "config-system-dir=">, Flags<[NoXarchOption, CoreOption, HelpHidden]>,
   HelpText<"System directory for configuration files">;
-def config_user_dir_EQ : Joined<["--"], "config-user-dir=">, Flags<[NoXarchOption, HelpHidden]>,
+def config_user_dir_EQ : Joined<["--"], "config-user-dir=">, Flags<[NoXarchOption, CoreOption, HelpHidden]>,
   HelpText<"User directory for configuration files">;
 def coverage : Flag<["-", "--"], "coverage">, Group<Link_Group>, Flags<[CoreOption]>;
 def cpp_precomp : Flag<["-"], "cpp-precomp">, Group<clang_ignored_f_Group>;
@@ -1673,6 +1675,12 @@ def fsanitize_coverage_ignorelist : Joined<["-"], "fsanitize-coverage-ignorelist
     HelpText<"Disable sanitizer coverage instrumentation for modules and functions "
              "that match the provided special case list, even the allowed ones">,
     MarshallingInfoStringVector<CodeGenOpts<"SanitizeCoverageIgnorelistFiles">>;
+def fexperimental_sanitize_metadata_EQ : CommaJoined<["-"], "fexperimental-sanitize-metadata=">,
+  Group<f_Group>,
+  HelpText<"Specify the type of metadata to emit for binary analysis sanitizers">;
+def fno_experimental_sanitize_metadata_EQ : CommaJoined<["-"], "fno-experimental-sanitize-metadata=">,
+  Group<f_Group>, Flags<[CoreOption]>,
+  HelpText<"Disable emitting metadata for binary analysis sanitizers">;
 def fsanitize_memory_track_origins_EQ : Joined<["-"], "fsanitize-memory-track-origins=">,
                                         Group<f_clang_Group>,
                                         HelpText<"Enable origins tracking in MemorySanitizer">,
@@ -2205,6 +2213,14 @@ def fms_compatibility_version
       HelpText<"Dot-separated value representing the Microsoft compiler "
                "version number to report in _MSC_VER (0 = don't define it "
                "(default))">;
+def fms_runtime_lib_EQ : Joined<["-"], "fms-runtime-lib=">, Group<f_Group>,
+  Flags<[NoXarchOption, CoreOption]>, Values<"static,static_dbg,dll,dll_dbg">,
+  HelpText<"Select Windows run-time library">,
+  DocBrief<[{
+Specify Visual Studio C runtime library. "static" and "static_dbg" correspond
+to the cl flags /MT and /MTd which use the multithread, static version. "dll"
+and "dll_dbg" correspond to the cl flags /MD and /MDd which use the multithread,
+dll version.}]>;
 defm delayed_template_parsing : BoolFOption<"delayed-template-parsing",
   LangOpts<"DelayedTemplateParsing">, DefaultFalse,
   PosFlag<SetTrue, [CC1Option], "Parse templated function definitions at the end of the translation unit">,
@@ -2273,6 +2289,12 @@ defm modules_validate_system_headers : BoolOption<"f", "modules-validate-system-
   HeaderSearchOpts<"ModulesValidateSystemHeaders">, DefaultFalse,
   PosFlag<SetTrue, [CC1Option], "Validate the system headers that a module depends on when loading the module">,
   NegFlag<SetFalse, [NoXarchOption]>>, Group<i_Group>;
+def fno_modules_validate_textual_header_includes :
+  Flag<["-"], "fno-modules-validate-textual-header-includes">,
+  Group<f_Group>, Flags<[CC1Option, NoXarchOption]>,
+  MarshallingInfoNegativeFlag<LangOpts<"ModulesValidateTextualHeaderIncludes">>,
+  HelpText<"Do not enforce -fmodules-decluse and private header restrictions for textual headers. "
+           "This flag will be removed in a future Clang release.">;
 
 def fvalidate_ast_input_files_content:
   Flag <["-"], "fvalidate-ast-input-files-content">,
@@ -2549,10 +2571,6 @@ def fno_openmp_simd : Flag<["-"], "fno-openmp-simd">, Group<f_Group>, Flags<[CC1
 def fopenmp_cuda_mode : Flag<["-"], "fopenmp-cuda-mode">, Group<f_Group>,
   Flags<[CC1Option, NoArgumentUnused, HelpHidden]>;
 def fno_openmp_cuda_mode : Flag<["-"], "fno-openmp-cuda-mode">, Group<f_Group>,
-  Flags<[NoArgumentUnused, HelpHidden]>;
-def fopenmp_cuda_force_full_runtime : Flag<["-"], "fopenmp-cuda-force-full-runtime">, Group<f_Group>,
-  Flags<[CC1Option, NoArgumentUnused, HelpHidden]>;
-def fno_openmp_cuda_force_full_runtime : Flag<["-"], "fno-openmp-cuda-force-full-runtime">, Group<f_Group>,
   Flags<[NoArgumentUnused, HelpHidden]>;
 def fopenmp_cuda_number_of_sm_EQ : Joined<["-"], "fopenmp-cuda-number-of-sm=">, Group<f_Group>,
   Flags<[CC1Option, NoArgumentUnused, HelpHidden]>;
@@ -3365,6 +3383,9 @@ def mwindows : Joined<["-"], "mwindows">, Group<m_Group>, Flags<[NoXarchOption]>
 def mdll : Joined<["-"], "mdll">, Group<m_Group>, Flags<[NoXarchOption]>;
 def municode : Joined<["-"], "municode">, Group<m_Group>, Flags<[NoXarchOption]>;
 def mthreads : Joined<["-"], "mthreads">, Group<m_Group>, Flags<[NoXarchOption]>;
+def mguard_EQ : Joined<["-"], "mguard=">, Group<m_Group>, Flags<[NoXarchOption]>,
+  HelpText<"Enable or disable Control Flow Guard checks and guard tables emission">,
+  Values<"none,cf,cf-nochecks">;
 def mcpu_EQ : Joined<["-"], "mcpu=">, Group<m_Group>;
 def mmcu_EQ : Joined<["-"], "mmcu=">, Group<m_Group>;
 def msim : Flag<["-"], "msim">, Group<m_Group>;
@@ -4126,7 +4147,8 @@ defm openmp_implicit_rpath: BoolFOption<"openmp-implicit-rpath",
   LangOpts<"OpenMP">,
   DefaultTrue,
   PosFlag<SetTrue, [], "Set rpath on OpenMP executables">,
-  NegFlag<SetFalse>>;
+  NegFlag<SetFalse>,
+  BothFlags<[NoArgumentUnused]>>;
 def r : Flag<["-"], "r">, Flags<[LinkerInput,NoArgumentUnused]>,
         Group<Link_Group>;
 def save_temps_EQ : Joined<["-", "--"], "save-temps=">, Flags<[CC1Option, FlangOption, NoXarchOption]>,
@@ -5274,8 +5296,8 @@ def record_command_line : Separate<["-"], "record-command-line">,
   HelpText<"The string to embed in the .LLVM.command.line section.">,
   MarshallingInfoString<CodeGenOpts<"RecordCommandLine">>;
 def compress_debug_sections_EQ : Joined<["-", "--"], "compress-debug-sections=">,
-    HelpText<"DWARF debug sections compression type">, Values<"none,zlib">,
-    NormalizedValuesScope<"llvm::DebugCompressionType">, NormalizedValues<["None", "Z"]>,
+    HelpText<"DWARF debug sections compression type">, Values<"none,zlib,zstd">,
+    NormalizedValuesScope<"llvm::DebugCompressionType">, NormalizedValues<["None", "Zlib", "Zstd"]>,
     MarshallingInfoEnum<CodeGenOpts<"CompressDebugSections">, "None">;
 def compress_debug_sections : Flag<["-", "--"], "compress-debug-sections">,
   Alias<compress_debug_sections_EQ>, AliasArgs<["zlib"]>;
@@ -5480,6 +5502,10 @@ def fsanitize_coverage_pc_table
     : Flag<["-"], "fsanitize-coverage-pc-table">,
       HelpText<"Create a table of coverage-instrumented PCs">,
       MarshallingInfoFlag<CodeGenOpts<"SanitizeCoveragePCTable">>;
+def fsanitize_coverage_control_flow
+    : Flag<["-"], "fsanitize-coverage-control-flow">,
+      HelpText<"Collect control flow of function">,
+      MarshallingInfoFlag<CodeGenOpts<"SanitizeCoverageControlFlow">>;
 def fsanitize_coverage_trace_pc
     : Flag<["-"], "fsanitize-coverage-trace-pc">,
       HelpText<"Enable PC tracing in sanitizer coverage">,
@@ -5504,6 +5530,14 @@ def fsanitize_coverage_trace_stores
     : Flag<["-"], "fsanitize-coverage-trace-stores">,
       HelpText<"Enable tracing of stores">,
       MarshallingInfoFlag<CodeGenOpts<"SanitizeCoverageTraceStores">>;
+def fexperimental_sanitize_metadata_EQ_covered
+    : Flag<["-"], "fexperimental-sanitize-metadata=covered">,
+      HelpText<"Emit PCs for code covered with binary analysis sanitizers">,
+      MarshallingInfoFlag<CodeGenOpts<"SanitizeBinaryMetadataCovered">>;
+def fexperimental_sanitize_metadata_EQ_atomics
+    : Flag<["-"], "fexperimental-sanitize-metadata=atomics">,
+      HelpText<"Emit PCs for atomic operations used by binary analysis sanitizers">,
+      MarshallingInfoFlag<CodeGenOpts<"SanitizeBinaryMetadataAtomics">>;
 def fpatchable_function_entry_offset_EQ
     : Joined<["-"], "fpatchable-function-entry-offset=">, MetaVarName<"<M>">,
       HelpText<"Generate M NOPs before function entry">,
@@ -6160,7 +6194,8 @@ def fdeclare_opencl_builtins : Flag<["-"], "fdeclare-opencl-builtins">,
 
 def fpreserve_vec3_type : Flag<["-"], "fpreserve-vec3-type">,
   HelpText<"Preserve 3-component vector type">,
-  MarshallingInfoFlag<CodeGenOpts<"PreserveVec3Type">>;
+  MarshallingInfoFlag<CodeGenOpts<"PreserveVec3Type">>,
+  ImpliedByAnyOf<[hlsl.KeyPath]>;
 def fwchar_type_EQ : Joined<["-"], "fwchar-type=">,
   HelpText<"Select underlying type for wchar_t">,
   Values<"char,short,int">,
@@ -6391,6 +6426,9 @@ def cl_ignored_Group : OptionGroup<"<clang-cl ignored options>">,
 class CLFlag<string name> : Option<["/", "-"], name, KIND_FLAG>,
   Group<cl_Group>, Flags<[CLOption, NoXarchOption]>;
 
+class CLDXCFlag<string name> : Option<["/", "-"], name, KIND_FLAG>,
+  Group<cl_Group>, Flags<[CLDXCOption, NoXarchOption]>;
+
 class CLCompileFlag<string name> : Option<["/", "-"], name, KIND_FLAG>,
   Group<cl_compile_Group>, Flags<[CLOption, NoXarchOption]>;
 
@@ -6399,6 +6437,9 @@ class CLIgnoredFlag<string name> : Option<["/", "-"], name, KIND_FLAG>,
 
 class CLJoined<string name> : Option<["/", "-"], name, KIND_JOINED>,
   Group<cl_Group>, Flags<[CLOption, NoXarchOption]>;
+
+class CLDXCJoined<string name> : Option<["/", "-"], name, KIND_JOINED>,
+  Group<cl_Group>, Flags<[CLDXCOption, NoXarchOption]>;
 
 class CLCompileJoined<string name> : Option<["/", "-"], name, KIND_JOINED>,
   Group<cl_compile_Group>, Flags<[CLOption, NoXarchOption]>;
@@ -6496,7 +6537,7 @@ def _SLASH_J : CLFlag<"J">, HelpText<"Make char type unsigned">,
 
 // The _SLASH_O option handles all the /O flags, but we also provide separate
 // aliased options to provide separate help messages.
-def _SLASH_O : CLJoined<"O">,
+def _SLASH_O : CLDXCJoined<"O">,
   HelpText<"Set multiple /O flags at once; e.g. '/O2y-' for '/O2 /Oy-'">,
   MetaVarName<"<flags>">;
 def : CLFlag<"O1">, Alias<_SLASH_O>, AliasArgs<["1"]>,
@@ -6509,7 +6550,7 @@ def : CLFlag<"Ob1">, Alias<_SLASH_O>, AliasArgs<["b1"]>,
   HelpText<"Only inline functions explicitly or implicitly marked inline">;
 def : CLFlag<"Ob2">, Alias<_SLASH_O>, AliasArgs<["b2"]>,
   HelpText<"Inline functions as deemed beneficial by the compiler">;
-def : CLFlag<"Od">, Alias<_SLASH_O>, AliasArgs<["d"]>,
+def : CLDXCFlag<"Od">, Alias<_SLASH_O>, AliasArgs<["d"]>,
   HelpText<"Disable optimization">;
 def : CLFlag<"Og">, Alias<_SLASH_O>, AliasArgs<["g"]>,
   HelpText<"No effect">;

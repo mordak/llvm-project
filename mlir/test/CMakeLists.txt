@@ -5,8 +5,8 @@ if (MLIR_ENABLE_BINDINGS_PYTHON)
   add_subdirectory(python)
 endif()
 
-# Passed to lit.site.cfg.py.so that the out of tree Standalone dialect test
-# can find MLIR's CMake configuration
+# Provide the MLIR CMake module dir so that the out of tree Standalone
+# dialect and can add it to the module path.
 set(MLIR_CMAKE_DIR
   "${CMAKE_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX}/cmake/mlir")
 
@@ -35,15 +35,6 @@ if (MLIR_INCLUDE_INTEGRATION_TESTS)
     message(FATAL_ERROR "MLIR_INCLUDE_INTEGRATION_TESTS requires a native target")
   endif()
 
-  # Copy test data over.
-  # TODO: drop copy and load files relative to MLIR_SOURCE_DIR / %mlir_src_root.
-  file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/Integration/data/mttkrp_b.tns
-            ${CMAKE_CURRENT_SOURCE_DIR}/Integration/data/test.mtx
-            ${CMAKE_CURRENT_SOURCE_DIR}/Integration/data/test_symmetric.mtx
-            ${CMAKE_CURRENT_SOURCE_DIR}/Integration/data/test_symmetric_complex.mtx
-            ${CMAKE_CURRENT_SOURCE_DIR}/Integration/data/test.tns
-            ${CMAKE_CURRENT_SOURCE_DIR}/Integration/data/wide.mtx
-          DESTINATION ${MLIR_LIB_DIR}/data/)
 endif()
 
 llvm_canonicalize_cmake_booleans(

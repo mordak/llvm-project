@@ -17,14 +17,12 @@ exception
 initializer_list
 iosfwd
 limits
-memory
 new
 numeric
 ratio
 stdexcept
 string
 string_view
-tuple
 type_traits
 typeinfo
 vector

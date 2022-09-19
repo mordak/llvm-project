@@ -328,7 +328,7 @@ Value *InstCombinerImpl::simplifyMaskedLoad(IntrinsicInst &II) {
   // If we can unconditionally load from this address, replace with a
   // load/select idiom. TODO: use DT for context sensitive query
   if (isDereferenceablePointer(LoadPtr, II.getType(),
-                               II.getModule()->getDataLayout(), &II, nullptr)) {
+                               II.getModule()->getDataLayout(), &II, &AC)) {
     LoadInst *LI = Builder.CreateAlignedLoad(II.getType(), LoadPtr, Alignment,
                                              "unmaskedload");
     LI->copyMetadata(II);
@@ -1829,6 +1829,17 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
 
     break;
   }
+  case Intrinsic::matrix_multiply: {
+    // -A * -B -> A * B
+    Value *A, *B;
+    if (match(II->getArgOperand(0), m_FNeg(m_Value(A))) &&
+        match(II->getArgOperand(1), m_FNeg(m_Value(B)))) {
+      replaceOperand(*II, 0, A);
+      replaceOperand(*II, 1, B);
+      return II;
+    }
+    break;
+  }
   case Intrinsic::fmuladd: {
     // Canonicalize fast fmuladd to the separate fmul + fadd.
     if (II->isFast()) {
@@ -3116,8 +3127,7 @@ Instruction *InstCombinerImpl::visitCallBase(CallBase &Call) {
 
         if (FunctionType &&
             FunctionType->getZExtValue() != ExpectedType->getZExtValue())
-          dbgs() << Call.getModule()->getName() << ":"
-                 << Call.getDebugLoc().getLine()
+          dbgs() << Call.getModule()->getName()
                  << ": warning: kcfi: " << Call.getCaller()->getName()
                  << ": call to " << CalleeF->getName()
                  << " using a mismatching function pointer type\n";
