@@ -2378,6 +2378,12 @@ SmallVector<PhdrEntry *, 0> Writer<ELFT>::createPhdrs(Partition &part) {
     addHdr(PT_GNU_EH_FRAME, part.ehFrameHdr->getParent()->getPhdrFlags())
         ->add(part.ehFrameHdr->getParent());
 
+  // PT_OPENBSD_MUTABLE is an OpenBSD-specific feature. That makes
+  // the dynamic linker fill the segment with zero data, like bss, but
+  // it can be treated differently.
+  if (OutputSection *cmd = findSection(".openbsd.mutable", partNo))
+    addHdr(PT_OPENBSD_MUTABLE, cmd->getPhdrFlags())->add(cmd);
+
   // PT_OPENBSD_RANDOMIZE is an OpenBSD-specific feature. That makes
   // the dynamic linker fill the segment with random data.
   if (OutputSection *cmd = findSection(".openbsd.randomdata", partNo))
