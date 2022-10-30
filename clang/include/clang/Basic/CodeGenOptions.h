@@ -102,6 +102,12 @@ public:
     IAD_Intel,
   };
 
+  enum DebugSrcHashKind {
+    DSH_MD5,
+    DSH_SHA1,
+    DSH_SHA256,
+  };
+
   // This field stores one of the allowed values for the option
   // -fbasic-block-sections=.  The allowed values with this option are:
   // {"labels", "all", "list=<file>", "none"}.
@@ -425,6 +431,9 @@ public:
   /// The maximum percentage profiling weights can deviate from the expected
   /// values in order to be included in misexpect diagnostics.
   Optional<uint32_t> DiagnosticsMisExpectTolerance = 0;
+
+  /// The name of a file to use with \c .secure_log_unique directives.
+  std::string AsSecureLogFile;
 
 public:
   // Define accessors/mutators for code generation options of enumeration type.

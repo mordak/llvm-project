@@ -1210,8 +1210,7 @@ static bool isSafePHIToSpeculate(PHINode &PN) {
   BasicBlock *BB = PN.getParent();
   Align MaxAlign;
   uint64_t APWidth = DL.getIndexTypeSizeInBits(PN.getType());
-  APInt MaxSize(APWidth, 0);
-  bool HaveLoad = false;
+  Type *LoadType = nullptr;
   for (User *U : PN.users()) {
     LoadInst *LI = dyn_cast<LoadInst>(U);
     if (!LI || !LI->isSimple())
@@ -1223,20 +1222,26 @@ static bool isSafePHIToSpeculate(PHINode &PN) {
     if (LI->getParent() != BB)
       return false;
 
+    if (LoadType) {
+      if (LoadType != LI->getType())
+        return false;
+    } else {
+      LoadType = LI->getType();
+    }
+
     // Ensure that there are no instructions between the PHI and the load that
     // could store.
     for (BasicBlock::iterator BBI(PN); &*BBI != LI; ++BBI)
       if (BBI->mayWriteToMemory())
         return false;
 
-    uint64_t Size = DL.getTypeStoreSize(LI->getType()).getFixedSize();
     MaxAlign = std::max(MaxAlign, LI->getAlign());
-    MaxSize = MaxSize.ult(Size) ? APInt(APWidth, Size) : MaxSize;
-    HaveLoad = true;
   }
 
-  if (!HaveLoad)
+  if (!LoadType)
     return false;
+
+  APInt LoadSize = APInt(APWidth, DL.getTypeStoreSize(LoadType).getFixedSize());
 
   // We can only transform this if it is safe to push the loads into the
   // predecessor blocks. The only thing to watch out for is that we can't put
@@ -1259,7 +1264,7 @@ static bool isSafePHIToSpeculate(PHINode &PN) {
     // If this pointer is always safe to load, or if we can prove that there
     // is already a load in the block, then we can move the load to the pred
     // block.
-    if (isSafeToLoadUnconditionally(InVal, MaxAlign, MaxSize, DL, TI))
+    if (isSafeToLoadUnconditionally(InVal, MaxAlign, LoadSize, DL, TI))
       continue;
 
     return false;
@@ -1922,28 +1927,6 @@ static VectorType *isVectorPromotionViable(Partition &P, const DataLayout &DL) {
   if (CandidateTys.empty())
     return nullptr;
 
-  // Generate new candidate type based on load/store size.
-  for (const Slice &S : P) {
-    Type *Ty;
-    if (LoadInst *LI = dyn_cast<LoadInst>(S.getUse()->getUser()))
-      Ty = LI->getType();
-    else if (StoreInst *SI = dyn_cast<StoreInst>(S.getUse()->getUser()))
-      Ty = SI->getValueOperand()->getType();
-    else
-      continue;
-    if (isa<VectorType>(Ty))
-      continue;
-    // Create Vector with size of V, and each element of type Ty
-    VectorType *V = CandidateTys[0];
-    uint64_t ElementSize = DL.getTypeStoreSizeInBits(Ty).getFixedSize();
-    uint64_t VectorSize = DL.getTypeSizeInBits(V).getFixedSize();
-    if ((ElementSize != VectorSize) && (VectorSize % ElementSize == 0)) {
-      VectorType *VTy = VectorType::get(Ty, VectorSize / ElementSize, false);
-      CandidateTys.push_back(VTy);
-      if (CommonEltTy != Ty)
-        HaveCommonEltTy = false;
-    }
-  }
   // Remove non-integer vector types if we had multiple common element types.
   // FIXME: It'd be nice to replace them with integer vector types, but we can't
   // do that until all the backends are known to produce good code for all
@@ -1971,14 +1954,10 @@ static VectorType *isVectorPromotionViable(Partition &P, const DataLayout &DL) {
       return cast<FixedVectorType>(RHSTy)->getNumElements() <
              cast<FixedVectorType>(LHSTy)->getNumElements();
     };
-    auto RankVectorTypesEq = [&](VectorType *LHSTy, VectorType *RHSTy) {
-      return cast<FixedVectorType>(LHSTy)->getNumElements() ==
-             cast<FixedVectorType>(RHSTy)->getNumElements();
-    };
     llvm::sort(CandidateTys, RankVectorTypes);
-    CandidateTys.erase(std::unique(CandidateTys.begin(), CandidateTys.end(),
-                                   RankVectorTypesEq),
-                       CandidateTys.end());
+    CandidateTys.erase(
+        std::unique(CandidateTys.begin(), CandidateTys.end(), RankVectorTypes),
+        CandidateTys.end());
   } else {
 // The only way to have the same element type in every vector type is to
 // have the same vector type. Check that and remove all but one.
@@ -3772,20 +3751,15 @@ static Type *getTypePartition(const DataLayout &DL, Type *Ty, uint64_t Offset,
 /// the following:
 ///
 ///   %a = alloca [12 x i8]
-///   %gep1 = getelementptr [12 x i8]* %a, i32 0, i32 0
-///   %gep2 = getelementptr [12 x i8]* %a, i32 0, i32 4
-///   %gep3 = getelementptr [12 x i8]* %a, i32 0, i32 8
-///   %iptr1 = bitcast i8* %gep1 to i64*
-///   %iptr2 = bitcast i8* %gep2 to i64*
-///   %fptr1 = bitcast i8* %gep1 to float*
-///   %fptr2 = bitcast i8* %gep2 to float*
-///   %fptr3 = bitcast i8* %gep3 to float*
-///   store float 0.0, float* %fptr1
-///   store float 1.0, float* %fptr2
-///   %v = load i64* %iptr1
-///   store i64 %v, i64* %iptr2
-///   %f1 = load float* %fptr2
-///   %f2 = load float* %fptr3
+///   %gep1 = getelementptr i8, ptr %a, i32 0
+///   %gep2 = getelementptr i8, ptr %a, i32 4
+///   %gep3 = getelementptr i8, ptr %a, i32 8
+///   store float 0.0, ptr %gep1
+///   store float 1.0, ptr %gep2
+///   %v = load i64, ptr %gep1
+///   store i64 %v, ptr %gep2
+///   %f1 = load float, ptr %gep2
+///   %f2 = load float, ptr %gep3
 ///
 /// Here we want to form 3 partitions of the alloca, each 4 bytes large, and
 /// promote everything so we recover the 2 SSA values that should have been

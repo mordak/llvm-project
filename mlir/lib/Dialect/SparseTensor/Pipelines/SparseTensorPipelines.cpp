@@ -9,7 +9,7 @@
 #include "mlir/Dialect/SparseTensor/Pipelines/Passes.h"
 
 #include "mlir/Conversion/Passes.h"
-#include "mlir/Dialect/Arithmetic/Transforms/Passes.h"
+#include "mlir/Dialect/Arith/Transforms/Passes.h"
 #include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
 #include "mlir/Dialect/Bufferization/Transforms/OneShotAnalysis.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
@@ -58,15 +58,17 @@ void mlir::sparse_tensor::buildSparseCompiler(
           /*analysisOnly=*/options.testBufferizationAnalysisOnly)));
   if (options.testBufferizationAnalysisOnly)
     return;
+  pm.addPass(createSparseTensorRewritePass(options.enableRuntimeLibrary));
   pm.addPass(createSparsificationPass(options.sparsificationOptions()));
   if (options.enableRuntimeLibrary)
     pm.addPass(createSparseTensorConversionPass(
         options.sparseTensorConversionOptions()));
   else
     pm.addPass(createSparseTensorCodegenPass());
-  pm.addNestedPass<func::FuncOp>(createCanonicalizerPass());
+  pm.addPass(createSparseBufferRewritePass());
   pm.addPass(createDenseBufferizationPass(
       getBufferizationOptions(/*analysisOnly=*/false)));
+  pm.addNestedPass<func::FuncOp>(createCanonicalizerPass());
   pm.addNestedPass<func::FuncOp>(
       mlir::bufferization::createFinalizingBufferizePass());
   // TODO(springerm): Add sparse support to the BufferDeallocation pass and add
@@ -76,10 +78,9 @@ void mlir::sparse_tensor::buildSparseCompiler(
   pm.addNestedPass<func::FuncOp>(createConvertSCFToCFPass());
   pm.addPass(createLowerAffinePass());
   pm.addPass(createConvertVectorToLLVMPass(options.lowerVectorToLLVMOptions()));
-  pm.addPass(createMemRefToLLVMPass());
+  pm.addPass(createMemRefToLLVMConversionPass());
   pm.addNestedPass<func::FuncOp>(createConvertComplexToStandardPass());
-  pm.addNestedPass<mlir::func::FuncOp>(
-      mlir::arith::createArithmeticExpandOpsPass());
+  pm.addNestedPass<mlir::func::FuncOp>(mlir::arith::createArithExpandOpsPass());
   pm.addNestedPass<func::FuncOp>(createConvertMathToLLVMPass());
   pm.addPass(createConvertMathToLibmPass());
   pm.addPass(createConvertComplexToLibmPass());

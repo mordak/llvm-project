@@ -2,6 +2,9 @@
 // RUN: %libomptarget-run-generic 2>&1 \
 // RUN: | %fcheck-generic
 
+// UNSUPPORTED: amdgcn-amd-amdhsa
+// UNSUPPORTED: amdgcn-amd-amdhsa-LTO
+
 #include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,11 +14,12 @@
 #define LENGTH 128
 
 void foo() {
+  const int device_id = omp_get_default_device();
   float *A;
-#pragma omp allocate(A) allocator(llvm_omp_target_shared_mem_alloc)
+  A = (float *)omp_target_alloc((FROM + LENGTH) * sizeof(float), device_id);
 
   float *A_dev = NULL;
-#pragma omp target has_device_addr(A [FROM:LENGTH]) map(A_dev)
+#pragma omp target has_device_addr(A[FROM : LENGTH]) map(A_dev)
   { A_dev = A; }
   // CHECK: Success
   if (A_dev == NULL || A_dev != A)
@@ -29,9 +33,13 @@ void bar() {
   short *xp = &x[0];
 
   x[1] = 111;
-#pragma omp target data map(tofrom : xp [0:2]) use_device_addr(xp [0:2])
-#pragma omp target has_device_addr(xp [0:2])
-  { xp[1] = 222; }
+#pragma omp target data map(tofrom : xp[0 : 2]) use_device_addr(xp[0 : 2])
+#pragma omp target has_device_addr(xp[0 : 2])
+  {
+    xp[1] = 222;
+    // CHECK: 222
+    printf("%d %p\n", xp[1], &xp[1]);
+  }
   // CHECK: 222
   printf("%d %p\n", xp[1], &xp[1]);
 }
@@ -43,7 +51,11 @@ void moo() {
   b[1] = 111;
 #pragma omp target data map(tofrom : b[1]) use_device_addr(b[1])
 #pragma omp target has_device_addr(b[1])
-  { b[1] = 222; }
+  {
+    b[1] = 222;
+    // CHECK: 222
+    printf("%hd %p %p %p\n", b[1], b, &b[1], &b);
+  }
   // CHECK: 222
   printf("%hd %p %p %p\n", b[1], b, &b[1], &b);
 }
@@ -57,22 +69,27 @@ void zoo() {
   x[1] = 111;
 #pragma omp target data map(tofrom : xpp[1][1]) use_device_addr(xpp[1][1])
 #pragma omp target has_device_addr(xpp[1][1])
-  { xpp[1][1] = 222; }
+  {
+    xpp[1][1] = 222;
+    // CHECK: 222
+    printf("%d %p %p\n", xpp[1][1], xpp[1], &xpp[1][1]);
+  }
   // CHECK: 222
   printf("%d %p %p\n", xpp[1][1], xpp[1], &xpp[1][1]);
 }
 void xoo() {
   short a[10], b[10];
-#pragma omp allocate(a) allocator(llvm_omp_target_shared_mem_alloc)
-#pragma omp allocate(b) allocator(llvm_omp_target_shared_mem_alloc)
   a[1] = 111;
   b[1] = 111;
-#pragma omp target has_device_addr(a) has_device_addr(b [0:1])
+#pragma omp target data map(to : a[0 : 2], b[0 : 2]) use_device_addr(a, b)
+#pragma omp target has_device_addr(a) has_device_addr(b[0])
   {
     a[1] = 222;
     b[1] = 222;
+    // CHECK: 222 222
+    printf("%hd %hd %p %p %p\n", a[1], b[1], &a, b, &b);
   }
-  // CHECK: 111
+  // CHECK:111
   printf("%hd %hd %p %p %p\n", a[1], b[1], &a, b, &b); // 111 111 p1d p2d p3d
 }
 int main() {

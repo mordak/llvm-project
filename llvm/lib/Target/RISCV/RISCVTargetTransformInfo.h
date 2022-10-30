@@ -51,11 +51,10 @@ public:
       : BaseT(TM, F.getParent()->getDataLayout()), ST(TM->getSubtargetImpl(F)),
         TLI(ST->getTargetLowering()) {}
 
-  /// Return the cost of materializing a vector immediate, assuming it does
-  /// not get folded into the using instruction(s).
-  InstructionCost getVectorImmCost(VectorType *VecTy,
-                                   TTI::OperandValueInfo OpInfo,
-                                   TTI::TargetCostKind CostKind);
+  /// Return the cost of materializing an immediate for a value operand of
+  /// a store instruction.
+  InstructionCost getStoreImmCost(Type *VecTy, TTI::OperandValueInfo OpInfo,
+                                  TTI::TargetCostKind CostKind);
 
   InstructionCost getIntImmCost(const APInt &Imm, Type *Ty,
                                 TTI::TargetCostKind CostKind);
@@ -84,6 +83,13 @@ public:
   unsigned getRegUsageForType(Type *Ty);
 
   unsigned getMaximumVF(unsigned ElemWidth, unsigned Opcode) const;
+
+  bool preferEpilogueVectorization() const {
+    // Epilogue vectorization is usually unprofitable - tail folding or
+    // a smaller VF would have been better.  This a blunt hammer - we
+    // should re-examine this once vectorization is better tuned.
+    return false;
+  }
 
   InstructionCost getMaskedMemoryOpCost(unsigned Opcode, Type *Src,
                                         Align Alignment, unsigned AddressSpace,

@@ -42,8 +42,11 @@ add_llvm_library(LLVMBOLTPasses
   TailDuplication.cpp
   ThreeWayBranch.cpp
   ValidateInternalCalls.cpp
+  ValidateMemRefs.cpp
   VeneerElimination.cpp
   RetpolineInsertion.cpp
+
+  DISABLE_LLVM_LINK_LLVM_DYLIB
 
   LINK_LIBS
   ${LLVM_PTHREAD_LIB}

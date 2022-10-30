@@ -92,6 +92,8 @@ static cl::opt<int>
 
 static codegen::RegisterCodeGenFlags CGF;
 
+bool isReduced(ReducerWorkItem &M, TestRunner &Test);
+
 void writeOutput(ReducerWorkItem &M, StringRef Message) {
   if (ReplaceInput) // In-place
     OutputFilename = InputFilename.c_str();
@@ -182,6 +184,15 @@ int main(int Argc, char **Argv) {
   TestRunner Tester(TestFilename, TestArguments, std::move(OriginalProgram),
                     std::move(TM), Argv[0]);
 
+  // This parses and writes out the testcase into a temporary file copy for the
+  // test, rather than evaluating the source IR directly. This is for the
+  // convenience of lit tests; the stripped out comments may have broken the
+  // interestingness checks.
+  if (!isReduced(Tester.getProgram(), Tester)) {
+    errs() << "\nInput isn't interesting! Verify interesting-ness test\n";
+    return 1;
+  }
+
   // Try to reduce code
   runDeltaPasses(Tester, MaxPassIterations);
 
@@ -189,7 +200,7 @@ int main(int Argc, char **Argv) {
   if (OutputFilename == "-")
     Tester.getProgram().print(outs(), nullptr);
   else
-    writeOutput(Tester.getProgram(), "\nDone reducing! Reduced testcase: ");
+    writeOutput(Tester.getProgram(), "Done reducing! Reduced testcase: ");
 
   return 0;
 }

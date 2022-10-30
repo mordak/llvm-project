@@ -94,7 +94,9 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <ctime>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -1306,7 +1308,10 @@ static void setPGOUseInstrumentor(CodeGenOptions &Opts,
   }
   std::unique_ptr<llvm::IndexedInstrProfReader> PGOReader =
     std::move(ReaderOrErr.get());
-  if (PGOReader->isIRLevelProfile()) {
+  // Currently memprof profiles are only added at the IR level. Mark the profile
+  // type as IR in that case as well and the subsequent matching needs to detect
+  // which is available (might be one or both).
+  if (PGOReader->isIRLevelProfile() || PGOReader->hasMemoryProfile()) {
     if (PGOReader->hasCSIRLevelProfile())
       Opts.setProfileUse(CodeGenOptions::ProfileCSIRInstr);
     else
@@ -4228,6 +4233,9 @@ static void GeneratePreprocessorArgs(PreprocessorOptions &Opts,
   for (const auto &RF : Opts.RemappedFiles)
     GenerateArg(Args, OPT_remap_file, RF.first + ";" + RF.second, SA);
 
+  if (Opts.SourceDateEpoch)
+    GenerateArg(Args, OPT_source_date_epoch, Twine(*Opts.SourceDateEpoch), SA);
+
   // Don't handle LexEditorPlaceholders. It is implied by the action that is
   // generated elsewhere.
 }
@@ -4308,6 +4316,22 @@ static bool ParsePreprocessorArgs(PreprocessorOptions &Opts, ArgList &Args,
     }
 
     Opts.addRemappedFile(Split.first, Split.second);
+  }
+
+  if (const Arg *A = Args.getLastArg(OPT_source_date_epoch)) {
+    StringRef Epoch = A->getValue();
+    // SOURCE_DATE_EPOCH, if specified, must be a non-negative decimal integer.
+    // On time64 systems, pick 253402300799 (the UNIX timestamp of
+    // 9999-12-31T23:59:59Z) as the upper bound.
+    const uint64_t MaxTimestamp =
+        std::min<uint64_t>(std::numeric_limits<time_t>::max(), 253402300799);
+    uint64_t V;
+    if (Epoch.getAsInteger(10, V) || V > MaxTimestamp) {
+      Diags.Report(diag::err_fe_invalid_source_date_epoch)
+          << Epoch << MaxTimestamp;
+    } else {
+      Opts.SourceDateEpoch = V;
+    }
   }
 
   // Always avoid lexing editor placeholders when we're just running the

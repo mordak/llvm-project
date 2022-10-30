@@ -214,6 +214,10 @@ void DynamicLoaderPOSIXDYLD::UnloadSections(const ModuleSP module) {
 void DynamicLoaderPOSIXDYLD::ProbeEntry() {
   Log *log = GetLog(LLDBLog::DynamicLoader);
 
+  // If we have a core file, we don't need any breakpoints.
+  if (IsCoreFile())
+    return;
+
   const addr_t entry = GetEntryPoint();
   if (entry == LLDB_INVALID_ADDRESS) {
     LLDB_LOGF(
@@ -298,6 +302,11 @@ bool DynamicLoaderPOSIXDYLD::EntryBreakpointHit(
 
 bool DynamicLoaderPOSIXDYLD::SetRendezvousBreakpoint() {
   Log *log = GetLog(LLDBLog::DynamicLoader);
+
+  // If we have a core file, we don't need any breakpoints.
+  if (IsCoreFile())
+    return false;
+
   if (m_dyld_bid != LLDB_INVALID_BREAK_ID) {
     LLDB_LOG(log,
              "Rendezvous breakpoint breakpoint id {0} for pid {1}"
@@ -829,4 +838,8 @@ bool DynamicLoaderPOSIXDYLD::AlwaysRelyOnEHUnwindInfo(
     return false;
 
   return module_sp->GetFileSpec().GetPath() == "[vdso]";
+}
+
+bool DynamicLoaderPOSIXDYLD::IsCoreFile() const {
+  return !m_process->IsLiveDebugSession();
 }

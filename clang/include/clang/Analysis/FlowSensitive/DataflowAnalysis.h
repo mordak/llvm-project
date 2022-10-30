@@ -20,7 +20,6 @@
 #include <vector>
 
 #include "clang/AST/ASTContext.h"
-#include "clang/AST/Stmt.h"
 #include "clang/Analysis/CFG.h"
 #include "clang/Analysis/FlowSensitive/ControlFlowContext.h"
 #include "clang/Analysis/FlowSensitive/DataflowEnvironment.h"
@@ -33,17 +32,16 @@
 namespace clang {
 namespace dataflow {
 
-template <typename AnalysisT, typename LatticeT, typename InputT,
-          typename = std::void_t<>>
-struct HasTransferFor : std::false_type {};
+template <typename AnalysisT, typename LatticeT, typename = std::void_t<>>
+struct HasTransferBranchFor : std::false_type {};
 
-template <typename AnalysisT, typename LatticeT, typename InputT>
-struct HasTransferFor<
-    AnalysisT, LatticeT, InputT,
-    std::void_t<decltype(std::declval<AnalysisT>().transfer(
-        std::declval<const InputT *>(), std::declval<LatticeT &>(),
-        std::declval<Environment &>()))>> : std::true_type {};
-
+template <typename AnalysisT, typename LatticeT>
+struct HasTransferBranchFor<
+    AnalysisT, LatticeT,
+    std::void_t<decltype(std::declval<AnalysisT>().transferBranch(
+        std::declval<bool>(), std::declval<const Stmt *>(),
+        std::declval<LatticeT &>(), std::declval<Environment &>()))>>
+    : std::true_type {};
 /// Base class template for dataflow analyses built on a single lattice type.
 ///
 /// Requirements:
@@ -110,17 +108,18 @@ public:
   void transferTypeErased(const CFGElement *Element, TypeErasedLattice &E,
                           Environment &Env) final {
     Lattice &L = llvm::any_cast<Lattice &>(E.Value);
-    if constexpr (HasTransferFor<Derived, LatticeT, CFGElement>::value) {
-      static_cast<Derived *>(this)->transfer(Element, L, Env);
-    }
+    static_cast<Derived *>(this)->transfer(Element, L, Env);
+  }
 
-    // FIXME: Remove after users have been updated to implement `transfer` on
-    // `CFGElement`.
-    if constexpr (HasTransferFor<Derived, LatticeT, Stmt>::value) {
-      if (auto Stmt = Element->getAs<CFGStmt>()) {
-        static_cast<Derived *>(this)->transfer(Stmt->getStmt(), L, Env);
-      }
+  void transferBranchTypeErased(bool Branch, const Stmt *Stmt,
+                                TypeErasedLattice &E, Environment &Env) final {
+    if constexpr (HasTransferBranchFor<Derived, LatticeT>::value) {
+      Lattice &L = llvm::any_cast<Lattice &>(E.Value);
+      static_cast<Derived *>(this)->transferBranch(Branch, Stmt, L, Env);
     }
+    // Silence unused parameter warnings.
+    (void)Branch;
+    (void)Stmt;
   }
 
 private:

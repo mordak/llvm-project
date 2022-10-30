@@ -38,6 +38,32 @@ func.func @scf_for_yield_only(
 
 // -----
 
+// CHECK-LABEL: func @scf_for_is_reading(
+//  CHECK-SAME:     %[[A:.*]]: memref<?xf32, strided<[?], offset: ?>>, %[[B:.*]]: memref<?xf32, strided<[?], offset: ?>>
+func.func @scf_for_is_reading(%A : tensor<?xf32>, %B : tensor<?xf32>,
+                              %lb : index, %ub : index)
+  -> (f32, f32)
+{
+  %c1 = arith.constant 1 : index
+  %cst = arith.constant 0.0 : f32
+
+  // This is a regression test to make sure that an alloc + copy is emitted.
+
+  // CHECK: %[[alloc:.*]] = memref.alloc
+  // CHECK: memref.copy %[[A]], %[[alloc]]
+  // CHECK: %[[clone:.*]] = bufferization.clone %[[alloc]]
+  // CHECK: scf.for {{.*}} iter_args(%{{.*}} = %[[clone]])
+  %0 = scf.for %iv = %lb to %ub step %c1 iter_args(%1 = %A) -> tensor<?xf32> {
+    %r = linalg.fill ins(%cst : f32) outs(%1 : tensor<?xf32>) -> tensor<?xf32>
+    scf.yield %B : tensor<?xf32>
+  }
+  %1 = tensor.extract %0[%c1] : tensor<?xf32>
+  %2 = tensor.extract %A[%c1] : tensor<?xf32>
+  return %1, %2 : f32, f32
+}
+
+// -----
+
 // Ensure that the function bufferizes without error. This tests pre-order
 // traversal of scf.for loops during bufferization. No need to check the IR,
 // just want to make sure that it does not crash.
@@ -857,4 +883,45 @@ func.func @non_tensor_for_arg(%A : tensor<?xf32> {bufferization.writable = true}
     scf.yield %idx, %t2 : index, tensor<?xf32>
   }
   return %r1#1 : tensor<?xf32>
+}
+
+// -----
+
+// This is a regression test. Just check that the IR bufferizes.
+  
+// CHECK-LABEL: func @buffer_type_of_collapse_shape
+func.func @buffer_type_of_collapse_shape(%arg0: tensor<f64>) {
+  %true = arith.constant true
+  %0 = scf.while (%arg1 = %arg0) : (tensor<f64>) -> (tensor<f64>) {
+    scf.condition(%true) %arg1 : tensor<f64>
+  } do {
+  ^bb0(%_: tensor<f64>):
+    %3 = bufferization.alloc_tensor() : tensor<1xf64>
+    %16 = tensor.collapse_shape %3 [] : tensor<1xf64> into tensor<f64>
+    scf.yield %16 : tensor<f64>
+  }
+  return
+}
+
+// -----
+
+// This is a regression test. Just check that the IR bufferizes.
+  
+// CHECK-LABEL: func @non_block_argument_yield
+func.func @non_block_argument_yield() {
+  %true = arith.constant true 
+  %0 = bufferization.alloc_tensor() : tensor<i32>
+  %1 = scf.while (%arg0 = %0) : (tensor<i32>) -> (tensor<i32>) {
+    scf.condition(%true) %arg0 : tensor<i32>
+  } do {
+  ^bb0(%arg0: tensor<i32>):
+    %ret = scf.while (%arg1 = %0) : (tensor<i32>) -> (tensor<i32>) {
+      scf.condition(%true) %arg1 : tensor<i32>
+    } do {
+    ^bb0(%arg7: tensor<i32>):
+      scf.yield %0 : tensor<i32>
+    }
+    scf.yield %ret : tensor<i32>
+  }
+  return
 }

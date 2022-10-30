@@ -1674,6 +1674,9 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
     return;
     }
 
+  case AArch64::SEH_PACSignLR:
+    TS->emitARM64WinCFIPACSignLR();
+    return;
   }
 
   // Finally, do the automated lowerings for everything else.

@@ -16,7 +16,7 @@ struct view {
     const int device_id = omp_get_default_device();
     data_host = (int *)malloc(bytes);
     data_device = (int *)omp_target_alloc(bytes, device_id);
-#pragma omp target teams distribute parallel for has_device_addr(data_device)
+#pragma omp target teams distribute parallel for has_device_addr(data_device[0])
     for (int i = 0; i < size; ++i)
       data_device[i] = i;
     omp_target_memcpy(data_host, data_device, bytes, 0, 0, host_id, device_id);

@@ -2970,6 +2970,27 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     setOrigin(&I, getOrigin(Op));
   }
 
+  void handleCountZeroes(IntrinsicInst &I) {
+    IRBuilder<> IRB(&I);
+    Value *Src = I.getArgOperand(0);
+
+    // Set the Output shadow based on input Shadow
+    Value *BoolShadow = IRB.CreateIsNotNull(getShadow(Src), "_mscz_bs");
+
+    // If zero poison is requested, mix in with the shadow
+    Constant *IsZeroPoison = cast<Constant>(I.getOperand(1));
+    if (!IsZeroPoison->isZeroValue()) {
+      Value *BoolZeroPoison = IRB.CreateIsNull(Src, "_mscz_bzp");
+      BoolShadow = IRB.CreateOr(BoolShadow, BoolZeroPoison, "_mscz_bs");
+    }
+
+    Value *OutputShadow =
+        IRB.CreateSExt(BoolShadow, getShadowTy(Src), "_mscz_os");
+
+    setShadow(&I, OutputShadow);
+    setOriginForNaryOp(I);
+  }
+
   // Instrument vector convert intrinsic.
   //
   // This function instruments intrinsics like cvtsi2ss:
@@ -3333,20 +3354,36 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     IRBuilder<> IRB(&I);
     Value *Ptr = I.getArgOperand(0);
     Value *Mask = I.getArgOperand(1);
+    Value *PassThru = I.getArgOperand(2);
 
     if (ClCheckAccessAddress) {
       insertShadowCheck(Ptr, &I);
       insertShadowCheck(Mask, &I);
     }
 
-    // TODO: Check loaded shadow.
+    if (!PropagateShadow) {
+      setShadow(&I, getCleanShadow(&I));
+      setOrigin(&I, getCleanOrigin());
+      return;
+    }
 
-    setShadow(&I, getCleanShadow(&I));
+    Type *ShadowTy = getShadowTy(&I);
+    Type *ElementShadowTy = cast<FixedVectorType>(ShadowTy)->getElementType();
+    auto [ShadowPtr, OriginPtr] =
+        getShadowOriginPtr(Ptr, IRB, ElementShadowTy, {}, /*isStore*/ false);
+
+    Value *Shadow = IRB.CreateMaskedExpandLoad(
+        ShadowTy, ShadowPtr, Mask, getShadow(PassThru), "_msmaskedexpload");
+
+    setShadow(&I, Shadow);
+
+    // TODO: Store origins.
     setOrigin(&I, getCleanOrigin());
   }
 
   void handleMaskedCompressStore(IntrinsicInst &I) {
     IRBuilder<> IRB(&I);
+    Value *Values = I.getArgOperand(0);
     Value *Ptr = I.getArgOperand(1);
     Value *Mask = I.getArgOperand(2);
 
@@ -3355,13 +3392,24 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       insertShadowCheck(Mask, &I);
     }
 
-    // TODO: Store shadow.
+    Value *Shadow = getShadow(Values);
+    Type *ElementShadowTy =
+        getShadowTy(cast<FixedVectorType>(Values->getType())->getElementType());
+    auto [ShadowPtr, OriginPtrs] =
+        getShadowOriginPtr(Ptr, IRB, ElementShadowTy, {}, /*isStore*/ true);
+
+    IRB.CreateMaskedCompressStore(Shadow, ShadowPtr, Mask);
+
+    // TODO: Store origins.
   }
 
   void handleMaskedGather(IntrinsicInst &I) {
     IRBuilder<> IRB(&I);
     Value *Ptrs = I.getArgOperand(0);
+    const Align Alignment(
+        cast<ConstantInt>(I.getArgOperand(1))->getZExtValue());
     Value *Mask = I.getArgOperand(2);
+    Value *PassThru = I.getArgOperand(3);
 
     Type *PtrsShadowTy = getShadowTy(Ptrs);
     if (ClCheckAccessAddress) {
@@ -3372,15 +3420,33 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       insertShadowCheck(MaskedPtrShadow, getOrigin(Ptrs), &I);
     }
 
-    // TODO: Check loaded shadow.
+    if (!PropagateShadow) {
+      setShadow(&I, getCleanShadow(&I));
+      setOrigin(&I, getCleanOrigin());
+      return;
+    }
 
-    setShadow(&I, getCleanShadow(&I));
+    Type *ShadowTy = getShadowTy(&I);
+    Type *ElementShadowTy = cast<FixedVectorType>(ShadowTy)->getElementType();
+    auto [ShadowPtrs, OriginPtrs] = getShadowOriginPtr(
+        Ptrs, IRB, ElementShadowTy, Alignment, /*isStore*/ false);
+
+    Value *Shadow =
+        IRB.CreateMaskedGather(ShadowTy, ShadowPtrs, Alignment, Mask,
+                               getShadow(PassThru), "_msmaskedgather");
+
+    setShadow(&I, Shadow);
+
+    // TODO: Store origins.
     setOrigin(&I, getCleanOrigin());
   }
 
   void handleMaskedScatter(IntrinsicInst &I) {
     IRBuilder<> IRB(&I);
+    Value *Values = I.getArgOperand(0);
     Value *Ptrs = I.getArgOperand(1);
+    const Align Alignment(
+        cast<ConstantInt>(I.getArgOperand(2))->getZExtValue());
     Value *Mask = I.getArgOperand(3);
 
     Type *PtrsShadowTy = getShadowTy(Ptrs);
@@ -3392,7 +3458,15 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       insertShadowCheck(MaskedPtrShadow, getOrigin(Ptrs), &I);
     }
 
-    // TODO: Store shadow.
+    Value *Shadow = getShadow(Values);
+    Type *ElementShadowTy =
+        getShadowTy(cast<FixedVectorType>(Values->getType())->getElementType());
+    auto [ShadowPtrs, OriginPtrs] = getShadowOriginPtr(
+        Ptrs, IRB, ElementShadowTy, Alignment, /*isStore*/ true);
+
+    IRB.CreateMaskedScatter(Shadow, ShadowPtrs, Alignment, Mask);
+
+    // TODO: Store origin.
   }
 
   void handleMaskedStore(IntrinsicInst &I) {
@@ -3539,6 +3613,19 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     setOriginForNaryOp(I);
   }
 
+  void handleVtestIntrinsic(IntrinsicInst &I) {
+    IRBuilder<> IRB(&I);
+    Value *Shadow0 = getShadow(&I, 0);
+    Value *Shadow1 = getShadow(&I, 1);
+    Value *Or = IRB.CreateOr(Shadow0, Shadow1);
+    Value *NZ = IRB.CreateICmpNE(Or, Constant::getNullValue(Or->getType()));
+    Value *Scalar = convertShadowToScalar(NZ, IRB);
+    Value *Shadow = IRB.CreateZExt(Scalar, getShadowTy(&I));
+
+    setShadow(&I, Shadow);
+    setOriginForNaryOp(I);
+  }
+
   void handleBinarySdSsIntrinsic(IntrinsicInst &I) {
     IRBuilder<> IRB(&I);
     unsigned Width =
@@ -3584,6 +3671,10 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       break;
     case Intrinsic::bswap:
       handleBswap(I);
+      break;
+    case Intrinsic::ctlz:
+    case Intrinsic::cttz:
+      handleCountZeroes(I);
       break;
     case Intrinsic::masked_compressstore:
       handleMaskedCompressStore(I);
@@ -3812,11 +3903,10 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       handleVectorCompareScalarIntrinsic(I);
       break;
 
-    case Intrinsic::x86_sse_cmp_ps:
+    case Intrinsic::x86_avx_cmp_pd_256:
+    case Intrinsic::x86_avx_cmp_ps_256:
     case Intrinsic::x86_sse2_cmp_pd:
-      // FIXME: For x86_avx_cmp_pd_256 and x86_avx_cmp_ps_256 this function
-      // generates reasonably looking IR that fails in the backend with "Do not
-      // know how to split the result of this operator!".
+    case Intrinsic::x86_sse_cmp_ps:
       handleVectorComparePackedIntrinsic(I);
       break;
 
@@ -3846,6 +3936,27 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     case Intrinsic::x86_sse2_min_sd:
     case Intrinsic::x86_sse_min_ss:
       handleBinarySdSsIntrinsic(I);
+      break;
+
+    case Intrinsic::x86_avx_vtestc_pd:
+    case Intrinsic::x86_avx_vtestc_pd_256:
+    case Intrinsic::x86_avx_vtestc_ps:
+    case Intrinsic::x86_avx_vtestc_ps_256:
+    case Intrinsic::x86_avx_vtestnzc_pd:
+    case Intrinsic::x86_avx_vtestnzc_pd_256:
+    case Intrinsic::x86_avx_vtestnzc_ps:
+    case Intrinsic::x86_avx_vtestnzc_ps_256:
+    case Intrinsic::x86_avx_vtestz_pd:
+    case Intrinsic::x86_avx_vtestz_pd_256:
+    case Intrinsic::x86_avx_vtestz_ps:
+    case Intrinsic::x86_avx_vtestz_ps_256:
+    case Intrinsic::x86_avx_ptestc_256:
+    case Intrinsic::x86_avx_ptestnzc_256:
+    case Intrinsic::x86_avx_ptestz_256:
+    case Intrinsic::x86_sse41_ptestc:
+    case Intrinsic::x86_sse41_ptestnzc:
+    case Intrinsic::x86_sse41_ptestz:
+      handleVtestIntrinsic(I);
       break;
 
     case Intrinsic::fshl:

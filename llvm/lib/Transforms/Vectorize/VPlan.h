@@ -1216,7 +1216,7 @@ public:
   void execute(VPTransformState &State) override;
 
   /// Returns true if only scalar values will be generated.
-  bool onlyScalarsGenerated();
+  bool onlyScalarsGenerated(ElementCount VF);
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
   /// Print the recipe.
@@ -3055,13 +3055,15 @@ VPValue *getOrCreateVPValueForSCEVExpr(VPlan &Plan, const SCEV *Expr,
 
 /// Returns true if \p VPV is uniform after vectorization.
 inline bool isUniformAfterVectorization(VPValue *VPV) {
-  if (auto *Def = VPV->getDef()) {
-    if (auto Rep = dyn_cast<VPReplicateRecipe>(Def))
-      return Rep->isUniform();
-    return false;
-  }
-  // A value without a def is external to vplan and thus uniform.
-  return true;
+  // A value defined outside the vector region must be uniform after
+  // vectorization inside a vector region.
+  if (VPV->isDefinedOutsideVectorRegions())
+    return true;
+  VPDef *Def = VPV->getDef();
+  assert(Def && "Must have definition for value defined inside vector region");
+  if (auto Rep = dyn_cast<VPReplicateRecipe>(Def))
+    return Rep->isUniform();
+  return false;
 }
 } // end namespace vputils
 

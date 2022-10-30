@@ -7,10 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Affine/IR/AffineValueMap.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Arithmetic/Utils/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -301,9 +299,9 @@ void ForOp::build(OpBuilder &builder, OperationState &result, Value lb,
 }
 
 LogicalResult ForOp::verify() {
-  if (auto cst = getStep().getDefiningOp<arith::ConstantIndexOp>())
-    if (cst.value() <= 0)
-      return emitOpError("constant step operand must be positive");
+  IntegerAttr step;
+  if (matchPattern(getStep(), m_Constant(&step)) && step.getInt() <= 0)
+    return emitOpError("constant step operand must be positive");
 
   auto opNumResults = getNumResults();
   if (opNumResults == 0)
@@ -721,17 +719,20 @@ struct ForOpIterArgsFolder : public OpRewritePattern<scf::ForOp> {
 /// Returns llvm::None when the difference between two AffineValueMap is
 /// dynamic.
 static Optional<int64_t> computeConstDiff(Value l, Value u) {
-  auto alb = l.getDefiningOp<AffineApplyOp>();
-  auto aub = u.getDefiningOp<AffineApplyOp>();
-  // ID map: (d0)->d0
-  auto id = AffineMap::getMultiDimIdentityMap(1, l.getContext());
-  auto lb = alb ? alb.getAffineValueMap() : AffineValueMap(id, l);
-  auto ub = aub ? aub.getAffineValueMap() : AffineValueMap(id, u);
+  IntegerAttr clb, cub;
+  if (matchPattern(l, m_Constant(&clb)) && matchPattern(u, m_Constant(&cub))) {
+    llvm::APInt lbValue = clb.getValue();
+    llvm::APInt ubValue = cub.getValue();
+    return (ubValue - lbValue).getSExtValue();
+  }
 
-  AffineValueMap diffMap;
-  AffineValueMap::difference(ub, lb, &diffMap);
-  if (auto constDiff = diffMap.getResult(0).dyn_cast<AffineConstantExpr>())
-    return constDiff.getValue();
+  // Else a simple pattern match for x + c or c + x
+  llvm::APInt diff;
+  if (matchPattern(
+          u, m_Op<arith::AddIOp>(matchers::m_Val(l), m_ConstantInt(&diff))) ||
+      matchPattern(
+          u, m_Op<arith::AddIOp>(m_ConstantInt(&diff), matchers::m_Val(l))))
+    return diff.getSExtValue();
   return llvm::None;
 }
 
@@ -761,13 +762,13 @@ struct SimplifyTrivialLoops : public OpRewritePattern<ForOp> {
       return success();
     }
 
-    auto step = op.getStep().getDefiningOp<arith::ConstantOp>();
-    if (!step)
+    IntegerAttr step;
+    if (!matchPattern(op.getStep(), m_Constant(&step)))
       return failure();
 
     // If the loop is known to have 1 iteration, inline its body and remove the
     // loop.
-    llvm::APInt stepValue = step.getValue().cast<IntegerAttr>().getValue();
+    llvm::APInt stepValue = step.getValue();
     if (stepValue.sge(*diff)) {
       SmallVector<Value, 4> blockArgs;
       blockArgs.reserve(op.getNumIterOperands() + 1);
@@ -1672,11 +1673,11 @@ struct RemoveStaticCondition : public OpRewritePattern<IfOp> {
 
   LogicalResult matchAndRewrite(IfOp op,
                                 PatternRewriter &rewriter) const override {
-    auto constant = op.getCondition().getDefiningOp<arith::ConstantOp>();
-    if (!constant)
+    BoolAttr condition;
+    if (!matchPattern(op.getCondition(), m_Constant(&condition)))
       return failure();
 
-    if (constant.getValue().cast<BoolAttr>().getValue())
+    if (condition.getValue())
       replaceOpWithRegion(rewriter, op, op.getThenRegion());
     else if (!op.getElseRegion().empty())
       replaceOpWithRegion(rewriter, op, op.getElseRegion());
@@ -1775,7 +1776,7 @@ struct ConditionPropagation : public OpRewritePattern<IfOp> {
                                 PatternRewriter &rewriter) const override {
     // Early exit if the condition is constant since replacing a constant
     // in the body with another constant isn't a simplification.
-    if (op.getCondition().getDefiningOp<arith::ConstantOp>())
+    if (matchPattern(op.getCondition(), m_Constant()))
       return failure();
 
     bool changed = false;
@@ -1879,25 +1880,23 @@ struct ReplaceIfYieldWithConditionOrValue : public OpRewritePattern<IfOp> {
         continue;
       }
 
-      auto trueYield = trueResult.getDefiningOp<arith::ConstantOp>();
-      if (!trueYield)
+      BoolAttr trueYield, falseYield;
+      if (!matchPattern(trueResult, m_Constant(&trueYield)) ||
+          !matchPattern(falseResult, m_Constant(&falseYield)))
         continue;
 
-      if (!trueYield.getType().isInteger(1))
-        continue;
-
-      auto falseYield = falseResult.getDefiningOp<arith::ConstantOp>();
-      if (!falseYield)
-        continue;
-
-      bool trueVal = trueYield.getValue().cast<BoolAttr>().getValue();
-      bool falseVal = falseYield.getValue().cast<BoolAttr>().getValue();
+      bool trueVal = trueYield.getValue();
+      bool falseVal = falseYield.getValue();
       if (!trueVal && falseVal) {
         if (!opResult.use_empty()) {
+          Dialect *constDialect = trueResult.getDefiningOp()->getDialect();
           Value notCond = rewriter.create<arith::XOrIOp>(
               op.getLoc(), op.getCondition(),
-              rewriter.create<arith::ConstantOp>(
-                  op.getLoc(), i1Ty, rewriter.getIntegerAttr(i1Ty, 1)));
+              constDialect
+                  ->materializeConstant(rewriter,
+                                        rewriter.getIntegerAttr(i1Ty, 1), i1Ty,
+                                        op.getLoc())
+                  ->getResult(0));
           opResult.replaceAllUsesWith(notCond);
           changed = true;
         }
@@ -3385,6 +3384,137 @@ void WhileOp::getCanonicalizationPatterns(RewritePatternSet &results,
   results.add<RemoveLoopInvariantArgsFromBeforeBlock,
               RemoveLoopInvariantValueYielded, WhileConditionTruth,
               WhileCmpCond, WhileUnusedResult>(context);
+}
+
+//===----------------------------------------------------------------------===//
+// IndexSwitchOp
+//===----------------------------------------------------------------------===//
+
+/// Parse the case regions and values.
+static ParseResult
+parseSwitchCases(OpAsmParser &p, DenseI64ArrayAttr &cases,
+                 SmallVectorImpl<std::unique_ptr<Region>> &caseRegions) {
+  SmallVector<int64_t> caseValues;
+  while (succeeded(p.parseOptionalKeyword("case"))) {
+    int64_t value;
+    Region &region =
+        *caseRegions.emplace_back(std::make_unique<Region>()).get();
+    if (p.parseInteger(value) || p.parseRegion(region, /*arguments=*/{}))
+      return failure();
+    caseValues.push_back(value);
+  }
+  cases = p.getBuilder().getDenseI64ArrayAttr(caseValues);
+  return success();
+}
+
+/// Print the case regions and values.
+static void printSwitchCases(OpAsmPrinter &p, Operation *op,
+                             DenseI64ArrayAttr cases, RegionRange caseRegions) {
+  for (auto [value, region] : llvm::zip(cases.asArrayRef(), caseRegions)) {
+    p.printNewline();
+    p << "case " << value << ' ';
+    p.printRegion(*region, /*printEntryBlockArgs=*/false);
+  }
+}
+
+LogicalResult scf::IndexSwitchOp::verify() {
+  if (getCases().size() != getCaseRegions().size()) {
+    return emitOpError("has ")
+           << getCaseRegions().size() << " case regions but "
+           << getCases().size() << " case values";
+  }
+
+  DenseSet<int64_t> valueSet;
+  for (int64_t value : getCases())
+    if (!valueSet.insert(value).second)
+      return emitOpError("has duplicate case value: ") << value;
+
+  auto verifyRegion = [&](Region &region, const Twine &name) -> LogicalResult {
+    auto yield = cast<YieldOp>(region.front().getTerminator());
+    if (yield.getNumOperands() != getNumResults()) {
+      return (emitOpError("expected each region to return ")
+              << getNumResults() << " values, but " << name << " returns "
+              << yield.getNumOperands())
+                 .attachNote(yield.getLoc())
+             << "see yield operation here";
+    }
+    for (auto [idx, result, operand] :
+         llvm::zip(llvm::seq<unsigned>(0, getNumResults()), getResultTypes(),
+                   yield.getOperandTypes())) {
+      if (result == operand)
+        continue;
+      return (emitOpError("expected result #")
+              << idx << " of each region to be " << result)
+                 .attachNote(yield.getLoc())
+             << name << " returns " << operand << " here";
+    }
+    return success();
+  };
+
+  if (failed(verifyRegion(getDefaultRegion(), "default region")))
+    return failure();
+  for (auto &[idx, caseRegion] : llvm::enumerate(getCaseRegions()))
+    if (failed(verifyRegion(caseRegion, "case region #" + Twine(idx))))
+      return failure();
+
+  return success();
+}
+
+unsigned scf::IndexSwitchOp::getNumCases() { return getCases().size(); }
+
+Block &scf::IndexSwitchOp::getDefaultBlock() {
+  return getDefaultRegion().front();
+}
+
+Block &scf::IndexSwitchOp::getCaseBlock(unsigned idx) {
+  assert(idx < getNumCases() && "case index out-of-bounds");
+  return getCaseRegions()[idx].front();
+}
+
+void IndexSwitchOp::getSuccessorRegions(
+    Optional<unsigned> index, ArrayRef<Attribute> operands,
+    SmallVectorImpl<RegionSuccessor> &successors) {
+  // All regions branch back to the parent op.
+  if (index) {
+    successors.emplace_back(getResults());
+    return;
+  }
+
+  // If a constant was not provided, all regions are possible successors.
+  auto operandValue = operands.front().dyn_cast_or_null<IntegerAttr>();
+  if (!operandValue) {
+    for (Region &caseRegion : getCaseRegions())
+      successors.emplace_back(&caseRegion);
+    successors.emplace_back(&getDefaultRegion());
+    return;
+  }
+
+  // Otherwise, try to find a case with a matching value. If not, the default
+  // region is the only successor.
+  for (auto [caseValue, caseRegion] : llvm::zip(getCases(), getCaseRegions())) {
+    if (caseValue == operandValue.getInt()) {
+      successors.emplace_back(&caseRegion);
+      return;
+    }
+  }
+  successors.emplace_back(&getDefaultRegion());
+}
+
+void IndexSwitchOp::getRegionInvocationBounds(
+    ArrayRef<Attribute> operands, SmallVectorImpl<InvocationBounds> &bounds) {
+  auto operandValue = operands.front().dyn_cast_or_null<IntegerAttr>();
+  if (!operandValue) {
+    // All regions are invoked at most once.
+    bounds.append(getNumRegions(), InvocationBounds(/*lb=*/0, /*ub=*/1));
+    return;
+  }
+
+  unsigned liveIndex = getNumRegions() - 1;
+  auto it = llvm::find(getCases(), operandValue.getInt());
+  if (it != getCases().end())
+    liveIndex = std::distance(getCases().begin(), it);
+  for (unsigned i = 0, e = getNumRegions(); i < e; ++i)
+    bounds.emplace_back(/*lb=*/0, /*ub=*/i == liveIndex);
 }
 
 //===----------------------------------------------------------------------===//

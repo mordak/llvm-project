@@ -1297,6 +1297,8 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
     Value *I0 = II->getArgOperand(0), *I1 = II->getArgOperand(1);
     // umin(x, 1) == zext(x != 0)
     if (match(I1, m_One())) {
+      assert(II->getType()->getScalarSizeInBits() != 1 &&
+             "Expected simplify of umin with max constant");
       Value *Zero = Constant::getNullValue(I0->getType());
       Value *Cmp = Builder.CreateICmpNE(I0, Zero);
       return CastInst::Create(Instruction::ZExt, Cmp, II->getType());
@@ -1830,6 +1832,8 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
     break;
   }
   case Intrinsic::matrix_multiply: {
+    // Optimize negation in matrix multiplication.
+
     // -A * -B -> A * B
     Value *A, *B;
     if (match(II->getArgOperand(0), m_FNeg(m_Value(A))) &&
@@ -1837,6 +1841,50 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
       replaceOperand(*II, 0, A);
       replaceOperand(*II, 1, B);
       return II;
+    }
+
+    Value *Op0 = II->getOperand(0);
+    Value *Op1 = II->getOperand(1);
+    Value *OpNotNeg, *NegatedOp;
+    unsigned NegatedOpArg, OtherOpArg;
+    if (match(Op0, m_FNeg(m_Value(OpNotNeg)))) {
+      NegatedOp = Op0;
+      NegatedOpArg = 0;
+      OtherOpArg = 1;
+    } else if (match(Op1, m_FNeg(m_Value(OpNotNeg)))) {
+      NegatedOp = Op1;
+      NegatedOpArg = 1;
+      OtherOpArg = 0;
+    } else
+      // Multiplication doesn't have a negated operand.
+      break;
+
+    // Only optimize if the negated operand has only one use.
+    if (!NegatedOp->hasOneUse())
+      break;
+
+    Value *OtherOp = II->getOperand(OtherOpArg);
+    VectorType *RetTy = cast<VectorType>(II->getType());
+    VectorType *NegatedOpTy = cast<VectorType>(NegatedOp->getType());
+    VectorType *OtherOpTy = cast<VectorType>(OtherOp->getType());
+    ElementCount NegatedCount = NegatedOpTy->getElementCount();
+    ElementCount OtherCount = OtherOpTy->getElementCount();
+    ElementCount RetCount = RetTy->getElementCount();
+    // (-A) * B -> A * (-B), if it is cheaper to negate B and vice versa.
+    if (ElementCount::isKnownGT(NegatedCount, OtherCount) &&
+        ElementCount::isKnownLT(OtherCount, RetCount)) {
+      Value *InverseOtherOp = Builder.CreateFNeg(OtherOp);
+      replaceOperand(*II, NegatedOpArg, OpNotNeg);
+      replaceOperand(*II, OtherOpArg, InverseOtherOp);
+      return II;
+    }
+    // (-A) * B -> -(A * B), if it is cheaper to negate the result
+    if (ElementCount::isKnownGT(NegatedCount, RetCount)) {
+      SmallVector<Value *, 5> NewArgs(II->args());
+      NewArgs[NegatedOpArg] = OpNotNeg;
+      Instruction *NewMul =
+          Builder.CreateIntrinsic(II->getType(), IID, NewArgs, II);
+      return replaceInstUsesWith(*II, Builder.CreateFNegFMF(NewMul, II));
     }
     break;
   }
@@ -1990,7 +2038,64 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
     }
     break;
   }
+  case Intrinsic::ptrauth_auth:
+  case Intrinsic::ptrauth_resign: {
+    // (sign|resign) + (auth|resign) can be folded by omitting the middle
+    // sign+auth component if the key and discriminator match.
+    bool NeedSign = II->getIntrinsicID() == Intrinsic::ptrauth_resign;
+    Value *Key = II->getArgOperand(1);
+    Value *Disc = II->getArgOperand(2);
 
+    // AuthKey will be the key we need to end up authenticating against in
+    // whatever we replace this sequence with.
+    Value *AuthKey = nullptr, *AuthDisc = nullptr, *BasePtr;
+    if (auto CI = dyn_cast<CallBase>(II->getArgOperand(0))) {
+      BasePtr = CI->getArgOperand(0);
+      if (CI->getIntrinsicID() == Intrinsic::ptrauth_sign) {
+        if (CI->getArgOperand(1) != Key || CI->getArgOperand(2) != Disc)
+          break;
+      } else if (CI->getIntrinsicID() == Intrinsic::ptrauth_resign) {
+        if (CI->getArgOperand(3) != Key || CI->getArgOperand(4) != Disc)
+          break;
+        AuthKey = CI->getArgOperand(1);
+        AuthDisc = CI->getArgOperand(2);
+      } else
+        break;
+    } else
+      break;
+
+    unsigned NewIntrin;
+    if (AuthKey && NeedSign) {
+      // resign(0,1) + resign(1,2) = resign(0, 2)
+      NewIntrin = Intrinsic::ptrauth_resign;
+    } else if (AuthKey) {
+      // resign(0,1) + auth(1) = auth(0)
+      NewIntrin = Intrinsic::ptrauth_auth;
+    } else if (NeedSign) {
+      // sign(0) + resign(0, 1) = sign(1)
+      NewIntrin = Intrinsic::ptrauth_sign;
+    } else {
+      // sign(0) + auth(0) = nop
+      replaceInstUsesWith(*II, BasePtr);
+      eraseInstFromFunction(*II);
+      return nullptr;
+    }
+
+    SmallVector<Value *, 4> CallArgs;
+    CallArgs.push_back(BasePtr);
+    if (AuthKey) {
+      CallArgs.push_back(AuthKey);
+      CallArgs.push_back(AuthDisc);
+    }
+
+    if (NeedSign) {
+      CallArgs.push_back(II->getArgOperand(3));
+      CallArgs.push_back(II->getArgOperand(4));
+    }
+
+    Function *NewFn = Intrinsic::getDeclaration(II->getModule(), NewIntrin);
+    return CallInst::Create(NewFn, CallArgs);
+  }
   case Intrinsic::arm_neon_vtbl1:
   case Intrinsic::aarch64_neon_tbl1:
     if (Value *V = simplifyNeonTbl1(*II, Builder))
@@ -3346,6 +3451,10 @@ bool InstCombinerImpl::transformConstExprCastCall(CallBase &Call) {
 
     if (CallerPAL.hasParamAttr(i, Attribute::SwiftError))
       return false;
+
+    if (CallerPAL.hasParamAttr(i, Attribute::ByVal) !=
+        Callee->getAttributes().hasParamAttr(i, Attribute::ByVal))
+      return false; // Cannot transform to or from byval.
 
     // If the parameter is passed as a byval argument, then we have to have a
     // sized type and the sized type has to have the same size as the old type.

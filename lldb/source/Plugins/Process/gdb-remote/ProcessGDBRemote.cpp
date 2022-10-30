@@ -84,6 +84,7 @@
 
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/Support/FormatAdapters.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -165,12 +166,12 @@ public:
   }
 };
 
+} // namespace
+
 static PluginProperties &GetGlobalPluginProperties() {
   static PluginProperties g_settings;
   return g_settings;
 }
-
-} // namespace
 
 // TODO Randomly assigning a port is unsafe.  We should get an unused
 // ephemeral port from the kernel and make sure we reserve it before passing it
@@ -799,17 +800,17 @@ Status ProcessGDBRemote::DoLaunch(lldb_private::Module *exe_module,
       GDBRemoteCommunication::ScopedTimeout timeout(m_gdb_comm,
                                                     std::chrono::seconds(10));
 
-      int arg_packet_err = m_gdb_comm.SendArgumentsPacket(launch_info);
-      if (arg_packet_err == 0) {
-        std::string error_str;
-        if (m_gdb_comm.GetLaunchSuccess(error_str)) {
-          SetID(m_gdb_comm.GetCurrentProcessID());
-        } else {
-          error.SetErrorString(error_str.c_str());
-        }
+      // Since we can't send argv0 separate from the executable path, we need to
+      // make sure to use the actual executable path found in the launch_info...
+      Args args = launch_info.GetArguments();
+      if (FileSpec exe_file = launch_info.GetExecutableFile())
+        args.ReplaceArgumentAtIndex(0, exe_file.GetPath(false));
+      if (llvm::Error err = m_gdb_comm.LaunchProcess(args)) {
+        error.SetErrorStringWithFormatv("Cannot launch '{0}': {1}",
+                                        args.GetArgumentAtIndex(0),
+                                        llvm::fmt_consume(std::move(err)));
       } else {
-        error.SetErrorStringWithFormat("'A' packet returned an error: %i",
-                                       arg_packet_err);
+        SetID(m_gdb_comm.GetCurrentProcessID());
       }
     }
 
@@ -4022,8 +4023,10 @@ bool ParseRegisters(XMLNode feature_node, GdbServerTargetInfo &target_info,
   if (!feature_node)
     return false;
 
+  Log *log(GetLog(GDBRLog::Process));
+
   feature_node.ForEachChildElementWithName(
-      "reg", [&target_info, &registers](const XMLNode &reg_node) -> bool {
+      "reg", [&target_info, &registers, log](const XMLNode &reg_node) -> bool {
         std::string gdb_group;
         std::string gdb_type;
         DynamicRegisterInfo::Register reg_info;
@@ -4032,9 +4035,9 @@ bool ParseRegisters(XMLNode feature_node, GdbServerTargetInfo &target_info,
 
         // FIXME: we're silently ignoring invalid data here
         reg_node.ForEachAttribute([&target_info, &gdb_group, &gdb_type,
-                                   &encoding_set, &format_set, &reg_info](
-                                      const llvm::StringRef &name,
-                                      const llvm::StringRef &value) -> bool {
+                                   &encoding_set, &format_set, &reg_info,
+                                   log](const llvm::StringRef &name,
+                                        const llvm::StringRef &value) -> bool {
           if (name == "name") {
             reg_info.name.SetString(value);
           } else if (name == "bitsize") {
@@ -4091,10 +4094,10 @@ bool ParseRegisters(XMLNode feature_node, GdbServerTargetInfo &target_info,
             SplitCommaSeparatedRegisterNumberString(
                 value, reg_info.invalidate_regs, 0);
           } else {
-            Log *log(GetLog(GDBRLog::Process));
             LLDB_LOGF(log,
-                      "ProcessGDBRemote::%s unhandled reg attribute %s = %s",
-                      __FUNCTION__, name.data(), value.data());
+                      "ProcessGDBRemote::ParseRegisters unhandled reg "
+                      "attribute %s = %s",
+                      name.data(), value.data());
           }
           return true; // Keep iterating through all attributes
         });
@@ -4116,6 +4119,12 @@ bool ParseRegisters(XMLNode feature_node, GdbServerTargetInfo &target_info,
             // them as vector (similarly to xmm/ymm)
             reg_info.format = eFormatVectorOfUInt8;
             reg_info.encoding = eEncodingVector;
+          } else {
+            LLDB_LOGF(
+                log,
+                "ProcessGDBRemote::ParseRegisters Could not determine lldb"
+                "format and encoding for gdb type %s",
+                gdb_type.c_str());
           }
         }
 
@@ -4133,7 +4142,6 @@ bool ParseRegisters(XMLNode feature_node, GdbServerTargetInfo &target_info,
         }
 
         if (reg_info.byte_size == 0) {
-          Log *log(GetLog(GDBRLog::Process));
           LLDB_LOGF(log,
                     "ProcessGDBRemote::%s Skipping zero bitsize register %s",
                     __FUNCTION__, reg_info.name.AsCString());

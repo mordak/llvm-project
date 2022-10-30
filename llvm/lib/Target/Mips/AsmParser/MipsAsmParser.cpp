@@ -794,6 +794,9 @@ public:
       return MipsMCExpr::create(MipsMCExpr::MEK_TPREL_LO, E, Ctx);
     }
   }
+
+  bool areEqualRegs(const MCParsedAsmOperand &Op1,
+                    const MCParsedAsmOperand &Op2) const override;
 };
 
 /// MipsOperand - Instances of this class represent a parsed Mips machine
@@ -5990,6 +5993,9 @@ bool MipsAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_MissingFeature:
     Error(IDLoc, "instruction requires a CPU feature not currently enabled");
     return true;
+  case Match_InvalidTiedOperand:
+    Error(IDLoc, "operand must match destination register");
+    return true;
   case Match_InvalidOperand: {
     SMLoc ErrorLoc = IDLoc;
     if (ErrorInfo != ~0ULL) {
@@ -6978,6 +6984,19 @@ bool MipsAsmParser::parseBracketSuffix(StringRef Name,
 
 static std::string MipsMnemonicSpellCheck(StringRef S, const FeatureBitset &FBS,
                                           unsigned VariantID = 0);
+
+bool MipsAsmParser::areEqualRegs(const MCParsedAsmOperand &Op1,
+                                 const MCParsedAsmOperand &Op2) const {
+  // This target-overriden function exists to maintain current behaviour for
+  // e.g.
+  //   dahi    $3, $3, 0x5678
+  // as tested in test/MC/Mips/mips64r6/valid.s.
+  // FIXME: Should this test actually fail with an error? If so, then remove
+  // this overloaded method.
+  if (!Op1.isReg() || !Op2.isReg())
+    return true;
+  return Op1.getReg() == Op2.getReg();
+}
 
 bool MipsAsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
                                      SMLoc NameLoc, OperandVector &Operands) {

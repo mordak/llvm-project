@@ -27,7 +27,7 @@ define void @fp_iv_loop1_fast_FMF(float %init, float* noalias nocapture %A, i32 
 ; VEC4_INTERL1-NEXT:    [[TMP0:%.*]] = add i32 [[N]], -1
 ; VEC4_INTERL1-NEXT:    [[TMP1:%.*]] = zext i32 [[TMP0]] to i64
 ; VEC4_INTERL1-NEXT:    [[TMP2:%.*]] = add nuw nsw i64 [[TMP1]], 1
-; VEC4_INTERL1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[TMP0]], 3
+; VEC4_INTERL1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[N]], 4
 ; VEC4_INTERL1-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[SCALAR_PH:%.*]], label [[VECTOR_PH:%.*]]
 ; VEC4_INTERL1:       vector.ph:
 ; VEC4_INTERL1-NEXT:    [[N_VEC:%.*]] = and i64 [[TMP2]], -4
@@ -85,7 +85,7 @@ define void @fp_iv_loop1_fast_FMF(float %init, float* noalias nocapture %A, i32 
 ; VEC4_INTERL2-NEXT:    [[TMP0:%.*]] = add i32 [[N]], -1
 ; VEC4_INTERL2-NEXT:    [[TMP1:%.*]] = zext i32 [[TMP0]] to i64
 ; VEC4_INTERL2-NEXT:    [[TMP2:%.*]] = add nuw nsw i64 [[TMP1]], 1
-; VEC4_INTERL2-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[TMP0]], 7
+; VEC4_INTERL2-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[N]], 8
 ; VEC4_INTERL2-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[SCALAR_PH:%.*]], label [[VECTOR_PH:%.*]]
 ; VEC4_INTERL2:       vector.ph:
 ; VEC4_INTERL2-NEXT:    [[N_VEC:%.*]] = and i64 [[TMP2]], -8
@@ -286,7 +286,7 @@ define void @fp_iv_loop1_reassoc_FMF(float %init, float* noalias nocapture %A, i
 ; VEC4_INTERL1-NEXT:    [[TMP0:%.*]] = add i32 [[N]], -1
 ; VEC4_INTERL1-NEXT:    [[TMP1:%.*]] = zext i32 [[TMP0]] to i64
 ; VEC4_INTERL1-NEXT:    [[TMP2:%.*]] = add nuw nsw i64 [[TMP1]], 1
-; VEC4_INTERL1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[TMP0]], 3
+; VEC4_INTERL1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[N]], 4
 ; VEC4_INTERL1-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[SCALAR_PH:%.*]], label [[VECTOR_PH:%.*]]
 ; VEC4_INTERL1:       vector.ph:
 ; VEC4_INTERL1-NEXT:    [[N_VEC:%.*]] = and i64 [[TMP2]], -4
@@ -344,7 +344,7 @@ define void @fp_iv_loop1_reassoc_FMF(float %init, float* noalias nocapture %A, i
 ; VEC4_INTERL2-NEXT:    [[TMP0:%.*]] = add i32 [[N]], -1
 ; VEC4_INTERL2-NEXT:    [[TMP1:%.*]] = zext i32 [[TMP0]] to i64
 ; VEC4_INTERL2-NEXT:    [[TMP2:%.*]] = add nuw nsw i64 [[TMP1]], 1
-; VEC4_INTERL2-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[TMP0]], 7
+; VEC4_INTERL2-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[N]], 8
 ; VEC4_INTERL2-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[SCALAR_PH:%.*]], label [[VECTOR_PH:%.*]]
 ; VEC4_INTERL2:       vector.ph:
 ; VEC4_INTERL2-NEXT:    [[N_VEC:%.*]] = and i64 [[TMP2]], -8
@@ -548,7 +548,7 @@ define void @fp_iv_loop2(float %init, float* noalias nocapture %A, i32 %N) #0 {
 ; VEC4_INTERL1-NEXT:    [[TMP0:%.*]] = add i32 [[N]], -1
 ; VEC4_INTERL1-NEXT:    [[TMP1:%.*]] = zext i32 [[TMP0]] to i64
 ; VEC4_INTERL1-NEXT:    [[TMP2:%.*]] = add nuw nsw i64 [[TMP1]], 1
-; VEC4_INTERL1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[TMP0]], 3
+; VEC4_INTERL1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[N]], 4
 ; VEC4_INTERL1-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[SCALAR_PH:%.*]], label [[VECTOR_PH:%.*]]
 ; VEC4_INTERL1:       vector.ph:
 ; VEC4_INTERL1-NEXT:    [[N_VEC:%.*]] = and i64 [[TMP2]], -4
@@ -599,7 +599,7 @@ define void @fp_iv_loop2(float %init, float* noalias nocapture %A, i32 %N) #0 {
 ; VEC4_INTERL2-NEXT:    [[TMP0:%.*]] = add i32 [[N]], -1
 ; VEC4_INTERL2-NEXT:    [[TMP1:%.*]] = zext i32 [[TMP0]] to i64
 ; VEC4_INTERL2-NEXT:    [[TMP2:%.*]] = add nuw nsw i64 [[TMP1]], 1
-; VEC4_INTERL2-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[TMP0]], 7
+; VEC4_INTERL2-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[N]], 8
 ; VEC4_INTERL2-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[SCALAR_PH:%.*]], label [[VECTOR_PH:%.*]]
 ; VEC4_INTERL2:       vector.ph:
 ; VEC4_INTERL2-NEXT:    [[N_VEC:%.*]] = and i64 [[TMP2]], -8
@@ -792,7 +792,7 @@ define void @fp_iv_loop3(float %init, float* noalias nocapture %A, float* noalia
 ; VEC4_INTERL1-NEXT:    [[TMP1:%.*]] = add i32 [[N]], -1
 ; VEC4_INTERL1-NEXT:    [[TMP2:%.*]] = zext i32 [[TMP1]] to i64
 ; VEC4_INTERL1-NEXT:    [[TMP3:%.*]] = add nuw nsw i64 [[TMP2]], 1
-; VEC4_INTERL1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[TMP1]], 3
+; VEC4_INTERL1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[N]], 4
 ; VEC4_INTERL1-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[SCALAR_PH:%.*]], label [[VECTOR_PH:%.*]]
 ; VEC4_INTERL1:       vector.ph:
 ; VEC4_INTERL1-NEXT:    [[N_VEC:%.*]] = and i64 [[TMP3]], -4
@@ -874,7 +874,7 @@ define void @fp_iv_loop3(float %init, float* noalias nocapture %A, float* noalia
 ; VEC4_INTERL2-NEXT:    [[TMP1:%.*]] = add i32 [[N]], -1
 ; VEC4_INTERL2-NEXT:    [[TMP2:%.*]] = zext i32 [[TMP1]] to i64
 ; VEC4_INTERL2-NEXT:    [[TMP3:%.*]] = add nuw nsw i64 [[TMP2]], 1
-; VEC4_INTERL2-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[TMP1]], 7
+; VEC4_INTERL2-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[N]], 8
 ; VEC4_INTERL2-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[SCALAR_PH:%.*]], label [[VECTOR_PH:%.*]]
 ; VEC4_INTERL2:       vector.ph:
 ; VEC4_INTERL2-NEXT:    [[N_VEC:%.*]] = and i64 [[TMP3]], -8
@@ -1169,7 +1169,7 @@ define void @fp_iv_loop4(float* noalias nocapture %A, i32 %N) {
 ; VEC4_INTERL1-NEXT:    [[TMP0:%.*]] = add i32 [[N]], -1
 ; VEC4_INTERL1-NEXT:    [[TMP1:%.*]] = zext i32 [[TMP0]] to i64
 ; VEC4_INTERL1-NEXT:    [[TMP2:%.*]] = add nuw nsw i64 [[TMP1]], 1
-; VEC4_INTERL1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[TMP0]], 3
+; VEC4_INTERL1-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[N]], 4
 ; VEC4_INTERL1-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[SCALAR_PH:%.*]], label [[VECTOR_PH:%.*]]
 ; VEC4_INTERL1:       vector.ph:
 ; VEC4_INTERL1-NEXT:    [[N_VEC:%.*]] = and i64 [[TMP2]], -4
@@ -1217,7 +1217,7 @@ define void @fp_iv_loop4(float* noalias nocapture %A, i32 %N) {
 ; VEC4_INTERL2-NEXT:    [[TMP0:%.*]] = add i32 [[N]], -1
 ; VEC4_INTERL2-NEXT:    [[TMP1:%.*]] = zext i32 [[TMP0]] to i64
 ; VEC4_INTERL2-NEXT:    [[TMP2:%.*]] = add nuw nsw i64 [[TMP1]], 1
-; VEC4_INTERL2-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[TMP0]], 7
+; VEC4_INTERL2-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i32 [[N]], 8
 ; VEC4_INTERL2-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[SCALAR_PH:%.*]], label [[VECTOR_PH:%.*]]
 ; VEC4_INTERL2:       vector.ph:
 ; VEC4_INTERL2-NEXT:    [[N_VEC:%.*]] = and i64 [[TMP2]], -8
@@ -1603,11 +1603,11 @@ define void @non_primary_iv_float_scalar(float* %A, i64 %N) {
 ; VEC1_INTERL2-NEXT:    br label [[PRED_STORE_CONTINUE]]
 ; VEC1_INTERL2:       pred.store.continue:
 ; VEC1_INTERL2-NEXT:    br i1 [[TMP6]], label [[PRED_STORE_IF3:%.*]], label [[PRED_STORE_CONTINUE4]]
-; VEC1_INTERL2:       pred.store.if3:
+; VEC1_INTERL2:       pred.store.if2:
 ; VEC1_INTERL2-NEXT:    [[TMP7:%.*]] = fadd fast float [[TMP0]], 1.000000e+00
 ; VEC1_INTERL2-NEXT:    store float [[TMP7]], float* [[TMP2]], align 4
 ; VEC1_INTERL2-NEXT:    br label [[PRED_STORE_CONTINUE4]]
-; VEC1_INTERL2:       pred.store.continue4:
+; VEC1_INTERL2:       pred.store.continue3:
 ; VEC1_INTERL2-NEXT:    [[INDEX_NEXT]] = add nuw i64 [[INDEX]], 2
 ; VEC1_INTERL2-NEXT:    [[TMP8:%.*]] = icmp eq i64 [[INDEX_NEXT]], [[N_VEC]]
 ; VEC1_INTERL2-NEXT:    br i1 [[TMP8]], label [[MIDDLE_BLOCK:%.*]], label [[VECTOR_BODY]], !llvm.loop [[LOOP11:![0-9]+]]
