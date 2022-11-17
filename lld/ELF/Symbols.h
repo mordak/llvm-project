@@ -161,6 +161,9 @@ public:
   // True if the name contains '@'.
   uint8_t hasVersionSuffix : 1;
 
+  // True if the .gnu.warning.SYMBOL is set for the symbol
+  uint8_t gwarn : 1;
+
   // Symbol visibility. This is the computed minimum visibility of all
   // observed non-DSO symbols.
   uint8_t visibility() const { return stOther & 3; }
@@ -255,7 +258,7 @@ protected:
          uint8_t stOther, uint8_t type)
       : file(file), nameData(name.data()), nameSize(name.size()), type(type),
         binding(binding), stOther(stOther), symbolKind(k),
-        exportDynamic(false) {}
+        exportDynamic(false), gwarn(false) {}
 
   void overwrite(Symbol &sym, Kind k) const {
     if (sym.traced)
@@ -549,6 +552,8 @@ void reportDuplicate(const Symbol &sym, const InputFile *newFile,
                      InputSectionBase *errSec, uint64_t errOffset);
 void maybeWarnUnorderableSymbol(const Symbol *sym);
 bool computeIsPreemptible(const Symbol &sym);
+
+extern llvm::DenseMap<StringRef, StringRef> gnuWarnings;
 
 } // namespace elf
 } // namespace lld

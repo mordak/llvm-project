@@ -790,6 +790,18 @@ void elf::reportUndefinedSymbols() {
   undefs.clear();
 }
 
+static void reportGNUWarning(Symbol &sym, InputSectionBase &sec,
+                                 uint64_t offset) {
+  if (sym.gwarn) {
+    StringRef gnuWarning = gnuWarnings.lookup(sym.getName());
+    // report first occurance only
+    sym.gwarn = false;
+    if (!gnuWarning.empty())
+      message(sec.getSrcMsg(sym, offset) + "(" + sec.getObjMsg(offset) +
+              "): warning: " + gnuWarning);
+  }
+}
+
 // Report an undefined symbol if necessary.
 // Returns true if the undefined symbol will produce an error message.
 static bool maybeReportUndefined(Undefined &sym, InputSectionBase &sec,
@@ -1343,6 +1355,8 @@ template <class ELFT, class RelTy> void RelocationScanner::scanOne(RelTy *&i) {
   uint64_t offset = getter.get(rel.r_offset);
   if (offset == uint64_t(-1))
     return;
+
+  reportGNUWarning(sym, *sec, rel.r_offset);
 
   RelExpr expr = target->getRelExpr(type, sym, sec->content().data() + offset);
   int64_t addend = RelTy::IsRela
