@@ -94,6 +94,7 @@ Symbol *SymbolTable::insert(StringRef name) {
   sym->canInline = true;
   sym->referenced = false;
   sym->traced = false;
+  sym->gwarn = false;
   sym->scriptDefined = false;
   if (pos != StringRef::npos)
     sym->hasVersionSuffix = true;

@@ -144,6 +144,9 @@ public:
   // True if the name contains '@'.
   uint8_t hasVersionSuffix : 1;
 
+  // True if the .gnu.warning.SYMBOL is set for the symbol
+  uint8_t gwarn : 1;
+
   inline void replace(const Symbol &newSym);
 
   bool includeInDynsym() const;
@@ -253,7 +256,7 @@ protected:
         visibility(stOther & 3),
         isUsedInRegularObj(!file || file->kind() == InputFile::ObjKind),
         exportDynamic(isExportDynamic(k, visibility)), inDynamicList(false),
-        canInline(false), referenced(false), traced(false),
+        canInline(false), referenced(false), traced(false), gwarn(false),
         hasVersionSuffix(false), isInIplt(false), gotInIgot(false),
         isPreemptible(false), used(!config->gcSections), folded(false),
         needsTocRestore(false), scriptDefined(false), needsCopy(false),
@@ -596,6 +599,7 @@ void Symbol::replace(const Symbol &newSym) {
   canInline = old.canInline;
   referenced = old.referenced;
   traced = old.traced;
+  gwarn = old.gwarn;
   hasVersionSuffix = old.hasVersionSuffix;
   isPreemptible = old.isPreemptible;
   scriptDefined = old.scriptDefined;
@@ -616,6 +620,8 @@ template <typename... T> Defined *makeDefined(T &&...args) {
 void maybeWarnUnorderableSymbol(const Symbol *sym);
 bool computeIsPreemptible(const Symbol &sym);
 void reportBackrefs();
+
+extern llvm::DenseMap<StringRef, StringRef> gnuWarnings;
 
 // A mapping from a symbol to an InputFile referencing it backward. Used by
 // --warn-backrefs.
