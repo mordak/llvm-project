@@ -98,6 +98,7 @@ Symbol *SymbolTable::insert(StringRef name) {
   sym->inDynamicList = false;
   sym->referenced = false;
   sym->traced = false;
+  sym->gwarn = false;
   sym->scriptDefined = false;
   sym->versionId = VER_NDX_GLOBAL;
   if (pos != StringRef::npos)

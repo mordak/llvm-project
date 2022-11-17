@@ -811,6 +811,18 @@ void elf::reportUndefinedSymbols() {
   undefs.clear();
 }
 
+static void reportGNUWarning(Symbol &sym, InputSectionBase &sec,
+                                 uint64_t offset) {
+  if (sym.gwarn) {
+    StringRef gnuWarning = gnuWarnings.lookup(sym.getName());
+    // report first occurance only
+    sym.gwarn = false;
+    if (!gnuWarning.empty())
+      message(sec.getSrcMsg(sym, offset) + "(" + sec.getObjMsg(offset) +
+              "): warning: " + gnuWarning);
+  }
+}
+
 // Report an undefined symbol if necessary.
 // Returns true if the undefined symbol will produce an error message.
 static bool maybeReportUndefined(Undefined &sym, InputSectionBase &sec,
@@ -1315,6 +1327,8 @@ template <class ELFT, class RelTy> void RelocationScanner::scanOne(RelTy *&i) {
   if (sym.isUndefined() && symIndex != 0 &&
       maybeReportUndefined(cast<Undefined>(sym), sec, offset))
     return;
+
+  reportGNUWarning(sym, sec, rel.r_offset);
 
   const uint8_t *relocatedAddr = sec.rawData.begin() + offset;
   RelExpr expr = target.getRelExpr(type, sym, relocatedAddr);
