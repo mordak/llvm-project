@@ -41,6 +41,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetOptions.h"
+#include <optional>
 #include <string>
 
 using namespace llvm;
@@ -106,7 +107,7 @@ static std::string computeDataLayout(const Triple &TT, StringRef CPU,
 }
 
 static Reloc::Model getEffectiveRelocModel(bool JIT,
-                                           Optional<Reloc::Model> RM) {
+                                           std::optional<Reloc::Model> RM) {
   if (!RM || JIT)
     return Reloc::Static;
   return *RM;
@@ -120,8 +121,8 @@ static Reloc::Model getEffectiveRelocModel(bool JIT,
 MipsTargetMachine::MipsTargetMachine(const Target &T, const Triple &TT,
                                      StringRef CPU, StringRef FS,
                                      const TargetOptions &Options,
-                                     Optional<Reloc::Model> RM,
-                                     Optional<CodeModel::Model> CM,
+                                     std::optional<Reloc::Model> RM,
+                                     std::optional<CodeModel::Model> CM,
                                      CodeGenOpt::Level OL, bool JIT,
                                      bool isLittle)
     : LLVMTargetMachine(T, computeDataLayout(TT, CPU, Options, isLittle), TT,
@@ -129,11 +130,12 @@ MipsTargetMachine::MipsTargetMachine(const Target &T, const Triple &TT,
                         getEffectiveCodeModel(CM, CodeModel::Small), OL),
       isLittle(isLittle), TLOF(std::make_unique<MipsTargetObjectFile>()),
       ABI(MipsABIInfo::computeTargetABI(TT, CPU, Options.MCOptions)),
-      Subtarget(nullptr), DefaultSubtarget(TT, CPU, FS, isLittle, *this, None),
+      Subtarget(nullptr),
+      DefaultSubtarget(TT, CPU, FS, isLittle, *this, std::nullopt),
       NoMips16Subtarget(TT, CPU, FS.empty() ? "-mips16" : FS.str() + ",-mips16",
-                        isLittle, *this, None),
+                        isLittle, *this, std::nullopt),
       Mips16Subtarget(TT, CPU, FS.empty() ? "+mips16" : FS.str() + ",+mips16",
-                      isLittle, *this, None) {
+                      isLittle, *this, std::nullopt) {
   Subtarget = &DefaultSubtarget;
   initAsmInfo();
 
@@ -148,8 +150,8 @@ void MipsebTargetMachine::anchor() {}
 MipsebTargetMachine::MipsebTargetMachine(const Target &T, const Triple &TT,
                                          StringRef CPU, StringRef FS,
                                          const TargetOptions &Options,
-                                         Optional<Reloc::Model> RM,
-                                         Optional<CodeModel::Model> CM,
+                                         std::optional<Reloc::Model> RM,
+                                         std::optional<CodeModel::Model> CM,
                                          CodeGenOpt::Level OL, bool JIT)
     : MipsTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, JIT, false) {}
 
@@ -158,8 +160,8 @@ void MipselTargetMachine::anchor() {}
 MipselTargetMachine::MipselTargetMachine(const Target &T, const Triple &TT,
                                          StringRef CPU, StringRef FS,
                                          const TargetOptions &Options,
-                                         Optional<Reloc::Model> RM,
-                                         Optional<CodeModel::Model> CM,
+                                         std::optional<Reloc::Model> RM,
+                                         std::optional<CodeModel::Model> CM,
                                          CodeGenOpt::Level OL, bool JIT)
     : MipsTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, JIT, true) {}
 

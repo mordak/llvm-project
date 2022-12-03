@@ -1004,6 +1004,12 @@ std::optional<parser::MessageFixedText> CheckProcCompatibility(bool isCall,
   } else if (!rhsProcedure) {
     msg = "In assignment to procedure %s, the characteristics of the target"
           " procedure '%s' could not be determined"_err_en_US;
+  } else if (!isCall && lhsProcedure->functionResult &&
+      rhsProcedure->functionResult &&
+      !lhsProcedure->functionResult->IsCompatibleWith(
+          *rhsProcedure->functionResult, &whyNotCompatible)) {
+    msg =
+        "Function %s associated with incompatible function designator '%s': %s"_err_en_US;
   } else if (lhsProcedure->IsCompatibleWith(
                  *rhsProcedure, &whyNotCompatible, specificIntrinsic)) {
     // OK
@@ -1332,7 +1338,12 @@ bool IsFunction(const Scope &scope) {
 
 bool IsProcedure(const Symbol &symbol) {
   return common::visit(common::visitors{
-                           [](const SubprogramDetails &) { return true; },
+                           [&symbol](const SubprogramDetails &) {
+                             const Scope *scope{symbol.scope()};
+                             // Main programs & BLOCK DATA are not procedures.
+                             return !scope ||
+                                 scope->kind() == Scope::Kind::Subprogram;
+                           },
                            [](const SubprogramNameDetails &) { return true; },
                            [](const ProcEntityDetails &) { return true; },
                            [](const GenericDetails &) { return true; },

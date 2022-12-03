@@ -86,6 +86,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <optional>
 #include <system_error>
 #include <unordered_map>
 #include <utility>
@@ -868,7 +869,7 @@ static Optional<SectionRef> getWasmCodeSection(const WasmObjectFile &Obj) {
     if (Section.Type == wasm::WASM_SEC_CODE)
       return SecI;
   }
-  return None;
+  return std::nullopt;
 }
 
 static void
@@ -902,7 +903,7 @@ addMissingWasmCodeSymbols(const WasmObjectFile &Obj,
 static void addPltEntries(const ObjectFile &Obj,
                           std::map<SectionRef, SectionSymbolsTy> &AllSymbols,
                           StringSaver &Saver) {
-  Optional<SectionRef> Plt;
+  std::optional<SectionRef> Plt;
   for (const SectionRef &Section : Obj.sections()) {
     Expected<StringRef> SecNameOrErr = Section.getName();
     if (!SecNameOrErr) {
@@ -1100,7 +1101,7 @@ static SymbolInfoTy createDummySymbolInfo(const ObjectFile &Obj,
                                           const uint64_t Addr, StringRef &Name,
                                           uint8_t Type) {
   if (Obj.isXCOFF() && SymbolDescription)
-    return SymbolInfoTy(Addr, Name, None, None, false);
+    return SymbolInfoTy(Addr, Name, std::nullopt, std::nullopt, false);
   else
     return SymbolInfoTy(Addr, Name, Type);
 }
@@ -1275,14 +1276,14 @@ static Optional<OwningBinary<Binary>>
 fetchBinaryByBuildID(const ObjectFile &Obj) {
   Optional<object::BuildIDRef> BuildID = getBuildID(&Obj);
   if (!BuildID)
-    return None;
+    return std::nullopt;
   Optional<std::string> Path = BIDFetcher->fetch(*BuildID);
   if (!Path)
-    return None;
+    return std::nullopt;
   Expected<OwningBinary<Binary>> DebugBinary = createBinary(*Path);
   if (!DebugBinary) {
     reportWarning(toString(DebugBinary.takeError()), *Path);
-    return None;
+    return std::nullopt;
   }
   return std::move(*DebugBinary);
 }
@@ -1422,13 +1423,12 @@ static void disassembleObject(const Target *TheTarget, ObjectFile &Obj,
   LLVM_DEBUG(LVP.dump());
 
   std::unordered_map<uint64_t, BBAddrMap> AddrToBBAddrMap;
-  auto ReadBBAddrMap = [&](Optional<unsigned> SectionIndex = None) {
+  auto ReadBBAddrMap = [&](Optional<unsigned> SectionIndex = std::nullopt) {
     AddrToBBAddrMap.clear();
     if (const auto *Elf = dyn_cast<ELFObjectFileBase>(&Obj)) {
       auto BBAddrMapsOrErr = Elf->readBBAddrMap(SectionIndex);
       if (!BBAddrMapsOrErr)
-          reportWarning(toString(BBAddrMapsOrErr.takeError()),
-                        Obj.getFileName());
+        reportWarning(toString(BBAddrMapsOrErr.takeError()), Obj.getFileName());
       for (auto &FunctionBBAddrMap : *BBAddrMapsOrErr)
         AddrToBBAddrMap.emplace(FunctionBBAddrMap.Addr,
                                 std::move(FunctionBBAddrMap));
@@ -2585,7 +2585,7 @@ static void printRawClangAST(const ObjectFile *Obj) {
     ClangASTSectionName = "clangast";
   }
 
-  Optional<object::SectionRef> ClangASTSection;
+  std::optional<object::SectionRef> ClangASTSection;
   for (auto Sec : ToolSectionFilter(*Obj)) {
     StringRef Name;
     if (Expected<StringRef> NameOrErr = Sec.getName())
@@ -2620,7 +2620,7 @@ static void printFaultMaps(const ObjectFile *Obj) {
     return;
   }
 
-  Optional<object::SectionRef> FaultMapSection;
+  std::optional<object::SectionRef> FaultMapSection;
 
   for (auto Sec : ToolSectionFilter(*Obj)) {
     StringRef Name;
@@ -3030,7 +3030,7 @@ static void parseObjdumpOptions(const llvm::opt::InputArgList &InputArgs) {
   RawClangAST = InputArgs.hasArg(OBJDUMP_raw_clang_ast);
   Relocations = InputArgs.hasArg(OBJDUMP_reloc);
   PrintImmHex =
-      InputArgs.hasFlag(OBJDUMP_print_imm_hex, OBJDUMP_no_print_imm_hex, false);
+      InputArgs.hasFlag(OBJDUMP_print_imm_hex, OBJDUMP_no_print_imm_hex, true);
   PrivateHeaders = InputArgs.hasArg(OBJDUMP_private_headers);
   FilterSections = InputArgs.getAllArgValues(OBJDUMP_section_EQ);
   SectionHeaders = InputArgs.hasArg(OBJDUMP_section_headers);

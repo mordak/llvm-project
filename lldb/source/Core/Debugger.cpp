@@ -44,6 +44,7 @@
 #include "lldb/Target/Thread.h"
 #include "lldb/Target/ThreadList.h"
 #include "lldb/Utility/AnsiTerminal.h"
+#include "lldb/Utility/Diagnostics.h"
 #include "lldb/Utility/Event.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Listener.h"
@@ -51,6 +52,7 @@
 #include "lldb/Utility/State.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
+#include "lldb/lldb-enumerations.h"
 
 #if defined(_WIN32)
 #include "lldb/Host/windows/PosixApi.h"
@@ -146,6 +148,16 @@ static constexpr OptionEnumValueElement g_language_enumerators[] = {
         "default",
         "Select the lldb default as the default scripting language.",
     },
+};
+
+static constexpr OptionEnumValueElement g_dwim_print_verbosities[] = {
+    {eDWIMPrintVerbosityNone, "none",
+     "Use no verbosity when running dwim-print."},
+    {eDWIMPrintVerbosityExpression, "expression",
+     "Use partial verbosity when running dwim-print - display a message when "
+     "`expression` evaluation is used."},
+    {eDWIMPrintVerbosityFull, "full",
+     "Use full verbosity when running dwim-print."},
 };
 
 static constexpr OptionEnumValueElement s_stop_show_column_values[] = {
@@ -517,6 +529,13 @@ uint32_t Debugger::GetTabSize() const {
 bool Debugger::SetTabSize(uint32_t tab_size) {
   const uint32_t idx = ePropertyTabSize;
   return m_collection_sp->SetPropertyAtIndexAsUInt64(nullptr, idx, tab_size);
+}
+
+lldb::DWIMPrintVerbosity Debugger::GetDWIMPrintVerbosity() const {
+  const uint32_t idx = ePropertyDWIMPrintVerbosity;
+  return (lldb::DWIMPrintVerbosity)
+      m_collection_sp->GetPropertyAtIndexAsEnumeration(
+          nullptr, idx, g_debugger_properties[idx].default_uint_value);
 }
 
 #pragma mark Debugger
@@ -1310,6 +1329,9 @@ static void PrivateReportDiagnostic(Debugger &debugger,
                                     bool debugger_specific) {
   uint32_t event_type = 0;
   switch (type) {
+  case DiagnosticEventData::Type::Info:
+    assert(false && "DiagnosticEventData::Type::Info should not be broadcast");
+    return;
   case DiagnosticEventData::Type::Warning:
     event_type = Debugger::eBroadcastBitWarning;
     break;
@@ -1338,6 +1360,15 @@ void Debugger::ReportDiagnosticImpl(DiagnosticEventData::Type type,
                                     llvm::Optional<lldb::user_id_t> debugger_id,
                                     std::once_flag *once) {
   auto ReportDiagnosticLambda = [&]() {
+    // The diagnostic subsystem is optional but we still want to broadcast
+    // events when it's disabled.
+    if (Diagnostics::Enabled())
+      Diagnostics::Instance().Report(message);
+
+    // We don't broadcast info events.
+    if (type == DiagnosticEventData::Type::Info)
+      return;
+
     // Check if this diagnostic is for a specific debugger.
     if (debugger_id) {
       // It is debugger specific, grab it and deliver the event if the debugger
@@ -1373,6 +1404,13 @@ void Debugger::ReportError(std::string message,
                            llvm::Optional<lldb::user_id_t> debugger_id,
                            std::once_flag *once) {
   ReportDiagnosticImpl(DiagnosticEventData::Type::Error, std::move(message),
+                       debugger_id, once);
+}
+
+void Debugger::ReportInfo(std::string message,
+                          llvm::Optional<lldb::user_id_t> debugger_id,
+                          std::once_flag *once) {
+  ReportDiagnosticImpl(DiagnosticEventData::Type::Info, std::move(message),
                        debugger_id, once);
 }
 

@@ -67,6 +67,7 @@
 #include <cstdlib>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -371,8 +372,8 @@ protected:
   const Elf_Shdr *DotDynsymSec = nullptr;
   const Elf_Shdr *DotAddrsigSec = nullptr;
   DenseMap<const Elf_Shdr *, ArrayRef<Elf_Word>> ShndxTables;
-  Optional<uint64_t> SONameOffset;
-  Optional<DenseMap<uint64_t, std::vector<uint32_t>>> AddressToIndexMap;
+  std::optional<uint64_t> SONameOffset;
+  std::optional<DenseMap<uint64_t, std::vector<uint32_t>>> AddressToIndexMap;
 
   const Elf_Shdr *SymbolVersionSection = nullptr;   // .gnu.version
   const Elf_Shdr *SymbolVersionNeedSection = nullptr; // .gnu.version_r
@@ -940,7 +941,8 @@ ELFDumper<ELFT>::getSymbolSectionIndex(const Elf_Sym &Symbol, unsigned SymIndex,
   if (Ndx != SHN_UNDEF && Ndx < SHN_LORESERVE)
     return Ndx;
 
-  auto CreateErr = [&](const Twine &Name, Optional<unsigned> Offset = None) {
+  auto CreateErr = [&](const Twine &Name,
+                       std::optional<unsigned> Offset = std::nullopt) {
     std::string Desc;
     if (Offset)
       Desc = (Name + "+0x" + Twine::utohexstr(*Offset)).str();
@@ -1411,6 +1413,7 @@ static StringRef segmentTypeToString(unsigned Arch, unsigned Type) {
     LLVM_READOBJ_ENUM_CASE(ELF, PT_GNU_RELRO);
     LLVM_READOBJ_ENUM_CASE(ELF, PT_GNU_PROPERTY);
 
+    LLVM_READOBJ_ENUM_CASE(ELF, PT_OPENBSD_MUTABLE);
     LLVM_READOBJ_ENUM_CASE(ELF, PT_OPENBSD_RANDOMIZE);
     LLVM_READOBJ_ENUM_CASE(ELF, PT_OPENBSD_WXNEEDED);
     LLVM_READOBJ_ENUM_CASE(ELF, PT_OPENBSD_BOOTDATA);
@@ -2795,9 +2798,9 @@ Error MipsGOTParser<ELFT>::findGOT(Elf_Dyn_Range DynTable,
   }
 
   // Lookup dynamic table tags which define the GOT layout.
-  Optional<uint64_t> DtPltGot;
-  Optional<uint64_t> DtLocalGotNum;
-  Optional<uint64_t> DtGotSym;
+  std::optional<uint64_t> DtPltGot;
+  std::optional<uint64_t> DtLocalGotNum;
+  std::optional<uint64_t> DtGotSym;
   for (const auto &Entry : DynTable) {
     switch (Entry.getTag()) {
     case ELF::DT_PLTGOT:
@@ -2848,8 +2851,8 @@ Error MipsGOTParser<ELFT>::findGOT(Elf_Dyn_Range DynTable,
 template <class ELFT>
 Error MipsGOTParser<ELFT>::findPLT(Elf_Dyn_Range DynTable) {
   // Lookup dynamic table tags which define the PLT layout.
-  Optional<uint64_t> DtMipsPltGot;
-  Optional<uint64_t> DtJmpRel;
+  std::optional<uint64_t> DtMipsPltGot;
+  std::optional<uint64_t> DtJmpRel;
   for (const auto &Entry : DynTable) {
     switch (Entry.getTag()) {
     case ELF::DT_MIPS_PLTGOT:
@@ -4637,7 +4640,7 @@ void GNUELFDumper<ELFT>::printVersionSymbolSection(const Elf_Shdr *Sec) {
 
     bool IsDefault;
     Expected<StringRef> NameOrErr = this->Obj.getSymbolVersionByIndex(
-        Ndx, IsDefault, *VersionMap, /*IsSymHidden=*/None);
+        Ndx, IsDefault, *VersionMap, /*IsSymHidden=*/std::nullopt);
     if (!NameOrErr) {
       this->reportUniqueWarning("unable to get a version for entry " +
                                 Twine(I) + " of " + this->describe(*Sec) +
@@ -5230,11 +5233,11 @@ template <typename ELFT>
 static Optional<FreeBSDNote>
 getFreeBSDNote(uint32_t NoteType, ArrayRef<uint8_t> Desc, bool IsCore) {
   if (IsCore)
-    return None; // No pretty-printing yet.
+    return std::nullopt; // No pretty-printing yet.
   switch (NoteType) {
   case ELF::NT_FREEBSD_ABI_TAG:
     if (Desc.size() != 4)
-      return None;
+      return std::nullopt;
     return FreeBSDNote{
         "ABI tag",
         utostr(support::endian::read32<ELFT::TargetEndianness>(Desc.data()))};
@@ -5242,7 +5245,7 @@ getFreeBSDNote(uint32_t NoteType, ArrayRef<uint8_t> Desc, bool IsCore) {
     return FreeBSDNote{"Arch tag", toStringRef(Desc).str()};
   case ELF::NT_FREEBSD_FEATURE_CTL: {
     if (Desc.size() != 4)
-      return None;
+      return std::nullopt;
     unsigned Value =
         support::endian::read32<ELFT::TargetEndianness>(Desc.data());
     std::string FlagsStr;
@@ -5255,7 +5258,7 @@ getFreeBSDNote(uint32_t NoteType, ArrayRef<uint8_t> Desc, bool IsCore) {
     return FreeBSDNote{"Feature flags", OS.str()};
   }
   default:
-    return None;
+    return std::nullopt;
   }
 }
 
@@ -5722,7 +5725,7 @@ static void printNotesHelper(
     const typename ELFT::Phdr &P = (*PhdrsOrErr)[I];
     if (P.p_type != PT_NOTE)
       continue;
-    StartNotesFn(/*SecName=*/None, P.p_offset, P.p_filesz);
+    StartNotesFn(/*SecName=*/std::nullopt, P.p_offset, P.p_filesz);
     Error Err = Error::success();
     size_t Index = 0;
     for (const typename ELFT::Note Note : Obj.notes(P, Err)) {
@@ -6183,8 +6186,8 @@ void ELFDumper<ELFT>::printNonRelocatableStackSizes(
         break;
       }
       uint64_t SymValue = Data.getAddress(&Offset);
-      if (!printFunctionStackSize(SymValue, /*FunctionSec=*/None, Sec, Data,
-                                  &Offset))
+      if (!printFunctionStackSize(SymValue, /*FunctionSec=*/std::nullopt, Sec,
+                                  Data, &Offset))
         break;
     }
   }
@@ -6739,7 +6742,7 @@ void LLVMELFDumper<ELFT>::printSymbolSection(
       return StringRef("Common");
     if (Symbol.isReserved() && Symbol.st_shndx != SHN_XINDEX)
       return StringRef("Reserved");
-    return None;
+    return std::nullopt;
   };
 
   if (Optional<StringRef> Type = GetSectionSpecialType()) {

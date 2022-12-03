@@ -164,7 +164,7 @@ static Optional<std::string> findFile(StringRef path1, const Twine &path2) {
   path::append(s, path1, path2);
   if (fs::exists(s))
     return std::string(s);
-  return None;
+  return std::nullopt;
 }
 
 opt::InputArgList WasmOptTable::parse(ArrayRef<const char *> argv) {
@@ -283,7 +283,7 @@ static Optional<std::string> findFromSearchPaths(StringRef path) {
   for (StringRef dir : config->searchPaths)
     if (Optional<std::string> s = findFile(dir, path))
       return s;
-  return None;
+  return std::nullopt;
 }
 
 // This is for -l<basename>. We'll look for lib<basename>.a from
@@ -298,7 +298,7 @@ static Optional<std::string> searchLibraryBaseName(StringRef name) {
     if (Optional<std::string> s = findFile(dir, "lib" + name + ".a"))
       return s;
   }
-  return None;
+  return std::nullopt;
 }
 
 // This is for -l<namespec>.
@@ -393,7 +393,27 @@ static void readConfigs(opt::InputArgList &args) {
   config->exportAll = args.hasArg(OPT_export_all);
   config->exportTable = args.hasArg(OPT_export_table);
   config->growableTable = args.hasArg(OPT_growable_table);
-  config->importMemory = args.hasArg(OPT_import_memory);
+
+  if (args.hasArg(OPT_import_memory_with_name)) {
+    config->memoryImport =
+        args.getLastArgValue(OPT_import_memory_with_name).split(",");
+  } else if (args.hasArg(OPT_import_memory)) {
+    config->memoryImport =
+        std::pair<llvm::StringRef, llvm::StringRef>(defaultModule, memoryName);
+  } else {
+    config->memoryImport =
+        llvm::Optional<std::pair<llvm::StringRef, llvm::StringRef>>();
+  }
+
+  if (args.hasArg(OPT_export_memory_with_name)) {
+    config->memoryExport =
+        args.getLastArgValue(OPT_export_memory_with_name);
+  } else if (args.hasArg(OPT_export_memory)) {
+    config->memoryExport = memoryName;
+  } else {
+    config->memoryExport = llvm::Optional<llvm::StringRef>();
+  }
+
   config->sharedMemory = args.hasArg(OPT_shared_memory);
   config->importTable = args.hasArg(OPT_import_table);
   config->importUndefined = args.hasArg(OPT_import_undefined);
@@ -510,8 +530,20 @@ static void setConfigs() {
   }
 
   if (config->shared) {
-    config->importMemory = true;
+    if (config->memoryExport.has_value()) {
+      error("--export-memory is incompatible with --shared");
+    }
+    if (!config->memoryImport.has_value()) {
+      config->memoryImport =
+          std::pair<llvm::StringRef, llvm::StringRef>(defaultModule, memoryName);
+    }
     config->importUndefined = true;
+  }
+
+  // If neither export-memory nor import-memory is specified, default to
+  // exporting memory under its default name.
+  if (!config->memoryExport.has_value() && !config->memoryImport.has_value()) {
+    config->memoryExport = memoryName;
   }
 }
 
@@ -586,6 +618,12 @@ static void checkOptions(opt::InputArgList &args) {
   }
 }
 
+static const char *getReproduceOption(opt::InputArgList &args) {
+  if (auto *arg = args.getLastArg(OPT_reproduce))
+    return arg->getValue();
+  return getenv("LLD_REPRODUCE");
+}
+
 // Force Sym to be entered in the output. Used for -u or equivalent.
 static Symbol *handleUndefined(StringRef name) {
   Symbol *sym = symtab->find(name);
@@ -621,9 +659,9 @@ static void demoteLazySymbols() {
       if (s->signature) {
         LLVM_DEBUG(llvm::dbgs()
                    << "demoting lazy func: " << s->getName() << "\n");
-        replaceSymbol<UndefinedFunction>(s, s->getName(), None, None,
-                                         WASM_SYMBOL_BINDING_WEAK, s->getFile(),
-                                         s->signature);
+        replaceSymbol<UndefinedFunction>(s, s->getName(), std::nullopt,
+                                         std::nullopt, WASM_SYMBOL_BINDING_WEAK,
+                                         s->getFile(), s->signature);
       }
     }
   }
@@ -632,7 +670,7 @@ static void demoteLazySymbols() {
 static UndefinedGlobal *
 createUndefinedGlobal(StringRef name, llvm::wasm::WasmGlobalType *type) {
   auto *sym = cast<UndefinedGlobal>(symtab->addUndefinedGlobal(
-      name, None, None, WASM_SYMBOL_UNDEFINED, nullptr, type));
+      name, std::nullopt, std::nullopt, WASM_SYMBOL_UNDEFINED, nullptr, type));
   config->allowUndefinedSymbols.insert(sym->getName());
   sym->isUsedInRegularObj = true;
   return sym;
@@ -806,8 +844,9 @@ struct WrappedSymbol {
 };
 
 static Symbol *addUndefined(StringRef name) {
-  return symtab->addUndefinedFunction(name, None, None, WASM_SYMBOL_UNDEFINED,
-                                      nullptr, nullptr, false);
+  return symtab->addUndefinedFunction(name, std::nullopt, std::nullopt,
+                                      WASM_SYMBOL_UNDEFINED, nullptr, nullptr,
+                                      false);
 }
 
 // Handles -wrap option.
@@ -923,8 +962,7 @@ void LinkerDriver::linkerMain(ArrayRef<const char *> argsArr) {
   }
 
   // Handle --reproduce
-  if (auto *arg = args.getLastArg(OPT_reproduce)) {
-    StringRef path = arg->getValue();
+  if (const char *path = getReproduceOption(args)) {
     Expected<std::unique_ptr<TarWriter>> errOrWriter =
         TarWriter::create(path, path::stem(path));
     if (errOrWriter) {

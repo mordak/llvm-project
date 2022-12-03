@@ -342,6 +342,8 @@ bool X86TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
       HasRAOINT = true;
     } else if (Feature == "+avxifma") {
       HasAVXIFMA = true;
+    } else if (Feature == "+avxneconvert") {
+      HasAVXNECONVERT= true;
     } else if (Feature == "+avxvnni") {
       HasAVXVNNI = true;
     } else if (Feature == "+avxvnniint8") {
@@ -524,6 +526,11 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
   case CK_Tigerlake:
   case CK_SapphireRapids:
   case CK_Alderlake:
+  case CK_Raptorlake:
+  case CK_Meteorlake:
+  case CK_Sierraforest:
+  case CK_Grandridge:
+  case CK_Graniterapids:
     // FIXME: Historically, we defined this legacy name, it would be nice to
     // remove it at some point. We've never exposed fine-grained names for
     // recent primary x86 CPUs, and we should keep it that way.
@@ -798,6 +805,8 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__RAOINT__");
   if (HasAVXIFMA)
     Builder.defineMacro("__AVXIFMA__");
+  if (HasAVXNECONVERT)
+    Builder.defineMacro("__AVXNECONVERT__");
   if (HasAVXVNNI)
     Builder.defineMacro("__AVXVNNI__");
   if (HasAVXVNNIINT8)
@@ -925,6 +934,7 @@ bool X86TargetInfo::isValidFeatureName(StringRef Name) const {
       .Case("avx512ifma", true)
       .Case("avx512vp2intersect", true)
       .Case("avxifma", true)
+      .Case("avxneconvert", true)
       .Case("avxvnni", true)
       .Case("avxvnniint8", true)
       .Case("bmi", true)
@@ -1025,7 +1035,7 @@ bool X86TargetInfo::hasFeature(StringRef Feature) const {
       .Case("avx512ifma", HasAVX512IFMA)
       .Case("avx512vp2intersect", HasAVX512VP2INTERSECT)
       .Case("avxifma", HasAVXIFMA)
-      .Case("avxvnni", HasAVXVNNI)
+      .Case("avxneconvert", HasAVXNECONVERT)
       .Case("avxvnni", HasAVXVNNI)
       .Case("avxvnniint8", HasAVXVNNIINT8)
       .Case("bmi", HasBMI)
@@ -1192,6 +1202,7 @@ bool X86TargetInfo::validateCpuIs(StringRef FeatureStr) const {
 #define X86_VENDOR(ENUM, STRING) .Case(STRING, true)
 #define X86_CPU_TYPE_ALIAS(ENUM, ALIAS) .Case(ALIAS, true)
 #define X86_CPU_TYPE(ENUM, STR) .Case(STR, true)
+#define X86_CPU_SUBTYPE_ALIAS(ENUM, ALIAS) .Case(ALIAS, true)
 #define X86_CPU_SUBTYPE(ENUM, STR) .Case(STR, true)
 #include "llvm/Support/X86TargetParser.def"
       .Default(false);
@@ -1406,6 +1417,11 @@ Optional<unsigned> X86TargetInfo::getCPUCacheLineSize() const {
     case CK_Rocketlake:
     case CK_IcelakeServer:
     case CK_Alderlake:
+    case CK_Raptorlake:
+    case CK_Meteorlake:
+    case CK_Sierraforest:
+    case CK_Grandridge:
+    case CK_Graniterapids:
     case CK_KNL:
     case CK_KNM:
     // K7
@@ -1440,7 +1456,7 @@ Optional<unsigned> X86TargetInfo::getCPUCacheLineSize() const {
     // The following currently have unknown cache line sizes (but they are probably all 64):
     // Core
     case CK_None:
-      return None;
+      return std::nullopt;
   }
   llvm_unreachable("Unknown CPU kind");
 }

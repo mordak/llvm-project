@@ -265,6 +265,11 @@
 #endif
 
 #if !(defined(_MSC_VER) || defined(__SCE__)) || __has_feature(modules) ||      \
+    defined(__AVXNECONVERT__)
+#include <avxneconvertintrin.h>
+#endif
+
+#if !(defined(_MSC_VER) || defined(__SCE__)) || __has_feature(modules) ||      \
     defined(__RDPID__)
 /// Returns the value of the IA32_TSC_AUX MSR (0xc0000103).
 ///
@@ -521,11 +526,6 @@ _storebe_i64(void * __P, long long __D) {
 #if !(defined(_MSC_VER) || defined(__SCE__)) || __has_feature(modules) ||      \
     defined(__AMXFP16__)
 #include <amxfp16intrin.h>
-#endif
-
-#if !(defined(_MSC_VER) || defined(__SCE__)) || __has_feature(modules) ||      \
-    defined(__CMPCCXADD__)
-#include <cmpccxaddintrin.h>
 #endif
 
 #if !(defined(_MSC_VER) || defined(__SCE__)) || __has_feature(modules) ||      \

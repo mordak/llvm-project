@@ -1247,7 +1247,8 @@ Corrected:
   // member accesses, as we need to defer certain access checks until we know
   // the context.
   bool ADL = UseArgumentDependentLookup(SS, Result, NextToken.is(tok::l_paren));
-  if (Result.isSingleResult() && !ADL && !FirstDecl->isCXXClassMember())
+  if (Result.isSingleResult() && !ADL &&
+      (!FirstDecl->isCXXClassMember() || isa<EnumConstantDecl>(FirstDecl)))
     return NameClassification::NonType(Result.getRepresentativeDecl());
 
   // Otherwise, this is an overload set that we will need to resolve later.
@@ -2224,7 +2225,7 @@ void Sema::ActOnPopScope(SourceLocation Loc, Scope *S) {
   };
   SmallVector<LocAndDiag, 16> DeclDiags;
   auto addDiag = [&DeclDiags](SourceLocation Loc, PartialDiagnostic PD) {
-    DeclDiags.push_back(LocAndDiag{Loc, None, std::move(PD)});
+    DeclDiags.push_back(LocAndDiag{Loc, std::nullopt, std::move(PD)});
   };
   auto addDiagWithPrev = [&DeclDiags](SourceLocation Loc,
                                       SourceLocation PreviousDeclLoc,
@@ -9234,10 +9235,23 @@ static OpenCLParamType getOpenCLKernelParameterType(Sema &S, QualType PT) {
     // reference if an implementation supports them in kernel parameters.
     if (S.getLangOpts().OpenCLCPlusPlus &&
         !S.getOpenCLOptions().isAvailableOption(
-            "__cl_clang_non_portable_kernel_param_types", S.getLangOpts()) &&
-        !PointeeType->isAtomicType() && !PointeeType->isVoidType() &&
-        !PointeeType->isStandardLayoutType())
+            "__cl_clang_non_portable_kernel_param_types", S.getLangOpts())) {
+     auto CXXRec = PointeeType.getCanonicalType()->getAsCXXRecordDecl();
+     bool IsStandardLayoutType = true;
+     if (CXXRec) {
+       // If template type is not ODR-used its definition is only available
+       // in the template definition not its instantiation.
+       // FIXME: This logic doesn't work for types that depend on template
+       // parameter (PR58590).
+       if (!CXXRec->hasDefinition())
+         CXXRec = CXXRec->getTemplateInstantiationPattern();
+       if (!CXXRec || !CXXRec->hasDefinition() || !CXXRec->isStandardLayout())
+         IsStandardLayoutType = false;
+     }
+     if (!PointeeType->isAtomicType() && !PointeeType->isVoidType() &&
+        !IsStandardLayoutType)
       return InvalidKernelParam;
+    }
 
     return PtrKernelParam;
   }
@@ -13594,8 +13608,8 @@ void Sema::ActOnUninitializedDecl(Decl *RealDecl) {
     InitializationKind Kind
       = InitializationKind::CreateDefault(Var->getLocation());
 
-    InitializationSequence InitSeq(*this, Entity, Kind, None);
-    ExprResult Init = InitSeq.Perform(*this, Entity, Kind, None);
+    InitializationSequence InitSeq(*this, Entity, Kind, std::nullopt);
+    ExprResult Init = InitSeq.Perform(*this, Entity, Kind, std::nullopt);
 
     if (Init.get()) {
       Var->setInit(MaybeCreateExprWithCleanups(Init.get()));
@@ -14032,6 +14046,26 @@ void Sema::CheckStaticLocalForDllExport(VarDecl *VD) {
   }
 }
 
+void Sema::CheckThreadLocalForLargeAlignment(VarDecl *VD) {
+  assert(VD->getTLSKind());
+
+  // Perform TLS alignment check here after attributes attached to the variable
+  // which may affect the alignment have been processed. Only perform the check
+  // if the target has a maximum TLS alignment (zero means no constraints).
+  if (unsigned MaxAlign = Context.getTargetInfo().getMaxTLSAlign()) {
+    // Protect the check so that it's not performed on dependent types and
+    // dependent alignments (we can't determine the alignment in that case).
+    if (!VD->hasDependentAlignment()) {
+      CharUnits MaxAlignChars = Context.toCharUnitsFromBits(MaxAlign);
+      if (Context.getDeclAlign(VD) > MaxAlignChars) {
+        Diag(VD->getLocation(), diag::err_tls_var_aligned_over_maximum)
+            << (unsigned)Context.getDeclAlign(VD).getQuantity() << VD
+            << (unsigned)MaxAlignChars.getQuantity();
+      }
+    }
+  }
+}
+
 /// FinalizeDeclaration - called by ParseDeclarationAfterDeclarator to perform
 /// any semantic actions necessary after any initializer has been attached.
 void Sema::FinalizeDeclaration(Decl *ThisDecl) {
@@ -14075,24 +14109,11 @@ void Sema::FinalizeDeclaration(Decl *ThisDecl) {
 
   checkAttributesAfterMerging(*this, *VD);
 
-  // Perform TLS alignment check here after attributes attached to the variable
-  // which may affect the alignment have been processed. Only perform the check
-  // if the target has a maximum TLS alignment (zero means no constraints).
-  if (unsigned MaxAlign = Context.getTargetInfo().getMaxTLSAlign()) {
-    // Protect the check so that it's not performed on dependent types and
-    // dependent alignments (we can't determine the alignment in that case).
-    if (VD->getTLSKind() && !VD->hasDependentAlignment()) {
-      CharUnits MaxAlignChars = Context.toCharUnitsFromBits(MaxAlign);
-      if (Context.getDeclAlign(VD) > MaxAlignChars) {
-        Diag(VD->getLocation(), diag::err_tls_var_aligned_over_maximum)
-          << (unsigned)Context.getDeclAlign(VD).getQuantity() << VD
-          << (unsigned)MaxAlignChars.getQuantity();
-      }
-    }
-  }
-
   if (VD->isStaticLocal())
     CheckStaticLocalForDllExport(VD);
+
+  if (VD->getTLSKind())
+    CheckThreadLocalForLargeAlignment(VD);
 
   // Perform check for initializers of device-side global variables.
   // CUDA allows empty constructors as initializers (see E.2.3.1, CUDA
@@ -15739,8 +15760,8 @@ NamedDecl *Sema::ImplicitlyDefineFunction(SourceLocation Loc,
                                              /*NumExceptions=*/0,
                                              /*NoexceptExpr=*/nullptr,
                                              /*ExceptionSpecTokens=*/nullptr,
-                                             /*DeclsInPrototype=*/None, Loc,
-                                             Loc, D),
+                                             /*DeclsInPrototype=*/std::nullopt,
+                                             Loc, Loc, D),
                 std::move(DS.getAttributes()), SourceLocation());
   D.SetIdentifier(&II, Loc);
 
@@ -18211,13 +18232,20 @@ static void SetEligibleMethods(Sema &S, CXXRecordDecl *Record,
     if (!SatisfactionStatus[i])
       continue;
     CXXMethodDecl *Method = Methods[i];
-    const Expr *Constraints = Method->getTrailingRequiresClause();
+    CXXMethodDecl *OrigMethod = Method;
+    if (FunctionDecl *MF = OrigMethod->getInstantiatedFromMemberFunction())
+      OrigMethod = cast<CXXMethodDecl>(MF);
+
+    const Expr *Constraints = OrigMethod->getTrailingRequiresClause();
     bool AnotherMethodIsMoreConstrained = false;
     for (size_t j = 0; j < Methods.size(); j++) {
       if (i == j || !SatisfactionStatus[j])
         continue;
       CXXMethodDecl *OtherMethod = Methods[j];
-      if (!AreSpecialMemberFunctionsSameKind(S.Context, Method, OtherMethod,
+      if (FunctionDecl *MF = OtherMethod->getInstantiatedFromMemberFunction())
+        OtherMethod = cast<CXXMethodDecl>(MF);
+
+      if (!AreSpecialMemberFunctionsSameKind(S.Context, OrigMethod, OtherMethod,
                                              CSM))
         continue;
 
@@ -18228,7 +18256,7 @@ static void SetEligibleMethods(Sema &S, CXXRecordDecl *Record,
         AnotherMethodIsMoreConstrained = true;
         break;
       }
-      if (S.IsAtLeastAsConstrained(OtherMethod, {OtherConstraints}, Method,
+      if (S.IsAtLeastAsConstrained(OtherMethod, {OtherConstraints}, OrigMethod,
                                    {Constraints},
                                    AnotherMethodIsMoreConstrained)) {
         // There was an error with the constraints comparison. Exit the loop
@@ -19325,7 +19353,7 @@ void Sema::ActOnEnumBody(SourceLocation EnumLoc, SourceRange BraceRange,
     }
   }
 
-  // If we have have an empty set of enumerators we still need one bit.
+  // If we have an empty set of enumerators we still need one bit.
   // From [dcl.enum]p8
   // If the enumerator-list is empty, the values of the enumeration are as if
   // the enumeration had a single enumerator with value 0
@@ -19519,6 +19547,12 @@ Decl *Sema::ActOnFileScopeAsmDecl(Expr *expr,
                                                    AsmString, StartLoc,
                                                    EndLoc);
   CurContext->addDecl(New);
+  return New;
+}
+
+Decl *Sema::ActOnTopLevelStmtDecl(Stmt *Statement) {
+  auto *New = TopLevelStmtDecl::Create(Context, Statement);
+  Context.getTranslationUnitDecl()->addDecl(New);
   return New;
 }
 

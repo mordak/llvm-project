@@ -31,20 +31,20 @@ using namespace PatternMatch;
 STATISTIC(NumDeadStore,    "Number of dead stores eliminated");
 STATISTIC(NumGlobalCopies, "Number of allocas copied from constant global");
 
-/// isOnlyCopiedFromConstantGlobal - Recursively walk the uses of a (derived)
+/// isOnlyCopiedFromConstantMemory - Recursively walk the uses of a (derived)
 /// pointer to an alloca.  Ignore any reads of the pointer, return false if we
 /// see any stores or other unknown uses.  If we see pointer arithmetic, keep
 /// track of whether it moves the pointer (with IsOffset) but otherwise traverse
 /// the uses.  If we see a memcpy/memmove that targets an unoffseted pointer to
-/// the alloca, and if the source pointer is a pointer to a constant global, we
-/// can optimize this.
+/// the alloca, and if the source pointer is a pointer to a constant memory
+/// location, we can optimize this.
 static bool
-isOnlyCopiedFromConstantMemory(AAResults *AA,
-                               Value *V, MemTransferInst *&TheCopy,
+isOnlyCopiedFromConstantMemory(AAResults *AA, AllocaInst *V,
+                               MemTransferInst *&TheCopy,
                                SmallVectorImpl<Instruction *> &ToDelete) {
   // We track lifetime intrinsics as we encounter them.  If we decide to go
-  // ahead and replace the value with the global, this lets the caller quickly
-  // eliminate the markers.
+  // ahead and replace the value with the memory location, this lets the caller
+  // quickly eliminate the markers.
 
   SmallVector<std::pair<Value *, bool>, 35> ValuesToInspect;
   ValuesToInspect.emplace_back(V, false);
@@ -85,11 +85,12 @@ isOnlyCopiedFromConstantMemory(AAResults *AA,
         if (IsArgOperand && Call->isInAllocaArgument(DataOpNo))
           return false;
 
-        // If this is a readonly/readnone call site, then we know it is just a
-        // load (but one that potentially returns the value itself), so we can
+        // If this call site doesn't modify the memory, then we know it is just
+        // a load (but one that potentially returns the value itself), so we can
         // ignore it if we know that the value isn't captured.
-        if (Call->onlyReadsMemory() &&
-            (Call->use_empty() || Call->doesNotCapture(DataOpNo)))
+        bool NoCapture = Call->doesNotCapture(DataOpNo);
+        if ((Call->onlyReadsMemory() && (Call->use_empty() || NoCapture)) ||
+            (Call->onlyReadsMemory(DataOpNo) && NoCapture))
           continue;
 
         // If this is being passed as a byval argument, the caller is making a
@@ -130,8 +131,8 @@ isOnlyCopiedFromConstantMemory(AAResults *AA,
       // If the memintrinsic isn't using the alloca as the dest, reject it.
       if (U.getOperandNo() != 0) return false;
 
-      // If the source of the memcpy/move is not a constant global, reject it.
-      if (!AA->pointsToConstantMemory(MI->getSource()))
+      // If the source of the memcpy/move is not constant, reject it.
+      if (isModSet(AA->getModRefInfoMask(MI->getSource())))
         return false;
 
       // Otherwise, the transform is safe.  Remember the copy instruction.
@@ -141,9 +142,10 @@ isOnlyCopiedFromConstantMemory(AAResults *AA,
   return true;
 }
 
-/// isOnlyCopiedFromConstantGlobal - Return true if the specified alloca is only
-/// modified by a copy from a constant global.  If we can prove this, we can
-/// replace any uses of the alloca with uses of the global directly.
+/// isOnlyCopiedFromConstantMemory - Return true if the specified alloca is only
+/// modified by a copy from a constant memory location. If we can prove this, we
+/// can replace any uses of the alloca with uses of the memory location
+/// directly.
 static MemTransferInst *
 isOnlyCopiedFromConstantMemory(AAResults *AA,
                                AllocaInst *AI,
@@ -167,7 +169,7 @@ static bool isDereferenceableForAllocaSize(const Value *V, const AllocaInst *AI,
 }
 
 static Instruction *simplifyAllocaArraySize(InstCombinerImpl &IC,
-                                            AllocaInst &AI) {
+                                            AllocaInst &AI, DominatorTree &DT) {
   // Check for array size of 1 (scalar allocation).
   if (!AI.isArrayAllocation()) {
     // i32 1 is the canonical array size for scalar allocations.
@@ -185,6 +187,8 @@ static Instruction *simplifyAllocaArraySize(InstCombinerImpl &IC,
       AllocaInst *New = IC.Builder.CreateAlloca(NewTy, AI.getAddressSpace(),
                                                 nullptr, AI.getName());
       New->setAlignment(AI.getAlign());
+
+      replaceAllDbgUsesWith(AI, *New, *New, DT);
 
       // Scan to the end of the allocation instructions, to skip over a block of
       // allocas if possible...also skip interleaved debug info
@@ -354,7 +358,7 @@ void PointerReplacer::replacePointer(Instruction &I, Value *V) {
 }
 
 Instruction *InstCombinerImpl::visitAllocaInst(AllocaInst &AI) {
-  if (auto *I = simplifyAllocaArraySize(*this, AI))
+  if (auto *I = simplifyAllocaArraySize(*this, AI, DT))
     return I;
 
   if (AI.getAllocatedType()->isSized()) {
@@ -397,11 +401,11 @@ Instruction *InstCombinerImpl::visitAllocaInst(AllocaInst &AI) {
   }
 
   // Check to see if this allocation is only modified by a memcpy/memmove from
-  // a constant whose alignment is equal to or exceeds that of the allocation.
-  // If this is the case, we can change all users to use the constant global
-  // instead.  This is commonly produced by the CFE by constructs like "void
-  // foo() { int A[] = {1,2,3,4,5,6,7,8,9...}; }" if 'A' is only subsequently
-  // read.
+  // a memory location whose alignment is equal to or exceeds that of the
+  // allocation. If this is the case, we can change all users to use the
+  // constant memory location instead.  This is commonly produced by the CFE by
+  // constructs like "void foo() { int A[] = {1,2,3,4,5,6,7,8,9...}; }" if 'A'
+  // is only subsequently read.
   SmallVector<Instruction *, 4> ToDelete;
   if (MemTransferInst *Copy = isOnlyCopiedFromConstantMemory(AA, &AI, ToDelete)) {
     Value *TheSrc = Copy->getSource();
@@ -509,6 +513,7 @@ static StoreInst *combineStoreToNewValue(InstCombinerImpl &IC, StoreInst &SI,
     // here.
     switch (ID) {
     case LLVMContext::MD_dbg:
+    case LLVMContext::MD_DIAssignID:
     case LLVMContext::MD_tbaa:
     case LLVMContext::MD_prof:
     case LLVMContext::MD_fpmath:
@@ -577,43 +582,43 @@ static bool isMinMaxWithLoads(Value *V, Type *&LoadTy) {
 /// later. However, it is risky in case some backend or other part of LLVM is
 /// relying on the exact type loaded to select appropriate atomic operations.
 static Instruction *combineLoadToOperationType(InstCombinerImpl &IC,
-                                               LoadInst &LI) {
+                                               LoadInst &Load) {
   // FIXME: We could probably with some care handle both volatile and ordered
   // atomic loads here but it isn't clear that this is important.
-  if (!LI.isUnordered())
+  if (!Load.isUnordered())
     return nullptr;
 
-  if (LI.use_empty())
+  if (Load.use_empty())
     return nullptr;
 
   // swifterror values can't be bitcasted.
-  if (LI.getPointerOperand()->isSwiftError())
+  if (Load.getPointerOperand()->isSwiftError())
     return nullptr;
-
-  const DataLayout &DL = IC.getDataLayout();
 
   // Fold away bit casts of the loaded value by loading the desired type.
   // Note that we should not do this for pointer<->integer casts,
   // because that would result in type punning.
-  if (LI.hasOneUse()) {
+  if (Load.hasOneUse()) {
     // Don't transform when the type is x86_amx, it makes the pass that lower
     // x86_amx type happy.
-    if (auto *BC = dyn_cast<BitCastInst>(LI.user_back())) {
-      assert(!LI.getType()->isX86_AMXTy() &&
-             "load from x86_amx* should not happen!");
+    Type *LoadTy = Load.getType();
+    if (auto *BC = dyn_cast<BitCastInst>(Load.user_back())) {
+      assert(!LoadTy->isX86_AMXTy() && "Load from x86_amx* should not happen!");
       if (BC->getType()->isX86_AMXTy())
         return nullptr;
     }
 
-    if (auto* CI = dyn_cast<CastInst>(LI.user_back()))
-      if (CI->isNoopCast(DL) && LI.getType()->isPtrOrPtrVectorTy() ==
-                                    CI->getDestTy()->isPtrOrPtrVectorTy())
-        if (!LI.isAtomic() || isSupportedAtomicType(CI->getDestTy())) {
-          LoadInst *NewLoad = IC.combineLoadToNewType(LI, CI->getDestTy());
-          CI->replaceAllUsesWith(NewLoad);
-          IC.eraseInstFromFunction(*CI);
-          return &LI;
-        }
+    if (auto *CastUser = dyn_cast<CastInst>(Load.user_back())) {
+      Type *DestTy = CastUser->getDestTy();
+      if (CastUser->isNoopCast(IC.getDataLayout()) &&
+          LoadTy->isPtrOrPtrVectorTy() == DestTy->isPtrOrPtrVectorTy() &&
+          (!Load.isAtomic() || isSupportedAtomicType(DestTy))) {
+        LoadInst *NewLoad = IC.combineLoadToNewType(Load, DestTy);
+        CastUser->replaceAllUsesWith(NewLoad);
+        IC.eraseInstFromFunction(*CastUser);
+        return &Load;
+      }
+    }
   }
 
   // FIXME: We should also canonicalize loads of vectors when their elements are
@@ -1377,7 +1382,7 @@ Instruction *InstCombinerImpl::visitStoreInst(StoreInst &SI) {
   // If we have a store to a location which is known constant, we can conclude
   // that the store must be storing the constant value (else the memory
   // wouldn't be constant), and this must be a noop.
-  if (AA->pointsToConstantMemory(Ptr))
+  if (!isModSet(AA->getModRefInfoMask(Ptr)))
     return eraseInstFromFunction(SI);
 
   // Do really simple DSE, to catch cases where there are several consecutive
@@ -1552,6 +1557,7 @@ bool InstCombinerImpl::mergeStoreIntoSuccessor(StoreInst &SI) {
                     SI.getOrdering(), SI.getSyncScopeID());
   InsertNewInstBefore(NewSI, *BBI);
   NewSI->setDebugLoc(MergedLoc);
+  NewSI->mergeDIAssignID({&SI, OtherStore});
 
   // If the two stores had AA tags, merge them.
   AAMDNodes AATags = SI.getAAMetadata();

@@ -382,7 +382,7 @@ TEST(SemanticHighlighting, GetsCorrectTokens) {
       void $Function_def[[foo]]() {
         $Class[[F]] $LocalVariable_def[[FF]];
         $Class[[G]]<$Class[[F]], &$Class[[F]]::$Method[[f]]> $LocalVariable_def[[GG]];
-        $LocalVariable[[GG]].$Method[[foo]](&$LocalVariable[[FF]]);
+        $LocalVariable[[GG]].$Method[[foo]](&$LocalVariable_usedAsMutablePointer[[FF]]);
         $Class[[A]]<$Function[[foo]]> $LocalVariable_def[[AA]];
       }
     )cpp",
@@ -781,14 +781,14 @@ sizeof...($TemplateParameter[[Elements]]);
           const int* $LocalVariable_def_readonly[[constPtr]];
           int** $LocalVariable_def[[array]];
           $Function[[fun]]($LocalVariable[[val]], $LocalVariable[[val]],
-                           $LocalVariable[[ptr]], $LocalVariable_readonly[[constPtr]],
+                           $LocalVariable_usedAsMutablePointer[[ptr]], $LocalVariable_readonly[[constPtr]],
                            $LocalVariable_usedAsMutableReference[[val]], $LocalVariable[[val]],
 
                            $LocalVariable_usedAsMutableReference[[ptr]],
                            $LocalVariable_readonly_usedAsMutableReference[[constPtr]],
                            $LocalVariable_readonly[[constPtr]],
 
-                           $LocalVariable[[array]], $LocalVariable_usedAsMutableReference[[array]],
+                           $LocalVariable_usedAsMutablePointer[[array]], $LocalVariable_usedAsMutableReference[[array]],
                            $LocalVariable[[array]]
                            );
           [](int){}($LocalVariable[[val]]);
@@ -864,6 +864,12 @@ sizeof...($TemplateParameter[[Elements]]);
             const char *$LocalVariable_def_readonly[[s]] = $LocalVariable_readonly_static[[__func__]];
         }
       )cpp",
+      // override and final
+      R"cpp(
+        class $Class_def_abstract[[Base]] { virtual void $Method_decl_abstract_virtual[[m]]() = 0; };
+        class $Class_def[[override]] : public $Class_abstract[[Base]] { void $Method_decl_virtual[[m]]() $Modifier[[override]]; };
+        class $Class_def[[final]] : public $Class[[override]] { void $Method_decl_virtual[[m]]() $Modifier[[override]] $Modifier[[final]]; };
+      )cpp",
       // Issue 1222: readonly modifier for generic parameter
       R"cpp(
         template <typename $TemplateParameter_def[[T]]>
@@ -887,6 +893,17 @@ sizeof...($TemplateParameter[[Elements]]);
         $TemplateParameter[[T]] $Variable_def[[x]] = {};
         template <>
         int $Variable_def[[x]]<int> = (int)sizeof($Class[[Base]]);
+      )cpp",
+      // no crash
+      R"cpp(
+        struct $Class_def[[Foo]] {
+          void $Method_decl[[foo]]();
+        };
+
+        void $Function_def[[s]]($Class[[Foo]] $Parameter_def[[f]]) {
+          auto $LocalVariable_def[[k]] = &$Class[[Foo]]::$Method[[foo]];
+          ($Parameter[[f]].*$LocalVariable[[k]])(); // no crash on VisitCXXMemberCallExpr
+        }
       )cpp"};
   for (const auto &TestCase : TestCases)
     // Mask off scope modifiers to keep the tests manageable.

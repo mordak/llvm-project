@@ -202,7 +202,7 @@ static unsigned getNumAttributeArgs(const ParsedAttr &AL) {
 /// A helper function to provide Attribute Location for the Attr types
 /// AND the ParsedAttr.
 template <typename AttrInfo>
-static std::enable_if_t<std::is_base_of<Attr, AttrInfo>::value, SourceLocation>
+static std::enable_if_t<std::is_base_of_v<Attr, AttrInfo>, SourceLocation>
 getAttrLoc(const AttrInfo &AL) {
   return AL.getLocation();
 }
@@ -2676,7 +2676,7 @@ static void handleAvailabilityAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
 
         if (IOSToWatchOSMapping) {
           if (auto MappedVersion = IOSToWatchOSMapping->map(
-                  Version, MinimumWatchOSVersion, None)) {
+                  Version, MinimumWatchOSVersion, std::nullopt)) {
             return MappedVersion.value();
           }
         }
@@ -2731,8 +2731,8 @@ static void handleAvailabilityAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
           return Version;
 
         if (IOSToTvOSMapping) {
-          if (auto MappedVersion =
-                  IOSToTvOSMapping->map(Version, VersionTuple(0, 0), None)) {
+          if (auto MappedVersion = IOSToTvOSMapping->map(
+                  Version, VersionTuple(0, 0), std::nullopt)) {
             return *MappedVersion;
           }
         }
@@ -2795,24 +2795,25 @@ static void handleAvailabilityAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
         // attributes that are inferred from 'ios'.
         NewII = &S.Context.Idents.get("maccatalyst");
         auto RemapMacOSVersion =
-            [&](const VersionTuple &V) -> Optional<VersionTuple> {
+            [&](const VersionTuple &V) -> std::optional<VersionTuple> {
           if (V.empty())
-            return None;
+            return std::nullopt;
           // API_TO_BE_DEPRECATED is 100000.
           if (V.getMajor() == 100000)
             return VersionTuple(100000);
           // The minimum iosmac version is 13.1
-          return MacOStoMacCatalystMapping->map(V, VersionTuple(13, 1), None);
+          return MacOStoMacCatalystMapping->map(V, VersionTuple(13, 1),
+                                                std::nullopt);
         };
-        Optional<VersionTuple> NewIntroduced =
-                                   RemapMacOSVersion(Introduced.Version),
-                               NewDeprecated =
-                                   RemapMacOSVersion(Deprecated.Version),
-                               NewObsoleted =
-                                   RemapMacOSVersion(Obsoleted.Version);
+        std::optional<VersionTuple> NewIntroduced =
+                                        RemapMacOSVersion(Introduced.Version),
+                                    NewDeprecated =
+                                        RemapMacOSVersion(Deprecated.Version),
+                                    NewObsoleted =
+                                        RemapMacOSVersion(Obsoleted.Version);
         if (NewIntroduced || NewDeprecated || NewObsoleted) {
           auto VersionOrEmptyVersion =
-              [](const Optional<VersionTuple> &V) -> VersionTuple {
+              [](const std::optional<VersionTuple> &V) -> VersionTuple {
             return V ? *V : VersionTuple();
           };
           AvailabilityAttr *NewAttr = S.mergeAvailabilityAttr(
@@ -3150,7 +3151,7 @@ static void handleWarnUnusedResult(Sema &S, Decl *D, const ParsedAttr &AL) {
       if (LO.CPlusPlus && !LO.CPlusPlus20)
         S.Diag(AL.getLoc(), diag::ext_cxx20_attr) << AL;
 
-      // Since this this is spelled [[nodiscard]], get the optional string
+      // Since this is spelled [[nodiscard]], get the optional string
       // literal. If in C++ mode, but not in C++2a mode, diagnose as an
       // extension.
       // FIXME: C2x should support this feature as well, even as an extension.
@@ -4342,7 +4343,7 @@ void Sema::AddAlignedAttr(Decl *D, const AttributeCommonInfo &CI, Expr *E,
   }
 
   const auto *VD = dyn_cast<VarDecl>(D);
-  if (VD && Context.getTargetInfo().isTLSSupported()) {
+  if (VD) {
     unsigned MaxTLSAlign =
         Context.toCharUnitsFromBits(Context.getTargetInfo().getMaxTLSAlign())
             .getQuantity();
@@ -4507,7 +4508,7 @@ static void parseModeAttrArg(Sema &S, StringRef Str, unsigned &DestWidth,
     break;
   case 7:
     if (Str == "pointer")
-      DestWidth = S.Context.getTargetInfo().getPointerWidth(0);
+      DestWidth = S.Context.getTargetInfo().getPointerWidth(LangAS::Default);
     break;
   case 11:
     if (Str == "unwind_word")

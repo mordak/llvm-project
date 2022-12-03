@@ -240,6 +240,16 @@ end
 * The legacy extension intrinsic functions `IZEXT` and `JZEXT`
   are supported; `ZEXT` has different behavior with various older
   compilers, so it is not supported.
+* f18 doesn't impose a limit on the number of continuation lines
+  allowed for a single statement.
+* When a type-bound procedure declaration statement has neither interface
+  nor attributes, the "::" before the bindings is optional, even
+  if a binding has renaming with "=> proc".
+  The colons are not necessary for an unambiguous parse, C768
+  notwithstanding.
+* A type-bound procedure binding can be passed as an actual
+  argument corresponding to a dummy procedure and can be used as
+  the target of a procedure pointer assignment statement.
 
 ### Extensions supported when enabled by options
 
@@ -350,6 +360,19 @@ end
   pointer-valued function reference.
   No other Fortran compiler seems to handle this correctly for
   `ASSOCIATE`, though NAG gets it right for `SELECT TYPE`.
+* The standard doesn't explicitly require that a named constant that
+  appears as part of a complex-literal-constant be a scalar, but
+  most compilers emit an error when an array appears.
+  f18 supports them with a portability warning.
+* f18 does not enforce a blanket prohibition against generic
+  interfaces containing a mixture of functions and subroutines.
+  Apart from some contexts in which the standard requires all of
+  a particular generic interface to have only all functions or
+  all subroutines as its specific procedures, we allow both to
+  appear, unlike several other Fortran compilers.
+  This is especially desirable when two generics of the same
+  name are combined due to USE association and the mixture may
+  be inadvertent.
 
 ## Behavior in cases where the standard is ambiguous or indefinite
 
@@ -478,3 +501,15 @@ end module
   standard and not allowed by most other compilers.
   If the `USE`-associated entity of the same name is not a procedure,
   most compilers disallow it as well.
+
+* Fortran 2018 19.3.4p1: "A component name has the scope of its derived-type
+  definition.  Outside the type definition, it may also appear ..." which
+  seems to imply that within its derived-type definition, a component
+  name is in its scope, and at least shadows any entity of the same name
+  in the enclosing scope and might be read, thanks to the "also", to mean
+  that a "bare" reference to the name could be used in a specification inquiry.
+  However, most other compilers do not allow a component to shadow exterior
+  symbols, much less appear in specification inquiries, and there are
+  application codes that expect exterior symbols whose names match
+  components to be visible in a derived-type definition's default initialization
+  expressions, and so f18 follows that precedent.

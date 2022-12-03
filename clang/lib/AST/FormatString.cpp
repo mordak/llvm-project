@@ -740,7 +740,7 @@ ConversionSpecifier::getStandardSpecifier() const {
 
   switch (getKind()) {
   default:
-    return None;
+    return std::nullopt;
   case DArg:
     NewKind = dArg;
     break;
@@ -1050,7 +1050,7 @@ Optional<LengthModifier> FormatSpecifier::getCorrectedLengthModifier() const {
     }
   }
 
-  return None;
+  return std::nullopt;
 }
 
 bool FormatSpecifier::namedTypeToLengthModifier(QualType QT,

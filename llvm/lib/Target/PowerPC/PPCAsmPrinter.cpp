@@ -1616,7 +1616,7 @@ void PPCLinuxAsmPrinter::emitInstruction(const MachineInstr *MI) {
     //
     // Update compiler-rt/lib/xray/xray_powerpc64.cc accordingly when number
     // of instructions change.
-    OutStreamer->emitCodeAlignment(8, &getSubtargetInfo());
+    OutStreamer->emitCodeAlignment(Align(8), &getSubtargetInfo());
     MCSymbol *BeginOfSled = OutContext.createTempSymbol();
     OutStreamer->emitLabel(BeginOfSled);
     EmitToStreamer(*OutStreamer, RetInst);
@@ -1740,7 +1740,7 @@ void PPCLinuxAsmPrinter::emitFunctionEntryLabel() {
       ".opd", ELF::SHT_PROGBITS, ELF::SHF_WRITE | ELF::SHF_ALLOC);
   OutStreamer->switchSection(Section);
   OutStreamer->emitLabel(CurrentFnSym);
-  OutStreamer->emitValueToAlignment(8);
+  OutStreamer->emitValueToAlignment(Align(8));
   MCSymbol *Symbol1 = CurrentFnSymForSize;
   // Generates a R_PPC64_ADDR64 (from FK_DATA_8) relocation for the function
   // entry point.
@@ -1772,7 +1772,7 @@ void PPCLinuxAsmPrinter::emitEndOfAsmFile(Module &M) {
         Name, ELF::SHT_PROGBITS, ELF::SHF_WRITE | ELF::SHF_ALLOC);
     OutStreamer->switchSection(Section);
     if (!isPPC64)
-      OutStreamer->emitValueToAlignment(4);
+      OutStreamer->emitValueToAlignment(Align(4));
 
     for (const auto &TOCMapPair : TOC) {
       const MCSymbol *const TOCEntryTarget = TOCMapPair.first.first;
@@ -2053,7 +2053,7 @@ void PPCAIXAsmPrinter::emitFunctionBodyEnd() {
     const DataLayout &DL = MMI->getModule()->getDataLayout();
     const unsigned PointerSize = DL.getPointerSize();
     // Add necessary paddings in 64 bit mode.
-    OutStreamer->emitValueToAlignment(PointerSize);
+    OutStreamer->emitValueToAlignment(Align(PointerSize));
 
     OutStreamer->emitIntValue(0, PointerSize);
     OutStreamer->emitIntValue(0, PointerSize);
@@ -2404,7 +2404,7 @@ void PPCAIXAsmPrinter::emitTracebackTable() {
                                 MCSymbolRefExpr::create(TOCBaseSym, Ctx), Ctx);
 
     const DataLayout &DL = getDataLayout();
-    OutStreamer->emitValueToAlignment(4);
+    OutStreamer->emitValueToAlignment(Align(4));
     OutStreamer->AddComment("EHInfo Table");
     OutStreamer->emitValue(Exp, DL.getPointerSize());
   }
@@ -2511,7 +2511,7 @@ void PPCAIXAsmPrinter::emitGlobalVariableHelper(const GlobalVariable *GV) {
     if (GVKind.isBSSLocal() || GVKind.isThreadBSSLocal())
       OutStreamer->emitXCOFFLocalCommonSymbol(
           OutContext.getOrCreateSymbol(GVSym->getSymbolTableName()), Size,
-          GVSym, Alignment.value());
+          GVSym, Alignment);
     else
       OutStreamer->emitCommonSymbol(GVSym, Size, Alignment.value());
     return;
@@ -2668,8 +2668,7 @@ bool PPCAIXAsmPrinter::doInitialization(Module &M) {
         getObjFileLowering().SectionForGlobal(GO, GOKind, TM));
 
     Align GOAlign = getGVAlignment(GO, GO->getParent()->getDataLayout());
-    if (GOAlign > Csect->getAlignment())
-      Csect->setAlignment(GOAlign);
+    Csect->ensureMinAlignment(GOAlign);
   };
 
   // We need to know, up front, the alignment of csects for the assembly path,

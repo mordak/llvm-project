@@ -1058,7 +1058,7 @@ ExprResult Sema::DefaultVariadicArgumentPromotion(Expr *E, VariadicCallType CT,
       return ExprError();
 
     ExprResult Call = BuildCallExpr(TUScope, TrapFn.get(), E->getBeginLoc(),
-                                    None, E->getEndLoc());
+                                    std::nullopt, E->getEndLoc());
     if (Call.isInvalid())
       return ExprError();
 
@@ -1963,8 +1963,8 @@ Sema::ActOnStringLiteral(ArrayRef<Token> StringToks, Scope *UDLScope) {
     TemplateArgument Arg(Lit);
     TemplateArgumentLocInfo ArgInfo(Lit);
     ExplicitArgs.addArgument(TemplateArgumentLoc(Arg, ArgInfo));
-    return BuildLiteralOperatorCall(R, OpNameInfo, None, StringTokLocs.back(),
-                                    &ExplicitArgs);
+    return BuildLiteralOperatorCall(R, OpNameInfo, std::nullopt,
+                                    StringTokLocs.back(), &ExplicitArgs);
   }
 
   case LOLR_StringTemplatePack: {
@@ -1984,8 +1984,8 @@ Sema::ActOnStringLiteral(ArrayRef<Token> StringToks, Scope *UDLScope) {
       TemplateArgumentLocInfo ArgInfo;
       ExplicitArgs.addArgument(TemplateArgumentLoc(Arg, ArgInfo));
     }
-    return BuildLiteralOperatorCall(R, OpNameInfo, None, StringTokLocs.back(),
-                                    &ExplicitArgs);
+    return BuildLiteralOperatorCall(R, OpNameInfo, std::nullopt,
+                                    StringTokLocs.back(), &ExplicitArgs);
   }
   case LOLR_Raw:
   case LOLR_ErrorNoDiagnostic:
@@ -2624,7 +2624,7 @@ Sema::ActOnIdExpression(Scope *S, CXXScopeSpec &SS,
     // a template name, but we happen to have always already looked up the name
     // before we get here if it must be a template name.
     if (DiagnoseEmptyLookup(S, SS, R, CCC ? *CCC : DefaultValidator, nullptr,
-                            None, &TE)) {
+                            std::nullopt, &TE)) {
       if (TE && KeywordReplacement) {
         auto &State = getTypoExprState(TE);
         auto BestTC = State.Consumer->getNextCorrection();
@@ -3855,7 +3855,7 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
         TemplateArgumentLocInfo ArgInfo;
         ExplicitArgs.addArgument(TemplateArgumentLoc(Arg, ArgInfo));
       }
-      return BuildLiteralOperatorCall(R, OpNameInfo, None, TokLoc,
+      return BuildLiteralOperatorCall(R, OpNameInfo, std::nullopt, TokLoc,
                                       &ExplicitArgs);
     }
     case LOLR_StringTemplatePack:
@@ -9240,7 +9240,8 @@ static bool IsInvalidCmseNSCallConversion(Sema &S, QualType FromType,
 // This circumvents the usual type rules specified in 6.2.7p1 & 6.7.5.[1-3].
 // FIXME: add a couple examples in this comment.
 static Sema::AssignConvertType
-checkPointerTypesForAssignment(Sema &S, QualType LHSType, QualType RHSType) {
+checkPointerTypesForAssignment(Sema &S, QualType LHSType, QualType RHSType,
+                               SourceLocation Loc) {
   assert(LHSType.isCanonical() && "LHS not canonicalized!");
   assert(RHSType.isCanonical() && "RHS not canonicalized!");
 
@@ -9308,6 +9309,13 @@ checkPointerTypesForAssignment(Sema &S, QualType LHSType, QualType RHSType) {
     assert(lhptee->isFunctionType());
     return Sema::FunctionVoidPointer;
   }
+
+  if (!S.Diags.isIgnored(
+          diag::warn_typecheck_convert_incompatible_function_pointer_strict,
+          Loc) &&
+      RHSType->isFunctionPointerType() && LHSType->isFunctionPointerType() &&
+      !S.IsFunctionConversion(RHSType, LHSType, RHSType))
+    return Sema::IncompatibleFunctionPointerStrict;
 
   // C99 6.5.16.1p1 (constraint 3): both operands are pointers to qualified or
   // unqualified versions of compatible types, ...
@@ -9660,7 +9668,8 @@ Sema::CheckAssignmentConstraints(QualType LHSType, ExprResult &RHS,
         Kind = CK_NoOp;
       else
         Kind = CK_BitCast;
-      return checkPointerTypesForAssignment(*this, LHSType, RHSType);
+      return checkPointerTypesForAssignment(*this, LHSType, RHSType,
+                                            RHS.get()->getBeginLoc());
     }
 
     // int -> T*
@@ -13973,19 +13982,6 @@ QualType Sema::CheckAssignmentOperands(Expr *LHSExpr, ExprResult &RHS,
       //   type is deprecated unless the assignment is either a discarded-value
       //   expression or an unevaluated operand
       ExprEvalContexts.back().VolatileAssignmentLHSs.push_back(LHSExpr);
-    } else {
-      // C++20 [expr.ass]p6:
-      //   [Compound-assignment] expressions are deprecated if E1 has
-      //   volatile-qualified type and op is not one of the bitwise
-      //   operators |, &, ˆ.
-      switch (Opc) {
-      case BO_OrAssign:
-      case BO_AndAssign:
-      case BO_XorAssign:
-        break;
-      default:
-        Diag(Loc, diag::warn_deprecated_compound_assign_volatile) << LHSType;
-      }
     }
   }
 
@@ -15587,7 +15583,7 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
     }
   }
 
-  if (getLangOpts().HLSL) {
+  if (getLangOpts().HLSL && OpLoc.isValid()) {
     if (Opc == UO_AddrOf)
       return ExprError(Diag(OpLoc, diag::err_hlsl_operator_unsupported) << 0);
     if (Opc == UO_Deref)
@@ -16249,7 +16245,7 @@ void Sema::ActOnBlockArguments(SourceLocation CaretLoc, Declarator &ParamInfo,
     FunctionProtoType::ExtProtoInfo EPI;
     EPI.HasTrailingReturn = false;
     EPI.TypeQuals.addConst();
-    T = Context.getFunctionType(Context.DependentTy, None, EPI);
+    T = Context.getFunctionType(Context.DependentTy, std::nullopt, EPI);
     Sig = Context.getTrivialTypeSourceInfo(T);
   }
 
@@ -16399,10 +16395,10 @@ ExprResult Sema::ActOnBlockStmtExpr(SourceLocation CaretLoc,
     if (isa<FunctionNoProtoType>(FTy)) {
       FunctionProtoType::ExtProtoInfo EPI;
       EPI.ExtInfo = Ext;
-      BlockTy = Context.getFunctionType(RetTy, None, EPI);
+      BlockTy = Context.getFunctionType(RetTy, std::nullopt, EPI);
 
-    // Otherwise, if we don't need to change anything about the function type,
-    // preserve its sugar structure.
+      // Otherwise, if we don't need to change anything about the function type,
+      // preserve its sugar structure.
     } else if (FTy->getReturnType() == RetTy &&
                (!NoReturn || FTy->getNoReturnAttr())) {
       BlockTy = BSI->FunctionType;
@@ -16420,7 +16416,7 @@ ExprResult Sema::ActOnBlockStmtExpr(SourceLocation CaretLoc,
   } else {
     FunctionProtoType::ExtProtoInfo EPI;
     EPI.ExtInfo = FunctionType::ExtInfo().withNoReturn(NoReturn);
-    BlockTy = Context.getFunctionType(RetTy, None, EPI);
+    BlockTy = Context.getFunctionType(RetTy, std::nullopt, EPI);
   }
 
   DiagnoseUnusedParameters(BD->parameters());
@@ -16711,7 +16707,7 @@ ExprResult Sema::ActOnGNUNullExpr(SourceLocation TokenLoc) {
   // The type of __null will be int or long, depending on the size of
   // pointers on the target.
   QualType Ty;
-  unsigned pw = Context.getTargetInfo().getPointerWidth(0);
+  unsigned pw = Context.getTargetInfo().getPointerWidth(LangAS::Default);
   if (pw == Context.getTargetInfo().getIntWidth())
     Ty = Context.IntTy;
   else if (pw == Context.getTargetInfo().getLongWidth())
@@ -16946,6 +16942,12 @@ bool Sema::DiagnoseAssignmentResult(AssignConvertType ConvTy,
     } else {
       DiagKind = diag::ext_typecheck_convert_int_pointer;
     }
+    ConvHints.tryToFixConversion(SrcExpr, SrcType, DstType, *this);
+    MayHaveConvFixit = true;
+    break;
+  case IncompatibleFunctionPointerStrict:
+    DiagKind =
+        diag::warn_typecheck_convert_incompatible_function_pointer_strict;
     ConvHints.tryToFixConversion(SrcExpr, SrcType, DstType, *this);
     MayHaveConvFixit = true;
     break;
@@ -17695,7 +17697,7 @@ HandleImmediateInvocations(Sema &SemaRef,
 
     /// Prevent sema calls during the tree transform from adding pointers that
     /// are already in the sets.
-    llvm::SaveAndRestore<bool> DisableIITracking(
+    llvm::SaveAndRestore DisableIITracking(
         SemaRef.RebuildingImmediateInvocation, true);
 
     /// Prevent diagnostic during tree transfrom as they are duplicates
@@ -19966,7 +19968,7 @@ bool Sema::DiagRuntimeBehavior(SourceLocation Loc, ArrayRef<const Stmt*> Stmts,
 bool Sema::DiagRuntimeBehavior(SourceLocation Loc, const Stmt *Statement,
                                const PartialDiagnostic &PD) {
   return DiagRuntimeBehavior(
-      Loc, Statement ? llvm::makeArrayRef(Statement) : llvm::None, PD);
+      Loc, Statement ? llvm::makeArrayRef(Statement) : std::nullopt, PD);
 }
 
 bool Sema::CheckCallReturnType(QualType ReturnType, SourceLocation Loc,
@@ -20890,7 +20892,7 @@ ExprResult Sema::ActOnObjCAvailabilityCheckExpr(
       });
     }
     if (Spec == AvailSpecs.end())
-      return None;
+      return std::nullopt;
     return Spec->getVersion();
   };
 

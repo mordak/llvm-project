@@ -146,6 +146,17 @@ bool Sema::CheckConstraintExpression(const Expr *ConstraintExpression,
   return true;
 }
 
+namespace {
+struct SatisfactionStackRAII {
+  Sema &SemaRef;
+  SatisfactionStackRAII(Sema &SemaRef, llvm::FoldingSetNodeID FSNID)
+      : SemaRef(SemaRef) {
+      SemaRef.PushSatisfactionStackEntry(FSNID);
+  }
+  ~SatisfactionStackRAII() { SemaRef.PopSatisfactionStackEntry(); }
+};
+} // namespace
+
 template <typename AtomicEvaluator>
 static ExprResult
 calculateConstraintSatisfaction(Sema &S, const Expr *ConstraintExpr,
@@ -258,6 +269,29 @@ calculateConstraintSatisfaction(Sema &S, const Expr *ConstraintExpr,
   return SubstitutedAtomicExpr;
 }
 
+static bool
+DiagRecursiveConstraintEval(Sema &S, llvm::FoldingSetNodeID &ID, const Expr *E,
+                            const MultiLevelTemplateArgumentList &MLTAL) {
+  E->Profile(ID, S.Context, /*Canonical=*/true);
+  for (const auto &List : MLTAL)
+    for (const auto &TemplateArg : List.Args)
+      TemplateArg.Profile(ID, S.Context);
+
+  // Note that we have to do this with our own collection, because there are
+  // times where a constraint-expression check can cause us to need to evaluate
+  // other constriants that are unrelated, such as when evaluating a recovery
+  // expression, or when trying to determine the constexpr-ness of special
+  // members. Otherwise we could just use the
+  // Sema::InstantiatingTemplate::isAlreadyBeingInstantiated function.
+  if (S.SatisfactionStackContains(ID)) {
+    S.Diag(E->getExprLoc(), diag::err_constraint_depends_on_self)
+        << const_cast<Expr *>(E) << E->getSourceRange();
+    return true;
+  }
+
+  return false;
+}
+
 static ExprResult calculateConstraintSatisfaction(
     Sema &S, const NamedDecl *Template, SourceLocation TemplateNameLoc,
     const MultiLevelTemplateArgumentList &MLTAL, const Expr *ConstraintExpr,
@@ -278,6 +312,16 @@ static ExprResult calculateConstraintSatisfaction(
               AtomicExpr->getSourceRange());
           if (Inst.isInvalid())
             return ExprError();
+
+          llvm::FoldingSetNodeID ID;
+          if (DiagRecursiveConstraintEval(S, ID, AtomicExpr, MLTAL)) {
+            Satisfaction.IsSatisfied = false;
+            Satisfaction.ContainsErrors = true;
+            return ExprEmpty();
+          }
+
+          SatisfactionStackRAII StackRAII(S, ID);
+
           // We do not want error diagnostics escaping here.
           Sema::SFINAETrap Trap(S);
           SubstitutedExpression =
@@ -414,6 +458,7 @@ bool Sema::CheckConstraintSatisfaction(
   if (::CheckConstraintSatisfaction(*this, Template, ConstraintExprs,
                                     ConvertedConstraints, TemplateArgsLists,
                                     TemplateIDRange, *Satisfaction)) {
+    OutSatisfaction = *Satisfaction;
     return true;
   }
 
@@ -530,7 +575,7 @@ Sema::SetupConstraintCheckingTemplateArgumentsAndScope(
                                    /*Pattern=*/nullptr,
                                    /*ForConstraintInstantiation=*/true);
   if (SetupConstraintScope(FD, TemplateArgs, MLTAL, Scope))
-    return llvm::None;
+    return std::nullopt;
 
   return MLTAL;
 }
@@ -1109,11 +1154,11 @@ NormalizedConstraint::fromConstraintExprs(Sema &S, NamedDecl *D,
   assert(E.size() != 0);
   auto Conjunction = fromConstraintExpr(S, D, E[0]);
   if (!Conjunction)
-    return None;
+    return std::nullopt;
   for (unsigned I = 1; I < E.size(); ++I) {
     auto Next = fromConstraintExpr(S, D, E[I]);
     if (!Next)
-      return None;
+      return std::nullopt;
     *Conjunction = NormalizedConstraint(S.Context, std::move(*Conjunction),
                                         std::move(*Next), CCK_Conjunction);
   }
@@ -1138,10 +1183,10 @@ NormalizedConstraint::fromConstraintExpr(Sema &S, NamedDecl *D, const Expr *E) {
   if (LogicalBinOp BO = E) {
     auto LHS = fromConstraintExpr(S, D, BO.getLHS());
     if (!LHS)
-      return None;
+      return std::nullopt;
     auto RHS = fromConstraintExpr(S, D, BO.getRHS());
     if (!RHS)
-      return None;
+      return std::nullopt;
 
     return NormalizedConstraint(S.Context, std::move(*LHS), std::move(*RHS),
                                 BO.isAnd() ? CCK_Conjunction : CCK_Disjunction);
@@ -1165,14 +1210,14 @@ NormalizedConstraint::fromConstraintExpr(Sema &S, NamedDecl *D, const Expr *E) {
       SubNF = S.getNormalizedAssociatedConstraints(CD,
                                                    {CD->getConstraintExpr()});
       if (!SubNF)
-        return None;
+        return std::nullopt;
     }
 
     Optional<NormalizedConstraint> New;
     New.emplace(S.Context, *SubNF);
 
     if (substituteParameterMappings(S, *New, CSE))
-      return None;
+      return std::nullopt;
 
     return New;
   }
@@ -1300,6 +1345,20 @@ bool Sema::IsAtLeastAsConstrained(NamedDecl *D1,
                                   NamedDecl *D2,
                                   MutableArrayRef<const Expr *> AC2,
                                   bool &Result) {
+  if (const auto *FD1 = dyn_cast<FunctionDecl>(D1)) {
+    auto IsExpectedEntity = [](const FunctionDecl *FD) {
+      FunctionDecl::TemplatedKind Kind = FD->getTemplatedKind();
+      return Kind == FunctionDecl::TK_NonTemplate ||
+             Kind == FunctionDecl::TK_FunctionTemplate;
+    };
+    const auto *FD2 = dyn_cast<FunctionDecl>(D2);
+    (void)IsExpectedEntity;
+    (void)FD2;
+    assert(IsExpectedEntity(FD1) && FD2 && IsExpectedEntity(FD2) &&
+           "use non-instantiated function declaration for constraints partial "
+           "ordering");
+  }
+
   if (AC1.empty()) {
     Result = AC2.empty();
     return false;

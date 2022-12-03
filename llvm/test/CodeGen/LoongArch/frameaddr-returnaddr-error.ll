@@ -16,3 +16,9 @@ define ptr @non_const_depth_returnaddress(i32 %x) nounwind {
   ret ptr %1
 }
 
+define ptr @non_zero_returnaddress() nounwind {
+; CHECK: return address can only be determined for the current frame
+  %1 = call ptr @llvm.returnaddress(i32 1)
+  ret ptr %1
+}
+

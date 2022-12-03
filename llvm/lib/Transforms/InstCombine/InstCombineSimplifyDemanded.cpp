@@ -130,9 +130,6 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
   if (Depth == MaxAnalysisRecursionDepth)
     return nullptr;
 
-  if (isa<ScalableVectorType>(VTy))
-    return nullptr;
-
   Instruction *I = dyn_cast<Instruction>(V);
   if (!I) {
     computeKnownBits(V, Known, Depth, CxtI);
@@ -424,7 +421,9 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
 
     if (auto *DstVTy = dyn_cast<VectorType>(VTy)) {
       if (auto *SrcVTy = dyn_cast<VectorType>(I->getOperand(0)->getType())) {
-        if (cast<FixedVectorType>(DstVTy)->getNumElements() !=
+        if (isa<ScalableVectorType>(DstVTy) ||
+            isa<ScalableVectorType>(SrcVTy) ||
+            cast<FixedVectorType>(DstVTy)->getNumElements() !=
             cast<FixedVectorType>(SrcVTy)->getNumElements())
           // Don't touch a bitcast between vectors of different element counts.
           return nullptr;
@@ -972,7 +971,7 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
       }
       default: {
         // Handle target specific intrinsics
-        Optional<Value *> V = targetSimplifyDemandedUseBitsIntrinsic(
+        std::optional<Value *> V = targetSimplifyDemandedUseBitsIntrinsic(
             *II, DemandedMask, Known, KnownBitsComputed);
         if (V)
           return V.value();
@@ -1697,7 +1696,7 @@ Value *InstCombinerImpl::SimplifyDemandedVectorElts(Value *V,
     }
     default: {
       // Handle target specific intrinsics
-      Optional<Value *> V = targetSimplifyDemandedVectorEltsIntrinsic(
+      std::optional<Value *> V = targetSimplifyDemandedVectorEltsIntrinsic(
           *II, DemandedElts, UndefElts, UndefElts2, UndefElts3,
           simplifyAndSetOp);
       if (V)

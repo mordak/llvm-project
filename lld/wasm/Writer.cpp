@@ -288,11 +288,12 @@ void Writer::layoutMemory() {
 
   out.dylinkSec->memAlign = 0;
   for (OutputSegment *seg : segments) {
-    out.dylinkSec->memAlign = std::max(out.dylinkSec->memAlign, seg->alignment);
-    memoryPtr = alignTo(memoryPtr, 1ULL << seg->alignment);
+    out.dylinkSec->memAlign =
+        std::max(out.dylinkSec->memAlign, Log2(seg->alignment));
+    memoryPtr = alignTo(memoryPtr, seg->alignment);
     seg->startVA = memoryPtr;
     log(formatv("mem: {0,-15} offset={1,-8} size={2,-8} align={3}", seg->name,
-                memoryPtr, seg->size, seg->alignment));
+                memoryPtr, seg->size, Log2(seg->alignment)));
 
     if (!config->relocatable && seg->isTLS()) {
       if (WasmSym::tlsSize) {
@@ -301,7 +302,7 @@ void Writer::layoutMemory() {
       }
       if (WasmSym::tlsAlign) {
         auto *tlsAlign = cast<DefinedGlobal>(WasmSym::tlsAlign);
-        setGlobalPtr(tlsAlign, int64_t{1} << seg->alignment);
+        setGlobalPtr(tlsAlign, seg->alignment.value());
       }
       if (!config->sharedMemory && WasmSym::tlsBase) {
         auto *tlsBase = cast<DefinedGlobal>(WasmSym::tlsBase);
@@ -577,7 +578,7 @@ done:
   // memory is not being imported then we can assume its zero initialized.
   // In the case the memory is imported, and we can use the memory.fill
   // instruction, then we can also avoid including the segments.
-  if (config->importMemory && !allowed.count("bulk-memory"))
+  if (config->memoryImport.has_value() && !allowed.count("bulk-memory"))
     config->emitBssSegments = true;
 
   if (allowed.count("extended-const"))
@@ -671,9 +672,10 @@ void Writer::calculateExports() {
   if (config->relocatable)
     return;
 
-  if (!config->relocatable && !config->importMemory)
+  if (!config->relocatable && config->memoryExport.has_value()) {
     out.exportSec->exports.push_back(
-        WasmExport{"memory", WASM_EXTERNAL_MEMORY, 0});
+        WasmExport{*config->memoryExport, WASM_EXTERNAL_MEMORY, 0});
+  }
 
   unsigned globalIndex =
       out.importSec->getNumImportedGlobals() + out.globalSec->numGlobals();
@@ -1007,7 +1009,7 @@ static void createFunction(DefinedFunction *func, StringRef bodyContent) {
 bool Writer::needsPassiveInitialization(const OutputSegment *segment) {
   // If bulk memory features is supported then we can perform bss initialization
   // (via memory.fill) during `__wasm_init_memory`.
-  if (config->importMemory && !segment->requiredInBinary())
+  if (config->memoryImport.has_value() && !segment->requiredInBinary())
     return true;
   return segment->initFlags & WASM_DATA_SEGMENT_IS_PASSIVE;
 }
@@ -1083,13 +1085,13 @@ void Writer::createInitMemoryFunction() {
   {
     raw_string_ostream os(bodyContent);
     // Initialize memory in a thread-safe manner. The thread that successfully
-    // increments the flag from 0 to 1 is is responsible for performing the
-    // memory initialization. Other threads go sleep on the flag until the
-    // first thread finishing initializing memory, increments the flag to 2,
-    // and wakes all the other threads. Once the flag has been set to 2,
-    // subsequently started threads will skip the sleep. All threads
-    // unconditionally drop their passive data segments once memory has been
-    // initialized. The generated code is as follows:
+    // increments the flag from 0 to 1 is responsible for performing the memory
+    // initialization. Other threads go sleep on the flag until the first thread
+    // finishing initializing memory, increments the flag to 2, and wakes all
+    // the other threads. Once the flag has been set to 2, subsequently started
+    // threads will skip the sleep. All threads unconditionally drop their
+    // passive data segments once memory has been initialized. The generated
+    // code is as follows:
     //
     // (func $__wasm_init_memory
     //  (block $drop

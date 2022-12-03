@@ -694,7 +694,7 @@ llvm.func @simdloop_simple(%lb : i64, %ub : i64, %step : i64, %arg0: !llvm.ptr<f
       %4 = llvm.getelementptr %arg0[%iv] : (!llvm.ptr<f32>, i64) -> !llvm.ptr<f32>
       llvm.store %3, %4 : !llvm.ptr<f32>
       omp.yield
-  }) {operand_segment_sizes = array<i32: 1,1,1,0>} :
+  }) {operand_segment_sizes = array<i32: 1,1,1,0,0>} :
     (i64, i64, i64) -> ()
 
   llvm.return
@@ -2368,7 +2368,7 @@ llvm.func @omp_taskgroup(%x: i32, %y: i32, %zaddr: !llvm.ptr<i32>) {
 }
 
 // CHECK-LABEL: define void @omp_taskgroup(
-// CHECK-SAME:                             i32 %[[x:.+]], i32 %[[y:.+]], ptr %[[zaddr:.+]]) 
+// CHECK-SAME:                             i32 %[[x:.+]], i32 %[[y:.+]], ptr %[[zaddr:.+]])
 // CHECK:         br label %[[entry:[^,]+]]
 // CHECK:       [[entry]]:
 // CHECK:         %[[omp_global_thread_num:.+]] = call i32 @__kmpc_global_thread_num(ptr @{{.+}})
@@ -2409,7 +2409,7 @@ llvm.func @omp_taskgroup_task(%x: i32, %y: i32, %zaddr: !llvm.ptr<i32>) {
 }
 
 // CHECK-LABEL: define void @omp_taskgroup_task(
-// CHECK-SAME:                                  i32 %[[x:.+]], i32 %[[y:.+]], ptr %[[zaddr:.+]]) 
+// CHECK-SAME:                                  i32 %[[x:.+]], i32 %[[y:.+]], ptr %[[zaddr:.+]])
 // CHECK:         %[[structArg:.+]] = alloca { i32, i32, ptr }, align 8
 // CHECK:         br label %[[entry:[^,]+]]
 // CHECK:       [[entry]]:                                            ; preds = %3

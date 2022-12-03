@@ -481,6 +481,14 @@ namespace AArch64SVEPRFM {
 #include "AArch64GenSystemOperands.inc"
 }
 
+namespace AArch64RPRFM {
+struct RPRFM : SysAlias {
+  using SysAlias::SysAlias;
+};
+#define GET_RPRFM_DECL
+#include "AArch64GenSystemOperands.inc"
+} // namespace AArch64RPRFM
+
 namespace AArch64SVEPredPattern {
   struct SVEPREDPAT {
     const char *Name;
@@ -489,6 +497,15 @@ namespace AArch64SVEPredPattern {
 #define GET_SVEPREDPAT_DECL
 #include "AArch64GenSystemOperands.inc"
 }
+
+namespace AArch64SVEVecLenSpecifier {
+  struct SVEVECLENSPECIFIER {
+    const char *Name;
+    uint16_t Encoding;
+  };
+#define GET_SVEVECLENSPECIFIER_DECL
+#include "AArch64GenSystemOperands.inc"
+} // namespace AArch64SVEVecLenSpecifier
 
 /// Return the number of active elements for VL1 to VL256 predicate pattern,
 /// zero for all other patterns.
@@ -523,7 +540,7 @@ inline Optional<unsigned>
 getSVEPredPatternFromNumElements(unsigned MinNumElts) {
   switch (MinNumElts) {
   default:
-    return None;
+    return std::nullopt;
   case 1:
   case 2:
   case 3:
@@ -832,7 +849,7 @@ AArch64StringToPACKeyID(StringRef Name) {
     return AArch64PACKey::DA;
   if (Name == "db")
     return AArch64PACKey::DB;
-  return None;
+  return std::nullopt;
 }
 
 namespace AArch64 {

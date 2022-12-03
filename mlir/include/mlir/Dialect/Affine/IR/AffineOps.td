@@ -105,7 +105,7 @@ def AffineApplyOp : Affine_Op<"apply", [Pure]> {
 }
 
 def AffineForOp : Affine_Op<"for",
-    [AutomaticAllocationScope, ImplicitAffineTerminator, RecursivelySpeculatable,
+    [AutomaticAllocationScope, ImplicitAffineTerminator, ConditionallySpeculatable,
      RecursiveMemoryEffects, DeclareOpInterfaceMethods<LoopLikeOpInterface,
      ["getSingleInductionVar", "getSingleLowerBound", "getSingleStep",
       "getSingleUpperBound"]>,
@@ -340,6 +340,9 @@ def AffineForOp : Affine_Op<"for",
     /// Returns true if both the lower and upper bound have the same operand
     /// lists (same operands in the same order).
     bool matchingBoundOperandList();
+
+    /// Interface method for ConditionallySpeculatable.
+    Speculation::Speculatability getSpeculatability();
   }];
 
   let hasCanonicalizer = 1;
@@ -350,7 +353,9 @@ def AffineForOp : Affine_Op<"for",
 
 def AffineIfOp : Affine_Op<"if",
                            [ImplicitAffineTerminator, RecursivelySpeculatable,
-                            RecursiveMemoryEffects, NoRegionArguments]> {
+                            RecursiveMemoryEffects, NoRegionArguments,
+                            DeclareOpInterfaceMethods<RegionBranchOpInterface>
+                           ]> {
   let summary = "if-then-else operation";
   let description = [{
     Syntax:
@@ -555,14 +560,14 @@ class AffineMinMaxOpBase<string mnemonic, list<Trait> traits = []> :
   let extraClassDeclaration = [{
     static StringRef getMapAttrStrName() { return "map"; }
     AffineMap getAffineMap() { return getMap(); }
-    ValueRange getMapOperands() { return operands(); }
+    ValueRange getMapOperands() { return getOperands(); }
     ValueRange getDimOperands() {
-      return OperandRange{operands().begin(),
-                        operands().begin() + getMap().getNumDims()};
+      return OperandRange{getOperands().begin(),
+                          getOperands().begin() + getMap().getNumDims()};
     }
     ValueRange getSymbolOperands() {
-      return OperandRange{operands().begin() + getMap().getNumDims(),
-                        operands().end()};
+      return OperandRange{getOperands().begin() + getMap().getNumDims(),
+                          getOperands().end()};
     }
   }];
   let hasCustomAssemblyFormat = 1;
