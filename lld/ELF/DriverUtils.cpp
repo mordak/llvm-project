@@ -229,7 +229,7 @@ std::optional<std::string> elf::findFromSearchPaths(StringRef path) {
 
 namespace {
 // Must be in sync with findMajMinShlib in clang/lib/Driver/Driver.cpp.
-llvm::Optional<std::string> findMajMinShlib(StringRef dir, const Twine& libNameSo) {
+  std::optional<std::string> findMajMinShlib(StringRef dir, const Twine& libNameSo) {
   // Handle OpenBSD-style maj/min shlib scheme
   llvm::SmallString<128> Scratch;
   const StringRef LibName = (libNameSo + ".").toStringRef(Scratch);
@@ -263,11 +263,12 @@ llvm::Optional<std::string> findMajMinShlib(StringRef dir, const Twine& libNameS
 // search paths.
 std::optional<std::string> elf::searchLibraryBaseName(StringRef name) {
   for (StringRef dir : config->searchPaths) {
-    if (!config->isStatic)
+    if (!config->isStatic) {
       if (std::optional<std::string> s = findFile(dir, "lib" + name + ".so"))
         return s;
       if (std::optional<std::string> s = findMajMinShlib(dir, "lib" + name + ".so"))
         return s;
+    }
     if (std::optional<std::string> s = findFile(dir, "lib" + name + ".a"))
       return s;
   }
