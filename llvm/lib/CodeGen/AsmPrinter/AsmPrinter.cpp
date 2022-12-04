@@ -2864,7 +2864,7 @@ void AsmPrinter::emitTrapAlignment(Align Alignment, const GlobalObject *GV) cons
 /// the OutStreamer, but can be overridden by Target implementations.
 void AsmPrinter::emitTrapToAlignment(Align Alignment) const {
   if (Alignment == Align(1)) return;
-  OutStreamer->emitCodeAlignment(Alignment.value(), &getSubtargetInfo());
+  OutStreamer->emitCodeAlignment(Alignment, &getSubtargetInfo());
 }
 
 
@@ -3713,11 +3713,13 @@ void AsmPrinter::emitBasicBlockStart(const MachineBasicBlock &MBB) {
       MBB.pred_end();
   // Emit an alignment directive for this block, if needed.
   const Align Alignment = MBB.getAlignment();
-  if (Alignment != Align(1))
-    if (isReachableViaFallthrough)
+  if (Alignment != Align(1)) {
+    if (isReachableViaFallthrough) {
       emitAlignment(Alignment, nullptr, MBB.getMaxBytesForAlignment());
-    else
+    } else {
       emitTrapAlignment(Alignment);
+    }
+  }
 
   // If the block has its address taken, emit any labels that were used to
   // reference the block.  It is possible that there is more than one label

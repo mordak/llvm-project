@@ -2739,7 +2739,7 @@ void X86AsmPrinter::emitInstruction(const MachineInstr *MI) {
     EmitAndCountInstruction(MCInstBuilder(X86::JMP_1).addExpr(RGSuccExpr));
     EmitAndCountInstruction(MCInstBuilder(X86::INT3));
     EmitAndCountInstruction(MCInstBuilder(X86::INT3));
-    OutStreamer->emitValueToAlignment(8, 0xCC, 1);
+    OutStreamer->emitValueToAlignment(Align(8), 0xCC, 1);
     OutStreamer->emitLabel(RGSuccSym);
     return;
   }
@@ -2811,5 +2811,5 @@ void X86AsmPrinter::emitInstruction(const MachineInstr *MI) {
 /// Emit Trap bytes to the specified power of two alignment
 void X86AsmPrinter::emitTrapToAlignment(Align Alignment) const {
   if (Alignment == Align(1)) return;
-  OutStreamer->emitValueToAlignment(Alignment.value(), 0xCC, 1);
+  OutStreamer->emitValueToAlignment(Alignment, 0xCC, 1);
 }
