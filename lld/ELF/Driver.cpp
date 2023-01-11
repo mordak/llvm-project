@@ -1112,8 +1112,6 @@ static void readConfigs(opt::InputArgList &args) {
   errorHandler().errorHandlingScript =
       args.getLastArgValue(OPT_error_handling_script);
 
-  config->executeOnly =
-      args.hasFlag(OPT_execute_only, OPT_no_execute_only, false);
   config->exportDynamic =
       args.hasFlag(OPT_export_dynamic, OPT_no_export_dynamic, false) ||
       args.hasArg(OPT_shared);
@@ -1598,6 +1596,18 @@ static void setConfigs(opt::InputArgList &args) {
       args.hasFlag(OPT_toc_optimize, OPT_no_toc_optimize, m == EM_PPC64);
   config->pcRelOptimize =
       args.hasFlag(OPT_pcrel_optimize, OPT_no_pcrel_optimize, m == EM_PPC64);
+
+  config->executeOnly = false;
+#ifdef __OpenBSD__
+  switch (m) {
+  case EM_AARCH64:
+  case EM_RISCV:
+    config->executeOnly = true;
+    break;
+  }
+#endif
+  config->executeOnly =
+      args.hasFlag(OPT_execute_only, OPT_no_execute_only, config->executeOnly);
 }
 
 static bool isFormatBinary(StringRef s) {
