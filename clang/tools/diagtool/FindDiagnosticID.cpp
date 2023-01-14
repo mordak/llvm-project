@@ -10,6 +10,7 @@
 #include "DiagnosticNames.h"
 #include "clang/Basic/AllDiagnostics.h"
 #include "llvm/Support/CommandLine.h"
+#include <optional>
 
 DEF_DIAGTOOL("find-diagnostic-id", "Print the id of the given diagnostic",
              FindDiagnosticID)
@@ -47,7 +48,7 @@ int FindDiagnosticID::run(unsigned int argc, char **argv,
 
   std::vector<const char *> Args;
   Args.push_back("diagtool find-diagnostic-id");
-  for (const char *A : llvm::makeArrayRef(argv, argc))
+  for (const char *A : llvm::ArrayRef(argv, argc))
     Args.push_back(A);
 
   llvm::cl::HideUnrelatedOptions(FindDiagnosticIDOptions);

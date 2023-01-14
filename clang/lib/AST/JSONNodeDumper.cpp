@@ -3,6 +3,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/Specifiers.h"
 #include "clang/Lex/Lexer.h"
+#include <optional>
 
 using namespace clang;
 
@@ -850,6 +851,9 @@ void JSONNodeDumper::VisitVarDecl(const VarDecl *VD) {
     case VarDecl::CInit: JOS.attribute("init", "c");  break;
     case VarDecl::CallInit: JOS.attribute("init", "call"); break;
     case VarDecl::ListInit: JOS.attribute("init", "list"); break;
+    case VarDecl::ParenListInit:
+      JOS.attribute("init", "paren-list");
+      break;
     }
   }
   attributeOnlyIfTrue("isParameterPack", VD->isParameterPack());

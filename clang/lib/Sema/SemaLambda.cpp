@@ -21,6 +21,7 @@
 #include "clang/Sema/SemaInternal.h"
 #include "clang/Sema/SemaLambda.h"
 #include "llvm/ADT/STLExtras.h"
+#include <optional>
 using namespace clang;
 using namespace sema;
 
@@ -62,7 +63,7 @@ using namespace sema;
 static inline Optional<unsigned>
 getStackIndexOfNearestEnclosingCaptureReadyLambda(
     ArrayRef<const clang::sema::FunctionScopeInfo *> FunctionScopes,
-    VarDecl *VarToCapture) {
+    ValueDecl *VarToCapture) {
   // Label failure to capture.
   const Optional<unsigned> NoLambdaIsCaptureReady;
 
@@ -172,7 +173,7 @@ getStackIndexOfNearestEnclosingCaptureReadyLambda(
 
 Optional<unsigned> clang::getStackIndexOfNearestEnclosingCaptureCapableLambda(
     ArrayRef<const sema::FunctionScopeInfo *> FunctionScopes,
-    VarDecl *VarToCapture, Sema &S) {
+    ValueDecl *VarToCapture, Sema &S) {
 
   const Optional<unsigned> NoLambdaIsCaptureCapable;
 
@@ -775,8 +776,8 @@ void Sema::deduceClosureReturnType(CapturingScopeInfo &CSI) {
     if (Context.getCanonicalFunctionResultType(ReturnType) ==
           Context.getCanonicalFunctionResultType(CSI.ReturnType)) {
       // Use the return type with the strictest possible nullability annotation.
-      auto RetTyNullability = ReturnType->getNullability(Ctx);
-      auto BlockNullability = CSI.ReturnType->getNullability(Ctx);
+      auto RetTyNullability = ReturnType->getNullability();
+      auto BlockNullability = CSI.ReturnType->getNullability();
       if (BlockNullability &&
           (!RetTyNullability ||
            hasWeakerNullability(*RetTyNullability, *BlockNullability)))
@@ -887,11 +888,12 @@ VarDecl *Sema::createLambdaInitCaptureVarDecl(SourceLocation Loc,
   return NewVD;
 }
 
-void Sema::addInitCapture(LambdaScopeInfo *LSI, VarDecl *Var) {
+void Sema::addInitCapture(LambdaScopeInfo *LSI, VarDecl *Var,
+                          bool isReferenceType) {
   assert(Var->isInitCapture() && "init capture flag should be set");
-  LSI->addCapture(Var, /*isBlock*/false, Var->getType()->isReferenceType(),
-                  /*isNested*/false, Var->getLocation(), SourceLocation(),
-                  Var->getType(), /*Invalid*/false);
+  LSI->addCapture(Var, /*isBlock*/ false, isReferenceType,
+                  /*isNested*/ false, Var->getLocation(), SourceLocation(),
+                  Var->getType(), /*Invalid*/ false);
 }
 
 void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
@@ -1231,11 +1233,7 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
     if (Var->isInvalidDecl())
       continue;
 
-    VarDecl *Underlying;
-    if (auto *BD = dyn_cast<BindingDecl>(Var))
-      Underlying = dyn_cast<VarDecl>(BD->getDecomposedDecl());
-    else
-      Underlying = cast<VarDecl>(Var);
+    VarDecl *Underlying = Var->getPotentiallyDecomposedVarDecl();
 
     if (!Underlying->hasLocalStorage()) {
       Diag(C->Loc, diag::err_capture_non_automatic_variable) << C->Id;
@@ -1261,7 +1259,7 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
     }
 
     if (C->Init.isUsable()) {
-      addInitCapture(LSI, cast<VarDecl>(Var));
+      addInitCapture(LSI, cast<VarDecl>(Var), C->Kind == LCK_ByRef);
     } else {
       TryCaptureKind Kind = C->Kind == LCK_ByRef ? TryCapture_ExplicitByRef :
                                                    TryCapture_ExplicitByVal;

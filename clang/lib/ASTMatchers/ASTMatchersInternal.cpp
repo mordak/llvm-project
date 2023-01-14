@@ -22,7 +22,6 @@
 #include "clang/Lex/Lexer.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -35,6 +34,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -140,7 +140,7 @@ public:
     return Result;
   }
 
-  llvm::Optional<clang::TraversalKind> TraversalKind() const override {
+  std::optional<clang::TraversalKind> TraversalKind() const override {
     return InnerMatcher->TraversalKind();
   }
 
@@ -176,7 +176,7 @@ public:
     return this->InnerMatcher->dynMatches(DynNode, Finder, Builder);
   }
 
-  llvm::Optional<clang::TraversalKind> TraversalKind() const override {
+  std::optional<clang::TraversalKind> TraversalKind() const override {
     return TK;
   }
 

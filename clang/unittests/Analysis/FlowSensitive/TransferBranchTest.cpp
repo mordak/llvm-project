@@ -16,9 +16,10 @@
 #include "clang/Tooling/Tooling.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/Support/Error.h"
-#include "llvm/Testing/Support/Annotations.h"
+#include "llvm/Testing/Annotations/Annotations.h"
 #include "llvm/Testing/Support/Error.h"
 #include "gtest/gtest.h"
+#include <optional>
 
 namespace clang::dataflow::test {
 namespace {
@@ -102,10 +103,10 @@ TEST(TransferBranchTest, IfElse) {
         ASSERT_THAT(Results.keys(), UnorderedElementsAre("p", "q"));
 
         const TestLattice &LP = getLatticeAtAnnotation(Results, "p");
-        EXPECT_THAT(LP.Branch, Optional(true));
+        EXPECT_THAT(LP.Branch, std::make_optional(true));
 
         const TestLattice &LQ = getLatticeAtAnnotation(Results, "q");
-        EXPECT_THAT(LQ.Branch, Optional(false));
+        EXPECT_THAT(LQ.Branch, std::make_optional(false));
       },
       LangStandard::lang_cxx17);
 }

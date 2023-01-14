@@ -26,6 +26,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <system_error>
@@ -202,6 +203,9 @@ bool operator<(const Replacement &LHS, const Replacement &RHS);
 
 /// Equal-to operator between two Replacements.
 bool operator==(const Replacement &LHS, const Replacement &RHS);
+inline bool operator!=(const Replacement &LHS, const Replacement &RHS) {
+  return !(LHS == RHS);
+}
 
 /// Maintains a set of replacements that are conflict-free.
 /// Two replacements are considered conflicts if they overlap or have the same

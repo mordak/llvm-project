@@ -37,6 +37,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/VersionTuple.h"
 #include <cassert>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -932,8 +933,6 @@ public:
     return true;
   }
 
-  virtual bool shouldEmitFloat16WithExcessPrecision() const { return false; }
-
   /// Specify if mangling based on address space map should be used or
   /// not for language specific address spaces
   bool useAddressSpaceMapMangling() const {
@@ -1339,6 +1338,13 @@ public:
     return true;
   }
 
+  /// Returns true if feature has an impact on target code
+  /// generation and get its dependent options in second argument.
+  virtual bool getFeatureDepOptions(StringRef Feature,
+                                    std::string &Options) const {
+    return true;
+  }
+
   struct BranchProtectionInfo {
     LangOptions::SignReturnAddressScopeKind SignReturnAddr =
         LangOptions::SignReturnAddressScopeKind::None;
@@ -1385,7 +1391,9 @@ public:
 
   /// Identify whether this target supports multiversioning of functions,
   /// which requires support for cpu_supports and cpu_is functionality.
-  bool supportsMultiVersioning() const { return getTriple().isX86(); }
+  bool supportsMultiVersioning() const {
+    return getTriple().isX86() || getTriple().isAArch64();
+  }
 
   /// Identify whether this target supports IFuncs.
   bool supportsIFunc() const {
@@ -1401,6 +1409,10 @@ public:
   virtual unsigned multiVersionSortPriority(StringRef Name) const {
     return 0;
   }
+
+  // Return the target-specific cost for feature
+  // that taken into account in priority sorting.
+  virtual unsigned multiVersionFeatureCost() const { return 0; }
 
   // Validate the contents of the __builtin_cpu_is(const char*)
   // argument.
@@ -1435,7 +1447,7 @@ public:
   }
 
   // Get the cache line size of a given cpu. This method switches over
-  // the given cpu and returns "None" if the CPU is not found.
+  // the given cpu and returns "std::nullopt" if the CPU is not found.
   virtual Optional<unsigned> getCPUCacheLineSize() const {
     return std::nullopt;
   }
@@ -1512,7 +1524,7 @@ public:
   /// Return an AST address space which can be used opportunistically
   /// for constant global memory. It must be possible to convert pointers into
   /// this address space to LangAS::Default. If no such address space exists,
-  /// this may return None, and such optimizations will be disabled.
+  /// this may return std::nullopt, and such optimizations will be disabled.
   virtual llvm::Optional<LangAS> getConstantAddressSpace() const {
     return LangAS::Default;
   }
@@ -1652,9 +1664,10 @@ public:
   /// space \p AddressSpace to be converted in order to be used, then return the
   /// corresponding target specific DWARF address space.
   ///
-  /// \returns Otherwise return None and no conversion will be emitted in the
-  /// DWARF.
-  virtual Optional<unsigned> getDWARFAddressSpace(unsigned AddressSpace) const {
+  /// \returns Otherwise return std::nullopt and no conversion will be emitted
+  /// in the DWARF.
+  virtual std::optional<unsigned> getDWARFAddressSpace(unsigned AddressSpace)
+      const {
     return std::nullopt;
   }
 

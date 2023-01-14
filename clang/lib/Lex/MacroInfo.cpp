@@ -24,6 +24,7 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
+#include <optional>
 #include <utility>
 
 using namespace clang;
@@ -213,7 +214,7 @@ MacroDirective::DefInfo MacroDirective::getDefinition() {
       isPublic = VisMD->isPublic();
   }
 
-  return DefInfo(nullptr, UndefLoc, !isPublic || isPublic.value());
+  return DefInfo(nullptr, UndefLoc, !isPublic || *isPublic);
 }
 
 const MacroDirective::DefInfo

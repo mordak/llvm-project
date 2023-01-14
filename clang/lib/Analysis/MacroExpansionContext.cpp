@@ -8,6 +8,7 @@
 
 #include "clang/Analysis/MacroExpansionContext.h"
 #include "llvm/Support/Debug.h"
+#include <optional>
 
 #define DEBUG_TYPE "macro-expansion-context"
 
@@ -101,7 +102,7 @@ MacroExpansionContext::getExpandedText(SourceLocation MacroExpansionLoc) const {
   if (MacroExpansionLoc.isMacroID())
     return std::nullopt;
 
-  // If there was no macro expansion at that location, return None.
+  // If there was no macro expansion at that location, return std::nullopt.
   if (ExpansionRanges.find_as(MacroExpansionLoc) == ExpansionRanges.end())
     return std::nullopt;
 

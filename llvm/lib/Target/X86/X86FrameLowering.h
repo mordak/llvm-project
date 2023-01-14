@@ -62,7 +62,7 @@ public:
   void emitStackProbe(MachineFunction &MF, MachineBasicBlock &MBB,
                       MachineBasicBlock::iterator MBBI, const DebugLoc &DL,
                       bool InProlog,
-                      Optional<MachineFunction::DebugInstrOperandPair>
+                      std::optional<MachineFunction::DebugInstrOperandPair>
                           InstrNum = std::nullopt) const;
 
   bool stackProbeFunctionModifiesSP() const override;
@@ -215,7 +215,7 @@ private:
   void emitStackProbeCall(
       MachineFunction &MF, MachineBasicBlock &MBB,
       MachineBasicBlock::iterator MBBI, const DebugLoc &DL, bool InProlog,
-      Optional<MachineFunction::DebugInstrOperandPair> InstrNum) const;
+      std::optional<MachineFunction::DebugInstrOperandPair> InstrNum) const;
 
   /// Emit target stack probe as an inline sequence.
   void emitStackProbeInline(MachineFunction &MF, MachineBasicBlock &MBB,

@@ -25,6 +25,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/SaveAndRestore.h"
+#include <optional>
 
 using namespace clang;
 using namespace ento;
@@ -1092,7 +1093,7 @@ bool ExprEngine::shouldInlineCall(const CallEvent &Call, const Decl *D,
   // Check if this function has been marked as non-inlinable.
   Optional<bool> MayInline = Engine.FunctionSummaries->mayInline(D);
   if (MayInline) {
-    if (!MayInline.value())
+    if (!*MayInline)
       return false;
 
   } else {

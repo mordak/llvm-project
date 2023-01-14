@@ -25,6 +25,7 @@
 #include "clang/Analysis/AnyCall.h"
 #include "clang/Analysis/SelectorExtras.h"
 #include "llvm/ADT/STLExtras.h"
+#include <optional>
 
 using namespace clang;
 
@@ -719,8 +720,8 @@ private:
   /// type for functions/methods) @c QT has any of the given attributes,
   /// provided they pass necessary validation checks AND tracking the given
   /// attribute is enabled.
-  /// Returns the object kind corresponding to the present attribute, or None,
-  /// if none of the specified attributes are present.
+  /// Returns the object kind corresponding to the present attribute, or
+  /// std::nullopt, if none of the specified attributes are present.
   /// Crashes if passed an attribute which is not explicitly handled.
   template <class T>
   Optional<ObjKind> hasAnyEnabledAttrOf(const Decl *D, QualType QT);

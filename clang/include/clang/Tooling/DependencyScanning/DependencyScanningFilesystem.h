@@ -17,6 +17,7 @@
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include <mutex>
+#include <optional>
 
 namespace clang {
 namespace tooling {
@@ -95,8 +96,7 @@ public:
     assert(Contents && "contents not initialized");
     if (auto *Directives = Contents->DepDirectives.load()) {
       if (Directives->has_value())
-        return ArrayRef<dependency_directives_scan::Directive>(
-            Directives->value());
+        return ArrayRef<dependency_directives_scan::Directive>(**Directives);
     }
     return std::nullopt;
   }
@@ -374,6 +374,13 @@ private:
                                     const CachedFileSystemEntry &Entry) {
     return SharedCache.getShardForFilename(Filename)
         .getOrInsertEntryForFilename(Filename, Entry);
+  }
+
+  void printImpl(raw_ostream &OS, PrintType Type,
+                 unsigned IndentLevel) const override {
+    printIndent(OS, IndentLevel);
+    OS << "DependencyScanningFilesystem\n";
+    getUnderlyingFS().print(OS, Type, IndentLevel + 1);
   }
 
   /// The global cache shared between worker threads.

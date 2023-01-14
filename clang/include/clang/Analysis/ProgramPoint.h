@@ -24,6 +24,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/DataTypes.h"
 #include <cassert>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -144,7 +145,7 @@ public:
     return t;
   }
 
-  /// Convert to the specified ProgramPoint type, returning None if this
+  /// Convert to the specified ProgramPoint type, returning std::nullopt if this
   /// ProgramPoint is not of the desired type.
   template<typename T>
   Optional<T> getAs() const {

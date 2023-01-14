@@ -21,6 +21,7 @@
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/Support/PointerLikeTypeTraits.h"
 #include <cassert>
+#include <optional>
 
 namespace clang {
 
@@ -126,7 +127,7 @@ public:
   iterator end() const { return getStorage() + Bits.Data; }
 
   llvm::ArrayRef<NamedDecl*> decls() const {
-    return llvm::makeArrayRef(begin(), end());
+    return llvm::ArrayRef(begin(), end());
   }
 };
 

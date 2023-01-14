@@ -14,6 +14,7 @@
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 #include <vector>
 
 namespace clang {
@@ -65,8 +66,8 @@ struct SelectedASTNode {
 
 /// Traverses the given ASTContext and creates a tree of selected AST nodes.
 ///
-/// \returns None if no nodes are selected in the AST, or a selected AST node
-/// that corresponds to the TranslationUnitDecl otherwise.
+/// \returns std::nullopt if no nodes are selected in the AST, or a selected AST
+/// node that corresponds to the TranslationUnitDecl otherwise.
 Optional<SelectedASTNode> findSelectedASTNodes(const ASTContext &Context,
                                                SourceRange SelectionRange);
 

@@ -18,6 +18,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/RISCVISAInfo.h"
+#include <optional>
 
 namespace clang {
 namespace targets {
@@ -27,7 +28,6 @@ class RISCVTargetInfo : public TargetInfo {
 protected:
   std::string ABI, CPU;
   std::unique_ptr<llvm::RISCVISAInfo> ISAInfo;
-  static const Builtin::Info BuiltinInfo[];
 
 public:
   RISCVTargetInfo(const llvm::Triple &Triple, const TargetOptions &)

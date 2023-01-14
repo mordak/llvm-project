@@ -416,6 +416,10 @@ namespace llvm {
   /// the intrinsic for later emission to the StackMap.
   extern char &StackMapLivenessID;
 
+  // MachineSanitizerBinaryMetadata - appends/finalizes sanitizer binary
+  // metadata after llvm SanitizerBinaryMetadata pass.
+  extern char &MachineSanitizerBinaryMetadataID;
+
   /// RemoveRedundantDebugValues pass.
   extern char &RemoveRedundantDebugValuesID;
 
@@ -534,7 +538,7 @@ namespace llvm {
   FunctionPass *createPseudoProbeInserter();
 
   /// Create IR Type Promotion pass. \see TypePromotion.cpp
-  FunctionPass *createTypePromotionPass();
+  FunctionPass *createTypePromotionLegacyPass();
 
   /// Add Flow Sensitive Discriminators. PassNum specifies the
   /// sequence number of this pass (starting from 1).

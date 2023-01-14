@@ -21,7 +21,6 @@
 #include "clang/Sema/DeclSpec.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -30,6 +29,7 @@
 #include "llvm/Support/type_traits.h"
 #include <cassert>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 

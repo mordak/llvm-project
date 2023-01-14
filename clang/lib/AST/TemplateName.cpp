@@ -29,13 +29,14 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
+#include <optional>
 #include <string>
 
 using namespace clang;
 
 TemplateArgument
 SubstTemplateTemplateParmPackStorage::getArgumentPack() const {
-  return TemplateArgument(llvm::makeArrayRef(Arguments, Bits.Data));
+  return TemplateArgument(llvm::ArrayRef(Arguments, Bits.Data));
 }
 
 TemplateTemplateParmDecl *

@@ -13,6 +13,7 @@
 #include "mlir/IR/FunctionInterfaces.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/SymbolTable.h"
+#include <optional>
 
 using namespace mlir;
 
@@ -47,28 +48,28 @@ bool spirv::TargetEnv::allows(spirv::Capability capability) const {
   return givenCapabilities.count(capability);
 }
 
-Optional<spirv::Capability>
+std::optional<spirv::Capability>
 spirv::TargetEnv::allows(ArrayRef<spirv::Capability> caps) const {
   const auto *chosen = llvm::find_if(caps, [this](spirv::Capability cap) {
     return givenCapabilities.count(cap);
   });
   if (chosen != caps.end())
     return *chosen;
-  return llvm::None;
+  return std::nullopt;
 }
 
 bool spirv::TargetEnv::allows(spirv::Extension extension) const {
   return givenExtensions.count(extension);
 }
 
-Optional<spirv::Extension>
+std::optional<spirv::Extension>
 spirv::TargetEnv::allows(ArrayRef<spirv::Extension> exts) const {
   const auto *chosen = llvm::find_if(exts, [this](spirv::Extension ext) {
     return givenExtensions.count(ext);
   });
   if (chosen != exts.end())
     return *chosen;
-  return llvm::None;
+  return std::nullopt;
 }
 
 spirv::Vendor spirv::TargetEnv::getVendorID() const {
@@ -101,7 +102,7 @@ StringRef spirv::getInterfaceVarABIAttrName() {
 
 spirv::InterfaceVarABIAttr
 spirv::getInterfaceVarABIAttr(unsigned descriptorSet, unsigned binding,
-                              Optional<spirv::StorageClass> storageClass,
+                              std::optional<spirv::StorageClass> storageClass,
                               MLIRContext *context) {
   return spirv::InterfaceVarABIAttr::get(descriptorSet, binding, storageClass,
                                          context);
@@ -122,7 +123,7 @@ StringRef spirv::getEntryPointABIAttrName() { return "spirv.entry_point_abi"; }
 spirv::EntryPointABIAttr
 spirv::getEntryPointABIAttr(MLIRContext *context,
                             ArrayRef<int32_t> workgroupSize,
-                            llvm::Optional<int> subgroupSize) {
+                            std::optional<int> subgroupSize) {
   DenseI32ArrayAttr workgroupSizeAttr;
   if (!workgroupSize.empty()) {
     assert(workgroupSize.size() == 3);
@@ -163,8 +164,8 @@ spirv::getDefaultResourceLimits(MLIRContext *context) {
       /*max_compute_workgroup_invocations=*/128,
       /*max_compute_workgroup_size=*/b.getI32ArrayAttr({128, 128, 64}),
       /*subgroup_size=*/32,
-      /*min_subgroup_size=*/llvm::None,
-      /*max_subgroup_size=*/llvm::None,
+      /*min_subgroup_size=*/std::nullopt,
+      /*max_subgroup_size=*/std::nullopt,
       /*cooperative_matrix_properties_nv=*/ArrayAttr());
 }
 

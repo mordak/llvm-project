@@ -23,6 +23,7 @@
 #include "clang/Tooling/DependencyScanning/ModuleDepCollector.h"
 #include "clang/Tooling/Tooling.h"
 #include "llvm/Support/Host.h"
+#include <optional>
 
 using namespace clang;
 using namespace tooling;
@@ -372,7 +373,7 @@ static bool forEachDriverJob(
     Argv.push_back(Arg.c_str());
 
   const std::unique_ptr<driver::Compilation> Compilation(
-      Driver->BuildCompilation(llvm::makeArrayRef(Argv)));
+      Driver->BuildCompilation(llvm::ArrayRef(Argv)));
   if (!Compilation)
     return false;
 

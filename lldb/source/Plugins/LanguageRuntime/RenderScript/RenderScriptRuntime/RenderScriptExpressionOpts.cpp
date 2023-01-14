@@ -8,7 +8,6 @@
 
 #include <string>
 
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
@@ -175,7 +174,6 @@ bool RenderScriptRuntime::GetIRPasses(LLVMUserExpression::IRPasses &passes) {
 namespace lldb_renderscript {
 
 RSIRPasses::RSIRPasses(Process *process) {
-  IRPasses();
   assert(process);
 
   EarlyPasses = std::make_shared<llvm::legacy::PassManager>();

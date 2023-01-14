@@ -58,6 +58,7 @@
 #include "llvm/Support/StringSaver.h"
 #include "llvm/Support/raw_ostream.h"
 #include <memory>
+#include <optional>
 
 namespace clang {
 namespace tooling {
@@ -147,7 +148,7 @@ struct TransferableCommand {
         TmpArgv.push_back(S.c_str());
       ClangCLMode = !TmpArgv.empty() &&
                     driver::IsClangCL(driver::getDriverMode(
-                        TmpArgv.front(), llvm::makeArrayRef(TmpArgv).slice(1)));
+                        TmpArgv.front(), llvm::ArrayRef(TmpArgv).slice(1)));
       ArgList = {TmpArgv.begin(), TmpArgv.end()};
     }
 

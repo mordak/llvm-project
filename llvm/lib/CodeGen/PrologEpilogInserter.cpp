@@ -637,7 +637,7 @@ static void insertCSRSaves(MachineBasicBlock &SaveBlock,
       } else {
         const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(Reg);
         TII.storeRegToStackSlot(SaveBlock, I, Reg, true, CS.getFrameIdx(), RC,
-                                TRI);
+                                TRI, Register());
       }
     }
   }
@@ -663,7 +663,8 @@ static void insertCSRRestores(MachineBasicBlock &RestoreBlock,
           .addReg(CI.getDstReg(), getKillRegState(true));
       } else {
         const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(Reg);
-        TII.loadRegFromStackSlot(RestoreBlock, I, Reg, CI.getFrameIdx(), RC, TRI);
+        TII.loadRegFromStackSlot(RestoreBlock, I, Reg, CI.getFrameIdx(), RC,
+                                 TRI, Register());
         assert(I != RestoreBlock.begin() &&
                "loadRegFromStackSlot didn't insert any code!");
         // Insert in reverse order.  loadRegFromStackSlot can insert
@@ -1310,7 +1311,13 @@ void PEI::insertZeroCallUsedRegs(MachineFunction &MF) {
         if (!MO.isReg())
           continue;
 
-        for (MCPhysReg SReg : TRI.sub_and_superregs_inclusive(MO.getReg()))
+        MCRegister Reg = MO.getReg();
+
+        // This picks up sibling registers (e.q. %al -> %ah).
+        for (MCRegUnitIterator Unit(Reg, &TRI); Unit.isValid(); ++Unit)
+          RegsToZero.reset(*Unit);
+
+        for (MCPhysReg SReg : TRI.sub_and_superregs_inclusive(Reg))
           RegsToZero.reset(SReg);
       }
     }

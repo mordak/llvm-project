@@ -54,6 +54,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include <algorithm>
 #include <cassert>
+#include <optional>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -916,7 +917,7 @@ public:
             new (S.Context) TemplateArgument[Pack.New.size()];
         std::copy(Pack.New.begin(), Pack.New.end(), ArgumentPack);
         NewPack = DeducedTemplateArgument(
-            TemplateArgument(llvm::makeArrayRef(ArgumentPack, Pack.New.size())),
+            TemplateArgument(llvm::ArrayRef(ArgumentPack, Pack.New.size())),
             // FIXME: This is wrong, it's possible that some pack elements are
             // deduced from an array bound and others are not:
             //   template<typename ...T, T ...V> void g(const T (&...p)[V]);

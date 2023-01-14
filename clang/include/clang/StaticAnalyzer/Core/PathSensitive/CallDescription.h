@@ -19,6 +19,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/Support/Compiler.h"
+#include <optional>
 #include <vector>
 
 namespace clang {
@@ -63,13 +64,12 @@ public:
   /// @param RequiredArgs The number of arguments that is expected to match a
   /// call. Omit this parameter to match every occurrence of call with a given
   /// name regardless the number of arguments.
-  CallDescription(CallDescriptionFlags Flags,
-                  ArrayRef<const char *> QualifiedName,
+  CallDescription(CallDescriptionFlags Flags, ArrayRef<StringRef> QualifiedName,
                   MaybeCount RequiredArgs = std::nullopt,
                   MaybeCount RequiredParams = std::nullopt);
 
   /// Construct a CallDescription with default flags.
-  CallDescription(ArrayRef<const char *> QualifiedName,
+  CallDescription(ArrayRef<StringRef> QualifiedName,
                   MaybeCount RequiredArgs = std::nullopt,
                   MaybeCount RequiredParams = std::nullopt);
 

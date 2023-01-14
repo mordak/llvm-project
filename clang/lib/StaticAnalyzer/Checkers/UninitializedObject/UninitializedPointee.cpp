@@ -19,6 +19,7 @@
 #include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/DynamicType.h"
+#include <optional>
 
 using namespace clang;
 using namespace clang::ento;
@@ -121,7 +122,7 @@ struct DereferenceInfo {
 
 /// Dereferences \p FR and returns with the pointee's region, and whether it
 /// needs to be casted back to it's location type. If for whatever reason
-/// dereferencing fails, returns with None.
+/// dereferencing fails, returns std::nullopt.
 static llvm::Optional<DereferenceInfo> dereference(ProgramStateRef State,
                                                    const FieldRegion *FR);
 

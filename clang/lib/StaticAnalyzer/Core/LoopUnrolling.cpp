@@ -17,6 +17,7 @@
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/LoopUnrolling.h"
+#include <optional>
 
 using namespace clang;
 using namespace ento;
@@ -24,6 +25,7 @@ using namespace clang::ast_matchers;
 
 static const int MAXIMUM_STEP_UNROLLED = 128;
 
+namespace {
 struct LoopState {
 private:
   enum Kind { Normal, Unrolled } K;
@@ -56,6 +58,7 @@ public:
     ID.AddInteger(maxStep);
   }
 };
+} // namespace
 
 // The tracked stack of loops. The stack indicates that which loops the
 // simulated element contained by. The loops are marked depending if we decided

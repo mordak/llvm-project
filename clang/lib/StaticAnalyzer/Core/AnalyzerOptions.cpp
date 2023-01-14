@@ -23,6 +23,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
 #include <cstddef>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -77,7 +78,7 @@ AnalyzerOptions::getExplorationStrategy() const {
                 ExplorationStrategyKind::BFSBlockDFSContents)
           .Default(std::nullopt);
   assert(K && "User mode is invalid.");
-  return K.value();
+  return *K;
 }
 
 CTUPhase1InliningKind AnalyzerOptions::getCTUPhase1Inlining() const {
@@ -88,7 +89,7 @@ CTUPhase1InliningKind AnalyzerOptions::getCTUPhase1Inlining() const {
                .Case("all", CTUPhase1InliningKind::All)
                .Default(std::nullopt);
   assert(K && "CTU inlining mode is invalid.");
-  return K.value();
+  return *K;
 }
 
 IPAKind AnalyzerOptions::getIPAMode() const {
@@ -101,7 +102,7 @@ IPAKind AnalyzerOptions::getIPAMode() const {
                .Default(std::nullopt);
   assert(K && "IPA Mode is invalid.");
 
-  return K.value();
+  return *K;
 }
 
 bool

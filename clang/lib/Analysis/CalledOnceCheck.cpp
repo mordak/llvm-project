@@ -38,6 +38,7 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <memory>
+#include <optional>
 
 using namespace clang;
 
@@ -880,8 +881,8 @@ private:
   template <class CallLikeExpr>
   void checkIndirectCall(const CallLikeExpr *CallOrMessage) {
     // CallExpr::arguments does not interact nicely with llvm::enumerate.
-    llvm::ArrayRef<const Expr *> Arguments = llvm::makeArrayRef(
-        CallOrMessage->getArgs(), CallOrMessage->getNumArgs());
+    llvm::ArrayRef<const Expr *> Arguments =
+        llvm::ArrayRef(CallOrMessage->getArgs(), CallOrMessage->getNumArgs());
 
     // Let's check if any of the call arguments is a point of interest.
     for (const auto &Argument : llvm::enumerate(Arguments)) {
@@ -997,7 +998,7 @@ private:
 
   /// Return true/false if 'swift_async' attribute states that the given
   /// parameter is conventionally called once.
-  /// Return llvm::None if the given declaration doesn't have 'swift_async'
+  /// Return std::nullopt if the given declaration doesn't have 'swift_async'
   /// attribute.
   static llvm::Optional<bool> isConventionalSwiftAsync(const Decl *D,
                                                        unsigned ParamIndex) {
@@ -1157,8 +1158,8 @@ private:
   bool shouldBlockArgumentBeCalledOnce(const CallLikeExpr *CallOrMessage,
                                        const Stmt *BlockArgument) const {
     // CallExpr::arguments does not interact nicely with llvm::enumerate.
-    llvm::ArrayRef<const Expr *> Arguments = llvm::makeArrayRef(
-        CallOrMessage->getArgs(), CallOrMessage->getNumArgs());
+    llvm::ArrayRef<const Expr *> Arguments =
+        llvm::ArrayRef(CallOrMessage->getArgs(), CallOrMessage->getNumArgs());
 
     for (const auto &Argument : llvm::enumerate(Arguments)) {
       if (Argument.value() == BlockArgument) {

@@ -20,6 +20,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/X86TargetParser.h"
+#include <optional>
 
 namespace clang {
 namespace targets {
@@ -303,10 +304,6 @@ public:
     return false;
   }
 
-  bool shouldEmitFloat16WithExcessPrecision() const override {
-    return HasFloat16 && !hasLegalHalfType();
-  }
-
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
 
@@ -493,6 +490,9 @@ public:
   ArrayRef<Builtin::Info> getTargetBuiltins() const override;
 
   bool hasBitIntType() const override { return true; }
+  size_t getMaxBitIntWidth() const override {
+    return llvm::IntegerType::MAX_INT_BITS;
+  }
 };
 
 class LLVM_LIBRARY_VISIBILITY NetBSDI386TargetInfo
@@ -800,6 +800,9 @@ public:
   ArrayRef<Builtin::Info> getTargetBuiltins() const override;
 
   bool hasBitIntType() const override { return true; }
+  size_t getMaxBitIntWidth() const override {
+    return llvm::IntegerType::MAX_INT_BITS;
+  }
 };
 
 // x86-64 Windows target

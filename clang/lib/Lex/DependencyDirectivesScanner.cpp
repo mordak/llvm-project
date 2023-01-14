@@ -23,6 +23,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSwitch.h"
+#include <optional>
 
 using namespace clang;
 using namespace clang::dependency_directives_scan;
@@ -91,7 +92,7 @@ private:
   void skipDirective(StringRef Name, const char *&First, const char *const End);
 
   /// Lexes next token and if it is identifier returns its string, otherwise
-  /// it skips the current line and returns \p None.
+  /// it skips the current line and returns \p std::nullopt.
   ///
   /// In any case (whatever the token kind) \p First and the \p Lexer will
   /// advance beyond the token.
@@ -557,7 +558,7 @@ Scanner::tryLexIdentifierOrSkipLine(const char *&First, const char *const End) {
 StringRef Scanner::lexIdentifier(const char *&First, const char *const End) {
   Optional<StringRef> Id = tryLexIdentifierOrSkipLine(First, End);
   assert(Id && "expected identifier token");
-  return Id.value();
+  return *Id;
 }
 
 bool Scanner::isNextIdentifierOrSkipLine(StringRef Id, const char *&First,

@@ -29,6 +29,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/Transforms/Utils/SanitizerStats.h"
+#include <optional>
 
 using namespace clang;
 using namespace CodeGen;
@@ -1822,15 +1823,15 @@ namespace {
        if (!StartIndex)
          StartIndex = FieldIndex;
      } else if (StartIndex) {
-       EHStack.pushCleanup<SanitizeDtorFieldRange>(
-           NormalAndEHCleanup, DD, StartIndex.value(), FieldIndex);
+       EHStack.pushCleanup<SanitizeDtorFieldRange>(NormalAndEHCleanup, DD,
+                                                   *StartIndex, FieldIndex);
        StartIndex = std::nullopt;
      }
    }
    void End() {
      if (StartIndex)
        EHStack.pushCleanup<SanitizeDtorFieldRange>(NormalAndEHCleanup, DD,
-                                                   StartIndex.value(), -1);
+                                                   *StartIndex, -1);
    }
  };
 } // end anonymous namespace

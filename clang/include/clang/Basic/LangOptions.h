@@ -24,6 +24,7 @@
 #include "llvm/ADT/FloatingPointMode.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -294,6 +295,8 @@ public:
     /// method instead.
     FEM_UnsetOnCommandLine = 3
   };
+
+  enum ExcessPrecisionKind { FPP_Standard, FPP_Fast, FPP_None };
 
   /// Possible exception handling behavior.
   enum class ExceptionHandlingKind { None, SjLj, WinEH, DwarfCFI, Wasm };

@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <unistd.h>
+#include <optional>
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
@@ -36,7 +37,7 @@ llvm::VersionTuple HostInfoOpenBSD::GetOSVersion() {
   return llvm::VersionTuple();
 }
 
-llvm::Optional<std::string> HostInfoOpenBSD::GetOSBuildString() {
+std::optional<std::string> HostInfoOpenBSD::GetOSBuildString() {
   int mib[2] = {CTL_KERN, KERN_OSREV};
   char osrev_str[12];
   uint32_t osrev = 0;
@@ -45,7 +46,7 @@ llvm::Optional<std::string> HostInfoOpenBSD::GetOSBuildString() {
   if (::sysctl(mib, 2, &osrev, &osrev_len, NULL, 0) == 0)
     return llvm::formatv("{0,8:8}", osrev).str();
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 FileSpec HostInfoOpenBSD::GetProgramFileSpec() {

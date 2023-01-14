@@ -16,6 +16,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
+#include <optional>
 
 namespace clang {
 
@@ -108,7 +109,7 @@ public:
   }
 
   /// If @c E is a generic call (to ObjC method /function/block/etc),
-  /// return a constructed @c AnyCall object. Return None otherwise.
+  /// return a constructed @c AnyCall object. Return std::nullopt otherwise.
   static Optional<AnyCall> forExpr(const Expr *E) {
     if (const auto *ME = dyn_cast<ObjCMessageExpr>(E)) {
       return AnyCall(ME);
@@ -128,7 +129,7 @@ public:
   }
 
   /// If @c D is a callable (Objective-C method or a function), return
-  /// a constructed @c AnyCall object. Return None otherwise.
+  /// a constructed @c AnyCall object. Return std::nullopt otherwise.
   // FIXME: block support.
   static Optional<AnyCall> forDecl(const Decl *D) {
     if (const auto *FD = dyn_cast<FunctionDecl>(D)) {

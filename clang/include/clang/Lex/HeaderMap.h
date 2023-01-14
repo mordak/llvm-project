@@ -21,6 +21,7 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include <memory>
+#include <optional>
 
 namespace clang {
 
@@ -47,11 +48,9 @@ public:
 
     for (unsigned Bucket = 0; Bucket < NumBuckets; ++Bucket) {
       HMapBucket B = getBucket(Bucket);
-      if (B.Key != HMAP_EmptyBucketKey) {
-        Optional<StringRef> Key = getString(B.Key);
-        if (Key)
-          Callback(Key.value());
-      }
+      if (B.Key != HMAP_EmptyBucketKey)
+        if (Optional<StringRef> Key = getString(B.Key))
+          Callback(*Key);
     }
   }
 
@@ -75,7 +74,7 @@ private:
   HMapBucket getBucket(unsigned BucketNo) const;
 
   /// Look up the specified string in the string table.  If the string index is
-  /// not valid, return None.
+  /// not valid, return std::nullopt.
   Optional<StringRef> getString(unsigned StrTabIdx) const;
 };
 

@@ -22,6 +22,7 @@
 #include "clang/AST/Type.h"
 #include "clang/Basic/AddressSpaces.h"
 #include "clang/Frontend/ASTUnit.h"
+#include <optional>
 
 using namespace clang;
 
@@ -1330,8 +1331,7 @@ enum CXTypeNullabilityKind clang_Type_getNullability(CXType CT) {
   if (T.isNull())
     return CXTypeNullability_Invalid;
 
-  ASTContext &Ctx = cxtu::getASTUnit(GetTU(CT))->getASTContext();
-  if (auto nullability = T->getNullability(Ctx)) {
+  if (auto nullability = T->getNullability()) {
     switch (*nullability) {
       case NullabilityKind::NonNull:
         return CXTypeNullability_NonNull;

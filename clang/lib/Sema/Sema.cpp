@@ -49,6 +49,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Support/TimeProfiler.h"
+#include <optional>
 
 using namespace clang;
 using namespace sema;
@@ -564,12 +565,12 @@ void Sema::PrintStats() const {
 void Sema::diagnoseNullableToNonnullConversion(QualType DstType,
                                                QualType SrcType,
                                                SourceLocation Loc) {
-  Optional<NullabilityKind> ExprNullability = SrcType->getNullability(Context);
+  Optional<NullabilityKind> ExprNullability = SrcType->getNullability();
   if (!ExprNullability || (*ExprNullability != NullabilityKind::Nullable &&
                            *ExprNullability != NullabilityKind::NullableResult))
     return;
 
-  Optional<NullabilityKind> TypeNullability = DstType->getNullability(Context);
+  Optional<NullabilityKind> TypeNullability = DstType->getNullability();
   if (!TypeNullability || *TypeNullability != NullabilityKind::NonNull)
     return;
 
@@ -2035,6 +2036,15 @@ void Sema::checkTypeSupport(QualType Ty, SourceLocation Loc, ValueDecl *D) {
       if (D)
         targetDiag(D->getLocation(), diag::note_defined_here, FD) << D;
     }
+
+    // Don't allow SVE types in functions without a SVE target.
+    if (Ty->isSVESizelessBuiltinType() && FD && FD->hasBody()) {
+      llvm::StringMap<bool> CallerFeatureMap;
+      Context.getFunctionFeatureMap(CallerFeatureMap, FD);
+      if (!Builtin::evaluateRequiredTargetFeatures(
+          "sve", CallerFeatureMap))
+        Diag(D->getLocation(), diag::err_sve_vector_in_non_sve_target) << Ty;
+    }
   };
 
   CheckType(Ty);
@@ -2538,6 +2548,9 @@ static void noteOverloads(Sema &S, const UnresolvedSetImpl &Overloads,
     if (const auto *FD = Fn->getAsFunction()) {
       if (FD->isMultiVersion() && FD->hasAttr<TargetAttr>() &&
           !FD->getAttr<TargetAttr>()->isDefaultVersion())
+        continue;
+      if (FD->isMultiVersion() && FD->hasAttr<TargetVersionAttr>() &&
+          !FD->getAttr<TargetVersionAttr>()->isDefaultVersion())
         continue;
     }
     S.Diag(Fn->getLocation(), diag::note_possible_target_of_call);

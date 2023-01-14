@@ -35,6 +35,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 using namespace clang;
 
@@ -4249,6 +4250,7 @@ recurse:
   case Expr::OMPArrayShapingExprClass:
   case Expr::OMPIteratorExprClass:
   case Expr::CXXInheritedCtorInitExprClass:
+  case Expr::CXXParenListInitExprClass:
     llvm_unreachable("unexpected statement kind");
 
   case Expr::ConstantExprClass:

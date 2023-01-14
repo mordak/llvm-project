@@ -17,6 +17,7 @@
 #include "clang/Basic/LLVM.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 namespace clang {
 
@@ -67,8 +68,8 @@ struct ParsedSourceRange {
   /// second element is the column.
   std::pair<unsigned, unsigned> End;
 
-  /// Returns a parsed source range from a string or None if the string is
-  /// invalid.
+  /// Returns a parsed source range from a string or std::nullopt if the string
+  /// is invalid.
   ///
   /// These source string has the following format:
   ///

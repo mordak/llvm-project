@@ -30,6 +30,7 @@
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallDescription.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
+#include <optional>
 
 using namespace clang;
 using namespace ento;
@@ -86,7 +87,7 @@ class MIGChecker : public Checker<check::PostCall, check::PreStmt<ReturnStmt>,
 #undef CALL
   };
 
-  CallDescription OsRefRetain{"os_ref_retain", 1};
+  CallDescription OsRefRetain{{"os_ref_retain"}, 1};
 
   void checkReturnAux(const ReturnStmt *RS, CheckerContext &C) const;
 

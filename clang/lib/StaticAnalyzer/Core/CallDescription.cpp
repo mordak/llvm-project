@@ -19,6 +19,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
 #include <iterator>
+#include <optional>
 
 using namespace llvm;
 using namespace clang;
@@ -36,7 +37,7 @@ static MaybeCount readRequiredParams(MaybeCount RequiredArgs,
 }
 
 ento::CallDescription::CallDescription(CallDescriptionFlags Flags,
-                                       ArrayRef<const char *> QualifiedName,
+                                       ArrayRef<StringRef> QualifiedName,
                                        MaybeCount RequiredArgs /*= None*/,
                                        MaybeCount RequiredParams /*= None*/)
     : RequiredArgs(RequiredArgs),
@@ -44,11 +45,12 @@ ento::CallDescription::CallDescription(CallDescriptionFlags Flags,
       Flags(Flags) {
   assert(!QualifiedName.empty());
   this->QualifiedName.reserve(QualifiedName.size());
-  llvm::copy(QualifiedName, std::back_inserter(this->QualifiedName));
+  llvm::transform(QualifiedName, std::back_inserter(this->QualifiedName),
+                  [](StringRef From) { return From.str(); });
 }
 
 /// Construct a CallDescription with default flags.
-ento::CallDescription::CallDescription(ArrayRef<const char *> QualifiedName,
+ento::CallDescription::CallDescription(ArrayRef<StringRef> QualifiedName,
                                        MaybeCount RequiredArgs /*= None*/,
                                        MaybeCount RequiredParams /*= None*/)
     : CallDescription(CDF_None, QualifiedName, RequiredArgs, RequiredParams) {}

@@ -21,7 +21,6 @@
 #include "clang/Basic/LLVM.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/GraphTraits.h"
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/iterator_range.h"
@@ -32,6 +31,7 @@
 #include <cstddef>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace clang {
@@ -103,7 +103,7 @@ public:
     return t;
   }
 
-  /// Convert to the specified CFGElement type, returning None if this
+  /// Convert to the specified CFGElement type, returning std::nullopt if this
   /// CFGElement is not of the desired type.
   template<typename T>
   Optional<T> getAs() const {

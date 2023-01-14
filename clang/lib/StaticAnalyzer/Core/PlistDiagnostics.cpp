@@ -28,6 +28,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/Casting.h"
 #include <memory>
+#include <optional>
 
 using namespace clang;
 using namespace ento;
@@ -407,11 +408,11 @@ void PlistPrinter::ReportMacroExpansions(raw_ostream &o, unsigned indent) {
 
     // Output the macro name.
     Indent(o, indent) << "<key>name</key>";
-    EmitString(o, MacroName.value()) << '\n';
+    EmitString(o, *MacroName) << '\n';
 
     // Output what it expands into.
     Indent(o, indent) << "<key>expansion</key>";
-    EmitString(o, ExpansionText.value()) << '\n';
+    EmitString(o, *ExpansionText) << '\n';
 
     // Finish up.
     --indent;

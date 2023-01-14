@@ -26,6 +26,7 @@
 #include "llvm/ProfileData/InstrProfReader.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include <optional>
 
 // This selects the coverage mapping format defined when `InstrProfData.inc`
 // is textually included.
@@ -325,7 +326,7 @@ public:
 
   /// Get the coverage mapping file ID for \c Loc.
   ///
-  /// If such file id doesn't exist, return None.
+  /// If such file id doesn't exist, return std::nullopt.
   Optional<unsigned> getCoverageFileID(SourceLocation Loc) {
     auto Mapping = FileIDMapping.find(SM.getFileID(Loc));
     if (Mapping != FileIDMapping.end())
@@ -335,7 +336,7 @@ public:
 
   /// This shrinks the skipped range if it spans a line that contains a
   /// non-comment token. If shrinking the skipped range would make it empty,
-  /// this returns None.
+  /// this returns std::nullopt.
   /// Note this function can potentially be expensive because
   /// getSpellingLineNumber uses getLineNumber, which is expensive.
   Optional<SpellingRegion> adjustSkippedRange(SourceManager &SM,
@@ -1630,7 +1631,7 @@ void CoverageMappingModuleGen::emitFunctionMappingRecord(
 #include "llvm/ProfileData/InstrProfData.inc"
   };
   auto *FunctionRecordTy =
-      llvm::StructType::get(Ctx, makeArrayRef(FunctionRecordTypes),
+      llvm::StructType::get(Ctx, ArrayRef(FunctionRecordTypes),
                             /*isPacked=*/true);
 
   // Create the function record constant.
@@ -1638,8 +1639,8 @@ void CoverageMappingModuleGen::emitFunctionMappingRecord(
   llvm::Constant *FunctionRecordVals[] = {
       #include "llvm/ProfileData/InstrProfData.inc"
   };
-  auto *FuncRecordConstant = llvm::ConstantStruct::get(
-      FunctionRecordTy, makeArrayRef(FunctionRecordVals));
+  auto *FuncRecordConstant =
+      llvm::ConstantStruct::get(FunctionRecordTy, ArrayRef(FunctionRecordVals));
 
   // Create the function record global.
   auto *FuncRecord = new llvm::GlobalVariable(
@@ -1683,7 +1684,7 @@ void CoverageMappingModuleGen::addFunctionMappingRecord(
       auto I = Entry.second;
       FilenameStrs[I] = normalizeFilename(Entry.first->getName());
     }
-    ArrayRef<std::string> FilenameRefs = llvm::makeArrayRef(FilenameStrs);
+    ArrayRef<std::string> FilenameRefs = llvm::ArrayRef(FilenameStrs);
     RawCoverageMappingReader Reader(CoverageMapping, FilenameRefs, Filenames,
                                     Expressions, Regions);
     if (Reader.read())
@@ -1729,20 +1730,19 @@ void CoverageMappingModuleGen::emit() {
 #include "llvm/ProfileData/InstrProfData.inc"
   };
   auto CovDataHeaderTy =
-      llvm::StructType::get(Ctx, makeArrayRef(CovDataHeaderTypes));
+      llvm::StructType::get(Ctx, ArrayRef(CovDataHeaderTypes));
   llvm::Constant *CovDataHeaderVals[] = {
 #define COVMAP_HEADER(Type, LLVMType, Name, Init) Init,
 #include "llvm/ProfileData/InstrProfData.inc"
   };
-  auto CovDataHeaderVal = llvm::ConstantStruct::get(
-      CovDataHeaderTy, makeArrayRef(CovDataHeaderVals));
+  auto CovDataHeaderVal =
+      llvm::ConstantStruct::get(CovDataHeaderTy, ArrayRef(CovDataHeaderVals));
 
   // Create the coverage data record
   llvm::Type *CovDataTypes[] = {CovDataHeaderTy, FilenamesVal->getType()};
-  auto CovDataTy = llvm::StructType::get(Ctx, makeArrayRef(CovDataTypes));
+  auto CovDataTy = llvm::StructType::get(Ctx, ArrayRef(CovDataTypes));
   llvm::Constant *TUDataVals[] = {CovDataHeaderVal, FilenamesVal};
-  auto CovDataVal =
-      llvm::ConstantStruct::get(CovDataTy, makeArrayRef(TUDataVals));
+  auto CovDataVal = llvm::ConstantStruct::get(CovDataTy, ArrayRef(TUDataVals));
   auto CovData = new llvm::GlobalVariable(
       CGM.getModule(), CovDataTy, true, llvm::GlobalValue::PrivateLinkage,
       CovDataVal, llvm::getCoverageMappingVarName());

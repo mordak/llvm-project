@@ -22,6 +22,7 @@
 #include "clang/Sema/Scope.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringSwitch.h"
+#include <optional>
 using namespace clang;
 
 namespace {
@@ -3424,7 +3425,7 @@ static bool ParseLoopHintValue(Preprocessor &PP, Token &Tok, Token PragmaName,
   ValueList.push_back(EOFTok); // Terminates expression for parsing.
 
   markAsReinjectedForRelexing(ValueList);
-  Info.Toks = llvm::makeArrayRef(ValueList).copy(PP.getPreprocessorAllocator());
+  Info.Toks = llvm::ArrayRef(ValueList).copy(PP.getPreprocessorAllocator());
 
   Info.PragmaName = PragmaName;
   Info.Option = Option;
@@ -3924,7 +3925,7 @@ void PragmaAttributeHandler::HandlePragma(Preprocessor &PP,
 
     markAsReinjectedForRelexing(AttributeTokens);
     Info->Tokens =
-        llvm::makeArrayRef(AttributeTokens).copy(PP.getPreprocessorAllocator());
+        llvm::ArrayRef(AttributeTokens).copy(PP.getPreprocessorAllocator());
   }
 
   if (Tok.isNot(tok::eod))

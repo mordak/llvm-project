@@ -21,6 +21,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
+#include <optional>
 
 namespace clang {
 
@@ -1289,6 +1290,7 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Expr::StmtExprClass:
   case Expr::ConvertVectorExprClass:
   case Expr::VAArgExprClass:
+  case Expr::CXXParenListInitExprClass:
     return canSubStmtsThrow(*this, S);
 
   case Expr::CompoundLiteralExprClass:

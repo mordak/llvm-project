@@ -19,9 +19,10 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/AffineMap.h"
-#include "mlir/IR/BlockAndValueMapping.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/SmallBitVector.h"
+#include <optional>
 
 namespace mlir {
 #define GEN_PASS_DEF_MEMREFTOLLVMCONVERSIONPASS
@@ -441,8 +442,8 @@ private:
     return rewriter.create<LLVM::LoadOp>(loc, sizePtr);
   }
 
-  Optional<int64_t> getConstantDimIndex(memref::DimOp dimOp) const {
-    if (Optional<int64_t> idx = dimOp.getConstantIndex())
+  std::optional<int64_t> getConstantDimIndex(memref::DimOp dimOp) const {
+    if (auto idx = dimOp.getConstantIndex())
       return idx;
 
     if (auto constantOp = dimOp.getIndex().getDefiningOp<LLVM::ConstantOp>())
@@ -451,7 +452,7 @@ private:
           .getValue()
           .getSExtValue();
 
-    return llvm::None;
+    return std::nullopt;
   }
 
   Value extractSizeOfRankedMemRef(Type operandType, memref::DimOp dimOp,
@@ -461,7 +462,7 @@ private:
 
     // Take advantage if index is constant.
     MemRefType memRefType = operandType.cast<MemRefType>();
-    if (Optional<int64_t> index = getConstantDimIndex(dimOp)) {
+    if (std::optional<int64_t> index = getConstantDimIndex(dimOp)) {
       int64_t i = *index;
       if (memRefType.isDynamicDim(i)) {
         // extract dynamic size from the memref descriptor.
@@ -556,7 +557,7 @@ struct GenericAtomicRMWOpLowering
 
     // Clone the GenericAtomicRMWOp region and extract the result.
     auto loopArgument = loopBlock->getArgument(0);
-    BlockAndValueMapping mapping;
+    IRMapping mapping;
     mapping.map(atomicOp.getCurrentValue(), loopArgument);
     Block &entryBlock = atomicOp.body().front();
     for (auto &nestedOp : entryBlock.without_terminator()) {
@@ -598,7 +599,7 @@ private:
   void moveOpsRange(ValueRange oldResult, ValueRange newResult,
                     Block::iterator start, Block::iterator end,
                     ConversionPatternRewriter &rewriter) const {
-    BlockAndValueMapping mapping;
+    IRMapping mapping;
     mapping.map(oldResult, newResult);
     SmallVector<Operation *, 2> opsToErase;
     for (auto it = start; it != end; ++it) {
@@ -1278,7 +1279,7 @@ private:
     UnrankedMemRefDescriptor::computeSizes(rewriter, loc, *getTypeConverter(),
                                            targetDesc, sizes);
     Value underlyingDescPtr = rewriter.create<LLVM::AllocaOp>(
-        loc, getVoidPtrType(), sizes.front(), llvm::None);
+        loc, getVoidPtrType(), sizes.front(), std::nullopt);
     targetDesc.setMemRefDescPtr(rewriter, loc, underlyingDescPtr);
 
     // Extract pointers and offset from the source memref.
@@ -1362,8 +1363,8 @@ private:
 
     // Hook up the cond exit to the remainder.
     rewriter.setInsertionPointToEnd(condBlock);
-    rewriter.create<LLVM::CondBrOp>(loc, pred, bodyBlock, llvm::None, remainder,
-                                    llvm::None);
+    rewriter.create<LLVM::CondBrOp>(loc, pred, bodyBlock, std::nullopt,
+                                    remainder, std::nullopt);
 
     // Reset position to beginning of new remainder block.
     rewriter.setInsertionPointToStart(remainder);
@@ -1533,7 +1534,7 @@ static void fillInStridesForCollapsedMemDescriptor(
   for (auto &en : llvm::enumerate(reassociation)) {
     rewriter.setInsertionPoint(op);
     auto dstIndex = en.index();
-    ArrayRef<int64_t> ref = llvm::makeArrayRef(en.value());
+    ArrayRef<int64_t> ref = llvm::ArrayRef(en.value());
     while (srcShape[ref.back()] == 1 && ref.size() > 1)
       ref = ref.drop_back();
     if (!ShapedType::isDynamic(srcShape[ref.back()]) || ref.size() == 1) {
@@ -1599,7 +1600,8 @@ static void fillInStridesForCollapsedMemDescriptor(
               initBlock->getParent(), Region::iterator(continueBlock), {});
         }
         rewriter.create<LLVM::CondBrOp>(loc, predNeOne, continueBlock,
-                                        srcStride, nextEntryBlock, llvm::None);
+                                        srcStride, nextEntryBlock,
+                                        std::nullopt);
         curEntryBlock = nextEntryBlock;
       }
     }
@@ -1875,7 +1877,7 @@ struct ViewOpLowering : public ConvertOpToLLVMPattern<memref::ViewOp> {
 
 /// Try to match the kind of a memref.atomic_rmw to determine whether to use a
 /// lowering to llvm.atomicrmw or fallback to llvm.cmpxchg.
-static Optional<LLVM::AtomicBinOp>
+static std::optional<LLVM::AtomicBinOp>
 matchSimpleAtomicOp(memref::AtomicRMWOp atomicOp) {
   switch (atomicOp.getKind()) {
   case arith::AtomicRMWKind::addf:
@@ -1897,7 +1899,7 @@ matchSimpleAtomicOp(memref::AtomicRMWOp atomicOp) {
   case arith::AtomicRMWKind::andi:
     return LLVM::AtomicBinOp::_and;
   default:
-    return llvm::None;
+    return std::nullopt;
   }
   llvm_unreachable("Invalid AtomicRMWKind");
 }

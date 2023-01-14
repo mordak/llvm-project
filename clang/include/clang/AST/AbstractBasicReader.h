@@ -10,6 +10,7 @@
 #define LLVM_CLANG_AST_ABSTRACTBASICREADER_H
 
 #include "clang/AST/DeclTemplate.h"
+#include <optional>
 
 namespace clang {
 namespace serialization {
@@ -190,7 +191,8 @@ public:
 
   APValue::LValuePathSerializationHelper readLValuePathSerializationHelper(
       SmallVectorImpl<APValue::LValuePathEntry> &path) {
-    auto elemTy = asImpl().readQualType();
+    auto origTy = asImpl().readQualType();
+    auto elemTy = origTy;
     unsigned pathLength = asImpl().readUInt32();
     for (unsigned i = 0; i < pathLength; ++i) {
       if (elemTy->template getAs<RecordType>()) {
@@ -208,7 +210,7 @@ public:
             APValue::LValuePathEntry::ArrayIndex(asImpl().readUInt32()));
       }
     }
-    return APValue::LValuePathSerializationHelper(path, elemTy);
+    return APValue::LValuePathSerializationHelper(path, origTy);
   }
 
   Qualifiers readQualifiers() {
