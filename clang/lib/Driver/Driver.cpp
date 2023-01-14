@@ -5784,7 +5784,7 @@ static Optional<std::string> findFile(StringRef path1, const Twine &path2) {
 
   if (llvm::sys::fs::exists(s))
     return std::string(s);
-  return None;
+  return std::nullopt;
 }
 
 // Must be in sync with findMajMinShlib in lld/ELF/DriverUtils.cpp.
@@ -5814,7 +5814,7 @@ llvm::Optional<std::string> findMajMinShlib(StringRef dir, const Twine& libNameS
   }
   if (MaxMaj >= 0)
     return findFile(dir, LibName + Twine(MaxMaj) + "." + Twine(MaxMin));
-  return None;
+  return std::nullopt;
 }
 }  // namespace
 

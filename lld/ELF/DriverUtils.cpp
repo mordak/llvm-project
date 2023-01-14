@@ -258,7 +258,7 @@ namespace {
   }
   if (MaxMaj >= 0)
     return findFile(dir, LibName + Twine(MaxMaj) + "." + Twine(MaxMin));
-  return None;
+  return std::nullopt;
 }
 }  // namespace
 
