@@ -1566,6 +1566,7 @@ static void setConfigs(opt::InputArgList &args) {
   switch (m) {
   case EM_AARCH64:
   case EM_RISCV:
+  case EM_X86_64:
     config->executeOnly = true;
     break;
   }
