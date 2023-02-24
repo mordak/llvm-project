@@ -1568,6 +1568,7 @@ static void setConfigs(opt::InputArgList &args) {
 #ifdef __OpenBSD__
   switch (m) {
   case EM_AARCH64:
+  case EM_MIPS:
   case EM_PPC:
   case EM_PPC64:
   case EM_RISCV:
