@@ -1715,6 +1715,10 @@ static void CollectARMPACBTIOptions(const ToolChain &TC, const ArgList &Args,
         Args.MakeArgString(Twine("-msign-return-address-key=") + Key));
   if (IndirectBranches)
     CmdArgs.push_back("-mbranch-target-enforce");
+  } else {
+    if (Triple.isOSOpenBSD())
+      CmdArgs.push_back("-mbranch-target-enforce");
+  }
 }
 
 void Clang::AddARMTargetArgs(const llvm::Triple &Triple, const ArgList &Args,
