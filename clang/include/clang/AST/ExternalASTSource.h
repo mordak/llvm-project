@@ -20,7 +20,6 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -161,7 +160,7 @@ public:
   virtual Module *getModule(unsigned ID) { return nullptr; }
 
   /// Return a descriptor for the corresponding module, if one exists.
-  virtual llvm::Optional<ASTSourceDescriptor> getSourceDescriptor(unsigned ID);
+  virtual std::optional<ASTSourceDescriptor> getSourceDescriptor(unsigned ID);
 
   enum ExtKind { EK_Always, EK_Never, EK_ReplyHazy };
 

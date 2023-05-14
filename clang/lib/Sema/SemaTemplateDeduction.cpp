@@ -45,7 +45,6 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/FoldingSet.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -720,7 +719,7 @@ private:
     // FIXME: What if we encounter multiple packs with different numbers of
     // pre-expanded expansions? (This should already have been diagnosed
     // during substitution.)
-    if (Optional<unsigned> ExpandedPackExpansions =
+    if (std::optional<unsigned> ExpandedPackExpansions =
             getExpandedPackSize(TemplateParams->getParam(Index)))
       FixedNumExpansions = ExpandedPackExpansions;
 
@@ -757,11 +756,8 @@ private:
       SmallVector<UnexpandedParameterPack, 2> Unexpanded;
       S.collectUnexpandedParameterPacks(Pattern, Unexpanded);
       for (unsigned I = 0, N = Unexpanded.size(); I != N; ++I) {
-        UnexpandedParameterPack U = Unexpanded[I];
-        if (U.first.is<const SubstTemplateTypeParmPackType *>() ||
-            U.first.is<const SubstNonTypeTemplateParmPackExpr *>())
-          continue;
-        auto [Depth, Index] = getDepthAndIndex(U);
+        unsigned Depth, Index;
+        std::tie(Depth, Index) = getDepthAndIndex(Unexpanded[I]);
         if (Depth == Info.getDeducedDepth())
           AddPack(Index);
       }
@@ -962,7 +958,7 @@ public:
 
       // If we have a pre-expanded pack and we didn't deduce enough elements
       // for it, fail deduction.
-      if (Optional<unsigned> Expansions = getExpandedPackSize(Param)) {
+      if (std::optional<unsigned> Expansions = getExpandedPackSize(Param)) {
         if (*Expansions != PackElements) {
           Info.Param = makeTemplateParameter(Param);
           Info.FirstArg = Result;
@@ -984,7 +980,7 @@ private:
   unsigned PackElements = 0;
   bool IsPartiallyExpanded = false;
   /// The number of expansions, if we have a fully-expanded pack in this scope.
-  Optional<unsigned> FixedNumExpansions;
+  std::optional<unsigned> FixedNumExpansions;
 
   SmallVector<DeducedPack, 2> Packs;
 };
@@ -1109,7 +1105,7 @@ DeduceTemplateArguments(Sema &S,
       // If the parameter type contains an explicitly-specified pack that we
       // could not expand, skip the number of parameters notionally created
       // by the expansion.
-      Optional<unsigned> NumExpansions = Expansion->getNumExpansions();
+      std::optional<unsigned> NumExpansions = Expansion->getNumExpansions();
       if (NumExpansions && !PackScope.isPartiallyExpanded()) {
         for (unsigned I = 0; I != *NumExpansions && ArgIdx < NumArgs;
              ++I, ++ArgIdx)
@@ -2082,7 +2078,7 @@ static Sema::TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
             const auto *ACM = dyn_cast<ConstantMatrixType>(A);
             const auto *ADM = dyn_cast<DependentSizedMatrixType>(A);
             if (!ParamExpr->isValueDependent()) {
-              Optional<llvm::APSInt> ParamConst =
+              std::optional<llvm::APSInt> ParamConst =
                   ParamExpr->getIntegerConstantExpr(S.Context);
               if (!ParamConst)
                 return Sema::TDK_NonDeducedMismatch;
@@ -2094,7 +2090,7 @@ static Sema::TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
               }
 
               Expr *ArgExpr = (ADM->*GetArgDimensionExpr)();
-              if (Optional<llvm::APSInt> ArgConst =
+              if (std::optional<llvm::APSInt> ArgConst =
                       ArgExpr->getIntegerConstantExpr(S.Context))
                 if (*ArgConst == *ParamConst)
                   return Sema::TDK_Success;
@@ -2870,10 +2866,10 @@ CheckDeducedArgumentConstraints(Sema &S, TemplateDeclT *Template,
 
   bool NeedsReplacement = DeducedArgsNeedReplacement(Template);
   TemplateArgumentList DeducedTAL{TemplateArgumentList::OnStack,
-                                  SugaredDeducedArgs};
+                                  CanonicalDeducedArgs};
 
   MultiLevelTemplateArgumentList MLTAL = S.getTemplateInstantiationArgs(
-      Template, /*Final=*/true,
+      Template, /*Final=*/false,
       /*InnerMost=*/NeedsReplacement ? nullptr : &DeducedTAL,
       /*RelativeToPrimary=*/true, /*Pattern=*/
       nullptr, /*ForConstraintInstantiation=*/true);
@@ -2883,7 +2879,7 @@ CheckDeducedArgumentConstraints(Sema &S, TemplateDeclT *Template,
   // not class-scope explicit specialization, so replace with Deduced Args
   // instead of adding to inner-most.
   if (NeedsReplacement)
-    MLTAL.replaceInnermostTemplateArguments(SugaredDeducedArgs);
+    MLTAL.replaceInnermostTemplateArguments(CanonicalDeducedArgs);
 
   if (S.CheckConstraintSatisfaction(Template, AssociatedConstraints, MLTAL,
                                     Info.getLocation(),
@@ -3267,7 +3263,7 @@ Sema::TemplateDeductionResult Sema::SubstituteExplicitTemplateArguments(
       auto *Param = TemplateParams->getParam(CanonicalBuilder.size() - 1);
       // If this is a fully-saturated fixed-size pack, it should be
       // fully-substituted, not partially-substituted.
-      Optional<unsigned> Expansions = getExpandedPackSize(Param);
+      std::optional<unsigned> Expansions = getExpandedPackSize(Param);
       if (!Expansions || Arg.pack_size() < *Expansions) {
         PartiallySubstitutedPackIndex = CanonicalBuilder.size() - 1;
         CurrentInstantiationScope->SetPartiallySubstitutedPack(
@@ -4184,7 +4180,8 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
       // If the parameter type contains an explicitly-specified pack that we
       // could not expand, skip the number of parameters notionally created
       // by the expansion.
-      Optional<unsigned> NumExpansions = ParamExpansion->getNumExpansions();
+      std::optional<unsigned> NumExpansions =
+          ParamExpansion->getNumExpansions();
       if (NumExpansions && !PackScope.isPartiallyExpanded()) {
         for (unsigned I = 0; I != *NumExpansions && ArgIdx < Args.size();
              ++I, ++ArgIdx) {
@@ -4656,8 +4653,8 @@ static bool CheckDeducedPlaceholderConstraints(Sema &S, const AutoType &Type,
                                   /*PartialTemplateArgs=*/false,
                                   SugaredConverted, CanonicalConverted))
     return true;
-  MultiLevelTemplateArgumentList MLTAL(Concept, SugaredConverted,
-                                       /*Final=*/true);
+  MultiLevelTemplateArgumentList MLTAL(Concept, CanonicalConverted,
+                                       /*Final=*/false);
   if (S.CheckConstraintSatisfaction(Concept, {Concept->getConstraintExpr()},
                                     MLTAL, TypeLoc.getLocalSourceRange(),
                                     Satisfaction))

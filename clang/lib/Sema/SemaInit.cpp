@@ -239,6 +239,7 @@ static void CheckStringInit(Expr *Str, QualType &DeclT, const ArrayType *AT,
     if (StrLength > CAT->getSize().getZExtValue())
       S.Diag(Str->getBeginLoc(),
              diag::err_initializer_string_for_char_array_too_long)
+          << CAT->getSize().getZExtValue() << StrLength
           << Str->getSourceRange();
   } else {
     // C99 6.7.8p14.
@@ -5419,8 +5420,9 @@ static void TryOrBuildParenListInitialization(
   } else if (auto *RT = Entity.getType()->getAs<RecordType>()) {
     const CXXRecordDecl *RD = cast<CXXRecordDecl>(RT->getDecl());
 
-    auto BaseRange = map_range(RD->bases(), [&S](auto &base) {
-      return InitializedEntity::InitializeBase(S.getASTContext(), &base, false);
+    auto BaseRange = map_range(RD->bases(), [&](auto &base) {
+      return InitializedEntity::InitializeBase(S.getASTContext(), &base, false,
+                                               &Entity);
     });
     auto FieldRange = map_range(RD->fields(), [](auto *field) {
       return InitializedEntity::InitializeMember(field);
@@ -9179,6 +9181,8 @@ ExprResult InitializationSequence::Perform(Sema &S,
                                         /*VerifyOnly=*/false, &CurInit);
       if (CurInit.get() && ResultType)
         *ResultType = CurInit.get()->getType();
+      if (shouldBindAsTemporary(Entity))
+        CurInit = S.MaybeBindToTemporary(CurInit.get());
       break;
     }
     }

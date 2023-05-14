@@ -348,8 +348,11 @@ struct ScalarEnumerationTraits<FormatStyle::IndentExternBlockStyle> {
 template <> struct MappingTraits<FormatStyle::IntegerLiteralSeparatorStyle> {
   static void mapping(IO &IO, FormatStyle::IntegerLiteralSeparatorStyle &Base) {
     IO.mapOptional("Binary", Base.Binary);
+    IO.mapOptional("BinaryMinDigits", Base.BinaryMinDigits);
     IO.mapOptional("Decimal", Base.Decimal);
+    IO.mapOptional("DecimalMinDigits", Base.DecimalMinDigits);
     IO.mapOptional("Hex", Base.Hex);
+    IO.mapOptional("HexMinDigits", Base.HexMinDigits);
   }
 };
 
@@ -607,6 +610,21 @@ struct ScalarEnumerationTraits<FormatStyle::SortJavaStaticImportOptions> {
 };
 
 template <>
+struct ScalarEnumerationTraits<FormatStyle::SortUsingDeclarationsOptions> {
+  static void enumeration(IO &IO,
+                          FormatStyle::SortUsingDeclarationsOptions &Value) {
+    IO.enumCase(Value, "Never", FormatStyle::SUD_Never);
+    IO.enumCase(Value, "Lexicographic", FormatStyle::SUD_Lexicographic);
+    IO.enumCase(Value, "LexicographicNumeric",
+                FormatStyle::SUD_LexicographicNumeric);
+
+    // For backward compatibility.
+    IO.enumCase(Value, "false", FormatStyle::SUD_Never);
+    IO.enumCase(Value, "true", FormatStyle::SUD_LexicographicNumeric);
+  }
+};
+
+template <>
 struct ScalarEnumerationTraits<FormatStyle::SpaceAroundPointerQualifiersStyle> {
   static void
   enumeration(IO &IO, FormatStyle::SpaceAroundPointerQualifiersStyle &Value) {
@@ -703,23 +721,23 @@ template <> struct MappingTraits<FormatStyle::TrailingCommentsAlignmentStyle> {
                         FormatStyle::TrailingCommentsAlignmentStyle &Value) {
     IO.enumCase(Value, "Leave",
                 FormatStyle::TrailingCommentsAlignmentStyle(
-                    {FormatStyle::TCAS_Leave, 1}));
+                    {FormatStyle::TCAS_Leave, 0}));
 
     IO.enumCase(Value, "Always",
                 FormatStyle::TrailingCommentsAlignmentStyle(
-                    {FormatStyle::TCAS_Always, 1}));
+                    {FormatStyle::TCAS_Always, 0}));
 
     IO.enumCase(Value, "Never",
                 FormatStyle::TrailingCommentsAlignmentStyle(
-                    {FormatStyle::TCAS_Never, 1}));
+                    {FormatStyle::TCAS_Never, 0}));
 
     // For backwards compatibility
     IO.enumCase(Value, "true",
                 FormatStyle::TrailingCommentsAlignmentStyle(
-                    {FormatStyle::TCAS_Always, 1}));
+                    {FormatStyle::TCAS_Always, 0}));
     IO.enumCase(Value, "false",
                 FormatStyle::TrailingCommentsAlignmentStyle(
-                    {FormatStyle::TCAS_Never, 1}));
+                    {FormatStyle::TCAS_Never, 0}));
   }
 
   static void mapping(IO &IO,
@@ -1377,7 +1395,10 @@ FormatStyle getLLVMStyle(FormatStyle::LanguageKind Language) {
   LLVMStyle.InsertBraces = false;
   LLVMStyle.InsertNewlineAtEOF = false;
   LLVMStyle.InsertTrailingCommas = FormatStyle::TCS_None;
-  LLVMStyle.IntegerLiteralSeparator = {/*Binary=*/0, /*Decimal=*/0, /*Hex=*/0};
+  LLVMStyle.IntegerLiteralSeparator = {
+      /*Binary=*/0,  /*BinaryMinDigits=*/0,
+      /*Decimal=*/0, /*DecimalMinDigits=*/0,
+      /*Hex=*/0,     /*HexMinDigits=*/0};
   LLVMStyle.JavaScriptQuotes = FormatStyle::JSQS_Leave;
   LLVMStyle.JavaScriptWrapImports = true;
   LLVMStyle.KeepEmptyLinesAtTheStartOfBlocks = true;
@@ -1404,7 +1425,7 @@ FormatStyle getLLVMStyle(FormatStyle::LanguageKind Language) {
   LLVMStyle.ShortNamespaceLines = 1;
   LLVMStyle.SortIncludes = FormatStyle::SI_CaseSensitive;
   LLVMStyle.SortJavaStaticImport = FormatStyle::SJSIO_Before;
-  LLVMStyle.SortUsingDeclarations = true;
+  LLVMStyle.SortUsingDeclarations = FormatStyle::SUD_LexicographicNumeric;
   LLVMStyle.SpaceAfterCStyleCast = false;
   LLVMStyle.SpaceAfterLogicalNot = false;
   LLVMStyle.SpaceAfterTemplateKeyword = true;
@@ -1772,7 +1793,7 @@ FormatStyle getNoStyle() {
   FormatStyle NoStyle = getLLVMStyle();
   NoStyle.DisableFormat = true;
   NoStyle.SortIncludes = FormatStyle::SI_Never;
-  NoStyle.SortUsingDeclarations = false;
+  NoStyle.SortUsingDeclarations = FormatStyle::SUD_Never;
   return NoStyle;
 }
 
@@ -1915,7 +1936,7 @@ std::string configurationAsText(const FormatStyle &Style) {
   return Stream.str();
 }
 
-llvm::Optional<FormatStyle>
+std::optional<FormatStyle>
 FormatStyle::FormatStyleSet::Get(FormatStyle::LanguageKind Language) const {
   if (!Styles)
     return std::nullopt;
@@ -1940,7 +1961,7 @@ void FormatStyle::FormatStyleSet::Add(FormatStyle Style) {
 
 void FormatStyle::FormatStyleSet::Clear() { Styles.reset(); }
 
-llvm::Optional<FormatStyle>
+std::optional<FormatStyle>
 FormatStyle::GetLanguageStyle(FormatStyle::LanguageKind Language) const {
   return StyleSet.Get(Language);
 }
@@ -3480,7 +3501,7 @@ reformat(const FormatStyle &Style, StringRef Code,
       });
     }
 
-    if (Style.SortUsingDeclarations) {
+    if (Style.SortUsingDeclarations != FormatStyle::SUD_Never) {
       Passes.emplace_back([&](const Environment &Env) {
         return UsingDeclarationsSorter(Env, Expanded).process();
       });

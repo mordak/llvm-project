@@ -322,7 +322,9 @@ CodeGenTypes::arrangeCXXStructorDeclaration(GlobalDecl GD) {
 
   SmallVector<CanQualType, 16> argTypes;
   SmallVector<FunctionProtoType::ExtParameterInfo, 16> paramInfos;
-  argTypes.push_back(DeriveThisType(MD->getParent(), MD));
+
+  const CXXRecordDecl *ThisType = TheCXXABI.getThisArgumentTypeForMethod(GD);
+  argTypes.push_back(DeriveThisType(ThisType, MD));
 
   bool PassParams = true;
 
@@ -1969,11 +1971,11 @@ void CodeGenModule::getDefaultFunctionAttributes(StringRef Name,
     FuncAttrs.addAttribute(llvm::Attribute::Convergent);
   }
 
-  // TODO: NoUnwind attribute should be added for other GPU modes OpenCL, HIP,
+  // TODO: NoUnwind attribute should be added for other GPU modes HIP,
   // SYCL, OpenMP offload. AFAIK, none of them support exceptions in device
   // code.
-  if (getLangOpts().CUDA && getLangOpts().CUDAIsDevice) {
-    // Exceptions aren't supported in CUDA device code.
+  if ((getLangOpts().CUDA && getLangOpts().CUDAIsDevice) ||
+      getLangOpts().OpenCL) {
     FuncAttrs.addAttribute(llvm::Attribute::NoUnwind);
   }
 

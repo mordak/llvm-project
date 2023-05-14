@@ -396,6 +396,18 @@ static bool getPotentialCopiesOfMemoryValue(
         NullOnly = false;
     };
 
+    auto AdjustWrittenValueType = [&](const AAPointerInfo::Access &Acc,
+                                      Value &V) {
+      Value *AdjV = AA::getWithType(V, *I.getType());
+      if (!AdjV) {
+        LLVM_DEBUG(dbgs() << "Underlying object written but stored value "
+                             "cannot be converted to read type: "
+                          << *Acc.getRemoteInst() << " : " << *I.getType()
+                          << "\n";);
+      }
+      return AdjV;
+    };
+
     auto CheckAccess = [&](const AAPointerInfo::Access &Acc, bool IsExact) {
       if ((IsLoad && !Acc.isWriteOrAssumption()) || (!IsLoad && !Acc.isRead()))
         return true;
@@ -417,7 +429,10 @@ static bool getPotentialCopiesOfMemoryValue(
       if (IsLoad) {
         assert(isa<LoadInst>(I) && "Expected load or store instruction only!");
         if (!Acc.isWrittenValueUnknown()) {
-          NewCopies.push_back(Acc.getWrittenValue());
+          Value *V = AdjustWrittenValueType(Acc, *Acc.getWrittenValue());
+          if (!V)
+            return false;
+          NewCopies.push_back(V);
           NewCopyOrigins.push_back(Acc.getRemoteInst());
           return true;
         }
@@ -428,7 +443,10 @@ static bool getPotentialCopiesOfMemoryValue(
                             << *Acc.getRemoteInst() << "\n";);
           return false;
         }
-        NewCopies.push_back(SI->getValueOperand());
+        Value *V = AdjustWrittenValueType(Acc, *SI->getValueOperand());
+        if (!V)
+          return false;
+        NewCopies.push_back(V);
         NewCopyOrigins.push_back(SI);
       } else {
         assert(isa<StoreInst>(I) && "Expected load or store instruction only!");
@@ -665,7 +683,7 @@ isPotentiallyReachable(Attributor &A, const Instruction &FromI,
     if (A.checkForAllInstructions(ReturnInstCB, FromFn, QueryingAA,
                                   {Instruction::Ret}, UsedAssumedInformation)) {
       LLVM_DEBUG(dbgs() << "[AA] No return is reachable, done\n");
-      return false;
+      continue;
     }
 
     if (!GoBackwardsCB) {
@@ -781,6 +799,61 @@ bool AA::isAssumedThreadLocalObject(Attributor &A, Value &Obj,
   }
 
   LLVM_DEBUG(dbgs() << "[AA] Object '" << Obj << "' is not thread local\n");
+  return false;
+}
+
+bool AA::isPotentiallyAffectedByBarrier(Attributor &A, const Instruction &I,
+                                        const AbstractAttribute &QueryingAA) {
+  if (!I.mayHaveSideEffects() && !I.mayReadFromMemory())
+    return false;
+
+  SmallSetVector<const Value *, 8> Ptrs;
+
+  auto AddLocationPtr = [&](std::optional<MemoryLocation> Loc) {
+    if (!Loc || !Loc->Ptr) {
+      LLVM_DEBUG(
+          dbgs() << "[AA] Access to unknown location; -> requires barriers\n");
+      return false;
+    }
+    Ptrs.insert(Loc->Ptr);
+    return true;
+  };
+
+  if (const MemIntrinsic *MI = dyn_cast<MemIntrinsic>(&I)) {
+    if (!AddLocationPtr(MemoryLocation::getForDest(MI)))
+      return true;
+    if (const MemTransferInst *MTI = dyn_cast<MemTransferInst>(&I))
+      if (!AddLocationPtr(MemoryLocation::getForSource(MTI)))
+        return true;
+  } else if (!AddLocationPtr(MemoryLocation::getOrNone(&I)))
+    return true;
+
+  return isPotentiallyAffectedByBarrier(A, Ptrs.getArrayRef(), QueryingAA, &I);
+}
+
+bool AA::isPotentiallyAffectedByBarrier(Attributor &A,
+                                        ArrayRef<const Value *> Ptrs,
+                                        const AbstractAttribute &QueryingAA,
+                                        const Instruction *CtxI) {
+  for (const Value *Ptr : Ptrs) {
+    if (!Ptr) {
+      LLVM_DEBUG(dbgs() << "[AA] nullptr; -> requires barriers\n");
+      return true;
+    }
+
+    auto Pred = [&](Value &Obj) {
+      if (AA::isAssumedThreadLocalObject(A, Obj, QueryingAA))
+        return true;
+      LLVM_DEBUG(dbgs() << "[AA] Access to '" << Obj << "' via '" << *Ptr
+                        << "'; -> requires barrier\n");
+      return false;
+    };
+
+    const auto &UnderlyingObjsAA = A.getAAFor<AAUnderlyingObjects>(
+        QueryingAA, IRPosition::value(*Ptr), DepClassTy::OPTIONAL);
+    if (!UnderlyingObjsAA.forallUnderlyingObjects(Pred))
+      return true;
+  }
   return false;
 }
 
@@ -1349,7 +1422,8 @@ bool Attributor::isAssumedDead(const Instruction &I,
                                const AbstractAttribute *QueryingAA,
                                const AAIsDead *FnLivenessAA,
                                bool &UsedAssumedInformation,
-                               bool CheckBBLivenessOnly, DepClassTy DepClass) {
+                               bool CheckBBLivenessOnly, DepClassTy DepClass,
+                               bool CheckForDeadStore) {
   const IRPosition::CallBaseContext *CBCtx =
       QueryingAA ? QueryingAA->getCallBaseContext() : nullptr;
 
@@ -1387,6 +1461,14 @@ bool Attributor::isAssumedDead(const Instruction &I,
     return false;
 
   if (IsDeadAA.isAssumedDead()) {
+    if (QueryingAA)
+      recordDependence(IsDeadAA, *QueryingAA, DepClass);
+    if (!IsDeadAA.isKnownDead())
+      UsedAssumedInformation = true;
+    return true;
+  }
+
+  if (CheckForDeadStore && isa<StoreInst>(I) && IsDeadAA.isRemovableStore()) {
     if (QueryingAA)
       recordDependence(IsDeadAA, *QueryingAA, DepClass);
     if (!IsDeadAA.isKnownDead())
@@ -2290,7 +2372,7 @@ ChangeStatus Attributor::cleanupIR() {
   for (const auto &V : ToBeDeletedInsts) {
     if (Instruction *I = dyn_cast_or_null<Instruction>(V)) {
       if (auto *CB = dyn_cast<CallBase>(I)) {
-        assert(isRunOn(*I->getFunction()) &&
+        assert((isa<IntrinsicInst>(CB) || isRunOn(*I->getFunction())) &&
                "Cannot delete an instruction outside the current SCC!");
         if (!isa<IntrinsicInst>(CB))
           Configuration.CGUpdater.removeCallSite(*CB);

@@ -1534,8 +1534,8 @@ QualType QualType::getAtomicUnqualifiedType() const {
   return getUnqualifiedType();
 }
 
-Optional<ArrayRef<QualType>> Type::getObjCSubstitutions(
-                               const DeclContext *dc) const {
+std::optional<ArrayRef<QualType>>
+Type::getObjCSubstitutions(const DeclContext *dc) const {
   // Look through method scopes.
   if (const auto method = dyn_cast<ObjCMethodDecl>(dc))
     dc = method->getDeclContext();
@@ -2487,11 +2487,13 @@ bool QualType::isTrivialType(const ASTContext &Context) const {
     return true;
   if (const auto *RT = CanonicalType->getAs<RecordType>()) {
     if (const auto *ClassDecl = dyn_cast<CXXRecordDecl>(RT->getDecl())) {
-      // C++11 [class]p6:
-      //   A trivial class is a class that has a default constructor,
-      //   has no non-trivial default constructors, and is trivially
-      //   copyable.
-      return ClassDecl->hasDefaultConstructor() &&
+      // C++20 [class]p6:
+      //   A trivial class is a class that is trivially copyable, and
+      //     has one or more eligible default constructors such that each is
+      //     trivial.
+      // FIXME: We should merge this definition of triviality into
+      // CXXRecordDecl::isTrivial. Currently it computes the wrong thing.
+      return ClassDecl->hasTrivialDefaultConstructor() &&
              !ClassDecl->hasNonTrivialDefaultConstructor() &&
              ClassDecl->isTriviallyCopyable();
     }
@@ -3683,7 +3685,7 @@ static const TemplateTypeParmDecl *getReplacedParameter(Decl *D,
 
 SubstTemplateTypeParmType::SubstTemplateTypeParmType(
     QualType Replacement, Decl *AssociatedDecl, unsigned Index,
-    Optional<unsigned> PackIndex)
+    std::optional<unsigned> PackIndex)
     : Type(SubstTemplateTypeParm, Replacement.getCanonicalType(),
            Replacement->getDependence()),
       AssociatedDecl(AssociatedDecl) {
@@ -4179,7 +4181,7 @@ LinkageInfo Type::getLinkageAndVisibility() const {
   return LinkageComputer{}.getTypeLinkageAndVisibility(this);
 }
 
-Optional<NullabilityKind> Type::getNullability() const {
+std::optional<NullabilityKind> Type::getNullability() const {
   QualType Type(this, 0);
   while (const auto *AT = Type->getAs<AttributedType>()) {
     // Check whether this is an attributed type with nullability
@@ -4320,8 +4322,7 @@ bool Type::canHaveNullability(bool ResultIfUnknown) const {
   llvm_unreachable("bad type kind!");
 }
 
-llvm::Optional<NullabilityKind>
-AttributedType::getImmediateNullability() const {
+std::optional<NullabilityKind> AttributedType::getImmediateNullability() const {
   if (getAttrKind() == attr::TypeNonNull)
     return NullabilityKind::NonNull;
   if (getAttrKind() == attr::TypeNullable)
@@ -4333,7 +4334,8 @@ AttributedType::getImmediateNullability() const {
   return std::nullopt;
 }
 
-Optional<NullabilityKind> AttributedType::stripOuterNullability(QualType &T) {
+std::optional<NullabilityKind>
+AttributedType::stripOuterNullability(QualType &T) {
   QualType AttrTy = T;
   if (auto MacroTy = dyn_cast<MacroQualifiedType>(T))
     AttrTy = MacroTy->getUnderlyingType();

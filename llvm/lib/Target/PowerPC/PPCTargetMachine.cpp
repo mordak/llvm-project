@@ -237,9 +237,10 @@ static PPCTargetMachine::PPCABI computeTargetABI(const Triple &TT,
   case Triple::ppc64le:
     return PPCTargetMachine::PPC_ABI_ELFv2;
   case Triple::ppc64:
-    if (TT.isOSOpenBSD())
+    if (TT.isPPC64ELFv2ABI())
       return PPCTargetMachine::PPC_ABI_ELFv2;
-    return PPCTargetMachine::PPC_ABI_ELFv1;
+    else
+      return PPCTargetMachine::PPC_ABI_ELFv1;
   default:
     return PPCTargetMachine::PPC_ABI_UNKNOWN;
   }

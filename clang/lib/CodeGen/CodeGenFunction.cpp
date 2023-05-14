@@ -361,17 +361,18 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   bool HasOnlyLifetimeMarkers =
       HasCleanups && EHStack.containsOnlyLifetimeMarkers(PrologueCleanupDepth);
   bool EmitRetDbgLoc = !HasCleanups || HasOnlyLifetimeMarkers;
+
+  std::optional<ApplyDebugLocation> OAL;
   if (HasCleanups) {
     // Make sure the line table doesn't jump back into the body for
     // the ret after it's been at EndLoc.
-    Optional<ApplyDebugLocation> AL;
     if (CGDebugInfo *DI = getDebugInfo()) {
       if (OnlySimpleReturnStmts)
         DI->EmitLocation(Builder, EndLoc);
       else
         // We may not have a valid end location. Try to apply it anyway, and
         // fall back to an artificial location if needed.
-        AL = ApplyDebugLocation::CreateDefaultArtificial(*this, EndLoc);
+        OAL = ApplyDebugLocation::CreateDefaultArtificial(*this, EndLoc);
     }
 
     PopCleanupBlocks(PrologueCleanupDepth);
@@ -505,7 +506,7 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
                      llvm::utostr(LargestVectorWidth));
 
   // Add vscale_range attribute if appropriate.
-  Optional<std::pair<unsigned, unsigned>> VScaleRange =
+  std::optional<std::pair<unsigned, unsigned>> VScaleRange =
       getContext().getTargetInfo().getVScaleRange(getLangOpts());
   if (VScaleRange) {
     CurFn->addFnAttr(llvm::Attribute::getWithVScaleRangeArgs(

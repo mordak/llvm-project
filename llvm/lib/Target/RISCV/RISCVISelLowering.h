@@ -239,10 +239,13 @@ enum NodeType : unsigned {
   VFCVT_RTZ_X_F_VL,
   VFCVT_RTZ_XU_F_VL,
   VFCVT_X_F_VL,
+  VFCVT_XU_F_VL,
   VFROUND_NOEXCEPT_VL,
   VFCVT_RM_X_F_VL, // Has a rounding mode operand.
+  VFCVT_RM_XU_F_VL, // Has a rounding mode operand.
   SINT_TO_FP_VL,
   UINT_TO_FP_VL,
+  VFCVT_RM_F_X_VL, // Has a rounding mode operand.
   VFCVT_RM_F_XU_VL, // Has a rounding mode operand.
   FP_ROUND_VL,
   FP_EXTEND_VL,
@@ -614,6 +617,10 @@ public:
     // Scaled addressing not supported on indexed load/stores
     return Scale == 1;
   }
+
+  /// If the target has a standard location for the stack protector cookie,
+  /// returns the address of that location. Otherwise, returns nullptr.
+  Value *getIRStackGuard(IRBuilderBase &IRB) const override;
 
 private:
   /// RISCVCCAssignFn - This target-specific function extends the default

@@ -42,11 +42,22 @@ The C++20 format library has improved but it not yet considered stable. The
 main improvements are additional formatters for the chrono calendar types. Work
 on formatting ranges has started.
 
-The C++20 ranges library has been completed and is no longer experimental. Some
-``views`` have not been implemented yet. Work on C++23 ranges has started.
+The C++20 ranges library has been completed and is no longer experimental (with
+the exception of `ranges::join_view` which is still marked as experimental
+because it is about to undergo an ABI-breaking change in the Standard due to
+`D2770 <https://isocpp.org/files/papers/D2770R0.html>`_). Work on C++23 ranges
+has started.
 
 The C++20 spaceship operator has been added to more types, the work is still
 ongoing.
+
+`D139235 <https://reviews.llvm.org/D139235>`_ made ``copy`` and ``move``
+algorithms and their variations (``copy_backward``, etc.) apply optimizations
+for trivial types more often. This has the potential to expose bugs in code
+using these algorithms that currently relies on undefined behavior (this
+includes indirect usage -- for example, these algorithms are used in the
+implementation of some standard containers). This change also made the
+algorithms check the given iterator types for conformance more strictly.
 
 Implemented Papers
 ------------------
@@ -66,6 +77,12 @@ Implemented Papers
 - P0415R1 - ``constexpr`` for ``std::complex``
 - P1208R6 - ``std::source_location``
 - P0323R12 - ``std::expected``
+- P1035R7 - Input Range Adaptors
+- P2325R3 - Views should not be required to be default constructible
+- P2446R2 - ``views::as_rvalue``
+- P1020R1 - Smart pointer creation with default initialization
+- P2210R2 - Superior String Splitting
+- P2286R8 - Formatting Ranges
 
 Improvements and New Features
 -----------------------------
@@ -73,7 +90,11 @@ Improvements and New Features
   now provided when implementations in the global namespace are provided by
   the C library.
 - Implemented ``<memory_resource>`` header from C++17
-- `D122780 <https://reviews.llvm.org/D122780>`_ Improved the performance of std::sort
+- The ``ranges`` versions of ``copy``, ``move``, ``copy_backward`` and ``move_backward`` are now also optimized for
+  ``std::deque<>::iterator``, which can lead to up to 20x performance improvements on certain algorithms.
+- The ``std`` and ``ranges`` versions of ``copy``, ``move``, ``copy_backward`` and ``move_backward`` are now also
+  optimized for ``join_view::iterator``, which can lead to up to 20x performance improvements on certain combinations of
+  iterators and algorithms.
 
 Deprecations and Removals
 -------------------------
@@ -128,6 +149,10 @@ Upcoming Deprecations and Removals
   working when we remove the base template. The Standard does not mandate that a base template is provided,
   and such a base template is bound to be incorrect for some types, which could currently cause unexpected
   behavior while going undetected.
+
+- The ``_LIBCPP_AVAILABILITY_CUSTOM_VERBOSE_ABORT_PROVIDED`` macro will not be honored anymore in LLVM 18.
+  Please see the updated documentation about the safe libc++ mode and in particular the ``_LIBCPP_VERBOSE_ABORT``
+  macro for details.
 
 API Changes
 -----------

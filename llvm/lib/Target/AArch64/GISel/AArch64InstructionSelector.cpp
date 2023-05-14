@@ -144,8 +144,8 @@ private:
                                    Register Scalar,
                                    MachineIRBuilder &MIRBuilder) const;
 
-  /// Emit a lane insert into \p DstReg, or a new vector register if None is
-  /// provided.
+  /// Emit a lane insert into \p DstReg, or a new vector register if
+  /// std::nullopt is provided.
   ///
   /// The lane inserted into is defined by \p LaneIdx. The vector source
   /// register is given by \p SrcReg. The register containing the element is
@@ -2351,8 +2351,7 @@ bool AArch64InstructionSelector::earlySelect(MachineInstr &I) {
   }
   case TargetOpcode::G_FENCE: {
     if (I.getOperand(1).getImm() == 0)
-      BuildMI(MBB, I, MIMetadata(I), TII.get(AArch64::CompilerBarrier))
-          .addImm(I.getOperand(0).getImm());
+      BuildMI(MBB, I, MIMetadata(I), TII.get(TargetOpcode::MEMBARRIER));
     else
       BuildMI(MBB, I, MIMetadata(I), TII.get(AArch64::DMB))
           .addImm(I.getOperand(0).getImm() == 4 ? 0x9 : 0xb);

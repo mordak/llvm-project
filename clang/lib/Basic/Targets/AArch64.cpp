@@ -26,25 +26,25 @@ using namespace clang::targets;
 
 static constexpr Builtin::Info BuiltinInfo[] = {
 #define BUILTIN(ID, TYPE, ATTRS)                                               \
-   {#ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, nullptr},
+  {#ID, TYPE, ATTRS, nullptr, HeaderDesc::NO_HEADER, ALL_LANGUAGES},
 #define TARGET_BUILTIN(ID, TYPE, ATTRS, FEATURE)                               \
-  {#ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, FEATURE},
+  {#ID, TYPE, ATTRS, FEATURE, HeaderDesc::NO_HEADER, ALL_LANGUAGES},
 #include "clang/Basic/BuiltinsNEON.def"
 
 #define BUILTIN(ID, TYPE, ATTRS)                                               \
-  {#ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, nullptr},
+  {#ID, TYPE, ATTRS, nullptr, HeaderDesc::NO_HEADER, ALL_LANGUAGES},
 #define TARGET_BUILTIN(ID, TYPE, ATTRS, FEATURE)                               \
-  {#ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, FEATURE},
+  {#ID, TYPE, ATTRS, FEATURE, HeaderDesc::NO_HEADER, ALL_LANGUAGES},
 #include "clang/Basic/BuiltinsSVE.def"
 
 #define BUILTIN(ID, TYPE, ATTRS)                                               \
-   {#ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, nullptr},
+  {#ID, TYPE, ATTRS, nullptr, HeaderDesc::NO_HEADER, ALL_LANGUAGES},
 #define LANGBUILTIN(ID, TYPE, ATTRS, LANG)                                     \
-  {#ID, TYPE, ATTRS, nullptr, LANG, nullptr},
+  {#ID, TYPE, ATTRS, nullptr, HeaderDesc::NO_HEADER, LANG},
 #define TARGET_BUILTIN(ID, TYPE, ATTRS, FEATURE)                               \
-  {#ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, FEATURE},
+  {#ID, TYPE, ATTRS, FEATURE, HeaderDesc::NO_HEADER, ALL_LANGUAGES},
 #define TARGET_HEADER_BUILTIN(ID, TYPE, ATTRS, HEADER, LANGS, FEATURE)         \
-  {#ID, TYPE, ATTRS, HEADER, LANGS, FEATURE},
+  {#ID, TYPE, ATTRS, FEATURE, HeaderDesc::HEADER, LANGS},
 #include "clang/Basic/BuiltinsAArch64.def"
 };
 
@@ -60,14 +60,14 @@ void AArch64TargetInfo::setArchFeatures() {
     HasLSE = true;
     HasRDM = true;
   } else if (ArchInfo->Version.getMajor() == 8) {
-    if (ArchInfo->Version.getMinor() >= 7) {
+    if (ArchInfo->Version.getMinor() >= 7u) {
       HasWFxT = true;
     }
-    if (ArchInfo->Version.getMinor() >= 6) {
+    if (ArchInfo->Version.getMinor() >= 6u) {
       HasBFloat16 = true;
       HasMatMul = true;
     }
-    if (ArchInfo->Version.getMinor() >= 5) {
+    if (ArchInfo->Version.getMinor() >= 5u) {
       HasAlternativeNZCV = true;
       HasFRInt3264 = true;
       HasSSBS = true;
@@ -75,28 +75,28 @@ void AArch64TargetInfo::setArchFeatures() {
       HasPredRes = true;
       HasBTI = true;
     }
-    if (ArchInfo->Version.getMinor() >= 4) {
+    if (ArchInfo->Version.getMinor() >= 4u) {
       HasDotProd = true;
       HasDIT = true;
       HasFlagM = true;
     }
-    if (ArchInfo->Version.getMinor() >= 3) {
+    if (ArchInfo->Version.getMinor() >= 3u) {
       HasRCPC = true;
       FPU |= NeonMode;
     }
-    if (ArchInfo->Version.getMinor() >= 2) {
+    if (ArchInfo->Version.getMinor() >= 2u) {
       HasCCPP = true;
     }
-    if (ArchInfo->Version.getMinor() >= 1) {
+    if (ArchInfo->Version.getMinor() >= 1u) {
       HasCRC = true;
       HasLSE = true;
       HasRDM = true;
     }
   } else if (ArchInfo->Version.getMajor() == 9) {
-    if (ArchInfo->Version.getMinor() >= 2) {
+    if (ArchInfo->Version.getMinor() >= 2u) {
       HasWFxT = true;
     }
-    if (ArchInfo->Version.getMinor() >= 1) {
+    if (ArchInfo->Version.getMinor() >= 1u) {
       HasBFloat16 = true;
       HasMatMul = true;
     }
@@ -581,7 +581,7 @@ ArrayRef<Builtin::Info> AArch64TargetInfo::getTargetBuiltins() const {
                                          Builtin::FirstTSBuiltin);
 }
 
-Optional<std::pair<unsigned, unsigned>>
+std::optional<std::pair<unsigned, unsigned>>
 AArch64TargetInfo::getVScaleRange(const LangOptions &LangOpts) const {
   if (LangOpts.VScaleMin || LangOpts.VScaleMax)
     return std::pair<unsigned, unsigned>(
@@ -687,9 +687,13 @@ void AArch64TargetInfo::setFeatureEnabled(llvm::StringMap<bool> &Features,
   if (ArchInfo == llvm::AArch64::INVALID)
     return; // Not an architecure, nothing more to do.
 
+  // Disabling an architecture feature does not affect dependent features
+  if (!Enabled)
+    return;
+
   for (const auto *OtherArch : llvm::AArch64::ArchInfos)
     if (ArchInfo.implies(*OtherArch))
-      Features[OtherArch->getSubArch()] = Enabled;
+      Features[OtherArch->getSubArch()] = true;
 
   // Set any features implied by the architecture
   uint64_t Extensions =
@@ -698,8 +702,6 @@ void AArch64TargetInfo::setFeatureEnabled(llvm::StringMap<bool> &Features,
   if (llvm::AArch64::getExtensionFeatures(Extensions, CPUFeats)) {
     for (auto F : CPUFeats) {
       assert(F[0] == '+' && "Expected + in target feature!");
-      if (F == "+crypto")
-        continue;
       Features[F.drop_front(1)] = true;
     }
   }

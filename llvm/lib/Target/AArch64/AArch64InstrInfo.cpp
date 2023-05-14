@@ -7870,7 +7870,7 @@ void AArch64InstrInfo::fixupPostOutline(MachineBasicBlock &MBB) const {
 
 static void signOutlinedFunction(MachineFunction &MF, MachineBasicBlock &MBB,
                                  bool ShouldSignReturnAddr,
-                                 bool ShouldSignReturnAddrWithAKey) {
+                                 bool ShouldSignReturnAddrWithBKey) {
   if (ShouldSignReturnAddr) {
     MachineBasicBlock::iterator MBBPAC = MBB.begin();
     MachineBasicBlock::iterator MBBAUT = MBB.getFirstTerminator();
@@ -7888,21 +7888,15 @@ static void signOutlinedFunction(MachineFunction &MF, MachineBasicBlock &MBB,
     //    PACIASP                   EMITBKEY
     //    CFI_INSTRUCTION           PACIBSP
     //                              CFI_INSTRUCTION
-    unsigned PACI;
-    if (ShouldSignReturnAddrWithAKey) {
-      PACI = Subtarget.hasPAuth() ? AArch64::PACIA : AArch64::PACIASP;
-    } else {
+    if (ShouldSignReturnAddrWithBKey) {
       BuildMI(MBB, MBBPAC, DebugLoc(), TII->get(AArch64::EMITBKEY))
           .setMIFlag(MachineInstr::FrameSetup);
-      PACI = Subtarget.hasPAuth() ? AArch64::PACIB : AArch64::PACIBSP;
     }
 
-    auto MI = BuildMI(MBB, MBBPAC, DebugLoc(), TII->get(PACI));
-    if (Subtarget.hasPAuth())
-      MI.addReg(AArch64::LR, RegState::Define)
-          .addReg(AArch64::LR)
-          .addReg(AArch64::SP, RegState::InternalRead);
-    MI.setMIFlag(MachineInstr::FrameSetup);
+    BuildMI(MBB, MBBPAC, DebugLoc(),
+            TII->get(ShouldSignReturnAddrWithBKey ? AArch64::PACIBSP
+                                                  : AArch64::PACIASP))
+        .setMIFlag(MachineInstr::FrameSetup);
 
     if (MF.getInfo<AArch64FunctionInfo>()->needsDwarfUnwindInfo(MF)) {
       unsigned CFIIndex =
@@ -7918,14 +7912,14 @@ static void signOutlinedFunction(MachineFunction &MF, MachineBasicBlock &MBB,
     if (Subtarget.hasPAuth() && MBBAUT != MBB.end() &&
         MBBAUT->getOpcode() == AArch64::RET) {
       BuildMI(MBB, MBBAUT, DL,
-              TII->get(ShouldSignReturnAddrWithAKey ? AArch64::RETAA
-                                                    : AArch64::RETAB))
+              TII->get(ShouldSignReturnAddrWithBKey ? AArch64::RETAB
+                                                    : AArch64::RETAA))
           .copyImplicitOps(*MBBAUT);
       MBB.erase(MBBAUT);
     } else {
       BuildMI(MBB, MBBAUT, DL,
-              TII->get(ShouldSignReturnAddrWithAKey ? AArch64::AUTIASP
-                                                    : AArch64::AUTIBSP))
+              TII->get(ShouldSignReturnAddrWithBKey ? AArch64::AUTIBSP
+                                                    : AArch64::AUTIASP))
           .setMIFlag(MachineInstr::FrameDestroy);
       unsigned CFIIndexAuth =
           MF.addFrameInst(MCCFIInstruction::createNegateRAState(nullptr));
@@ -8040,13 +8034,13 @@ void AArch64InstrInfo::buildOutlinedFrame(
   bool ShouldSignReturnAddr = MFI.shouldSignReturnAddress(!IsLeafFunction);
 
   // a_key is the default
-  bool ShouldSignReturnAddrWithAKey = !MFI.shouldSignWithBKey();
+  bool ShouldSignReturnAddrWithBKey = MFI.shouldSignWithBKey();
 
   // If this is a tail call outlined function, then there's already a return.
   if (OF.FrameConstructionID == MachineOutlinerTailCall ||
       OF.FrameConstructionID == MachineOutlinerThunk) {
     signOutlinedFunction(MF, MBB, ShouldSignReturnAddr,
-                         ShouldSignReturnAddrWithAKey);
+                         ShouldSignReturnAddrWithBKey);
     return;
   }
 
@@ -8061,7 +8055,7 @@ void AArch64InstrInfo::buildOutlinedFrame(
   MBB.insert(MBB.end(), ret);
 
   signOutlinedFunction(MF, MBB, ShouldSignReturnAddr,
-                       ShouldSignReturnAddrWithAKey);
+                       ShouldSignReturnAddrWithBKey);
 
   FI->setOutliningStyle("Function");
 

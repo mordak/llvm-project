@@ -1258,7 +1258,11 @@ void PEI::insertZeroCallUsedRegs(MachineFunction &MF) {
   BitVector UsedRegs(TRI.getNumRegs());
   if (OnlyUsed)
     for (const MachineBasicBlock &MBB : MF)
-      for (const MachineInstr &MI : MBB)
+      for (const MachineInstr &MI : MBB) {
+        // skip debug instructions
+        if (MI.isDebugInstr())
+          continue;
+
         for (const MachineOperand &MO : MI.operands()) {
           if (!MO.isReg())
             continue;
@@ -1268,6 +1272,7 @@ void PEI::insertZeroCallUsedRegs(MachineFunction &MF) {
               (MO.isDef() || MO.isUse()))
             UsedRegs.set(Reg);
         }
+      }
 
   // Get a list of registers that are used.
   BitVector LiveIns(TRI.getNumRegs());

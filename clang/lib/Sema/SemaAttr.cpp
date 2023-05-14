@@ -338,7 +338,7 @@ void Sema::ActOnPragmaPack(SourceLocation PragmaLoc, PragmaMsStackAction Action,
   AlignPackInfo::Mode ModeVal = CurVal.getAlignMode();
 
   if (Alignment) {
-    Optional<llvm::APSInt> Val;
+    std::optional<llvm::APSInt> Val;
     Val = Alignment->getIntegerConstantExpr(Context);
 
     // pack(0) is like pack(), which just works out since that is what
@@ -565,13 +565,6 @@ void Sema::ActOnPragmaFloatControl(SourceLocation Loc,
   case PFC_Precise:
     NewFPFeatures.setFPPreciseEnabled(true);
     FpPragmaStack.Act(Loc, Action, StringRef(), NewFPFeatures);
-    if (PP.getCurrentFPEvalMethod() ==
-            LangOptions::FPEvalMethodKind::FEM_Indeterminable &&
-        PP.getLastFPEvalPragmaLocation().isValid())
-      // A preceding `pragma float_control(precise,off)` has changed
-      // the value of the evaluation method.
-      // Set it back to its old value.
-      PP.setCurrentFPEvalMethod(SourceLocation(), PP.getLastFPEvalMethod());
     break;
   case PFC_NoPrecise:
     if (CurFPFeatures.getExceptionMode() == LangOptions::FPE_Strict)
@@ -581,10 +574,6 @@ void Sema::ActOnPragmaFloatControl(SourceLocation Loc,
     else
       NewFPFeatures.setFPPreciseEnabled(false);
     FpPragmaStack.Act(Loc, Action, StringRef(), NewFPFeatures);
-    PP.setLastFPEvalMethod(PP.getCurrentFPEvalMethod());
-    // `AllowFPReassoc` or `AllowReciprocal` option is enabled.
-    PP.setCurrentFPEvalMethod(
-        Loc, LangOptions::FPEvalMethodKind::FEM_Indeterminable);
     break;
   case PFC_Except:
     if (!isPreciseFPEnabled())
@@ -608,12 +597,6 @@ void Sema::ActOnPragmaFloatControl(SourceLocation Loc,
     }
     FpPragmaStack.Act(Loc, Action, StringRef(), NewFPFeatures);
     NewFPFeatures = FpPragmaStack.CurrentValue;
-    if (CurFPFeatures.getAllowFPReassociate() ||
-        CurFPFeatures.getAllowReciprocal())
-      // Since we are popping the pragma, we don't want to be passing
-      // a location here.
-      PP.setCurrentFPEvalMethod(SourceLocation(),
-                                CurFPFeatures.getFPEvalMethod());
     break;
   }
   CurFPFeatures = NewFPFeatures.applyOverrides(getLangOpts());
@@ -886,7 +869,7 @@ void Sema::AddCFAuditedAttribute(Decl *D) {
 
 namespace {
 
-Optional<attr::SubjectMatchRule>
+std::optional<attr::SubjectMatchRule>
 getParentAttrMatcherRule(attr::SubjectMatchRule Rule) {
   using namespace attr;
   switch (Rule) {
@@ -961,7 +944,7 @@ void Sema::ActOnPragmaAttributeAttribute(
         RulesToFirstSpecifiedNegatedSubRule;
     for (const auto &Rule : Rules) {
       attr::SubjectMatchRule MatchRule = attr::SubjectMatchRule(Rule.first);
-      Optional<attr::SubjectMatchRule> ParentRule =
+      std::optional<attr::SubjectMatchRule> ParentRule =
           getParentAttrMatcherRule(MatchRule);
       if (!ParentRule)
         continue;
@@ -985,7 +968,7 @@ void Sema::ActOnPragmaAttributeAttribute(
     bool IgnoreNegatedSubRules = false;
     for (const auto &Rule : Rules) {
       attr::SubjectMatchRule MatchRule = attr::SubjectMatchRule(Rule.first);
-      Optional<attr::SubjectMatchRule> ParentRule =
+      std::optional<attr::SubjectMatchRule> ParentRule =
           getParentAttrMatcherRule(MatchRule);
       if (!ParentRule)
         continue;

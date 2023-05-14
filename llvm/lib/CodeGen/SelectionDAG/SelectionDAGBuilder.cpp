@@ -182,8 +182,7 @@ getCopyFromParts(SelectionDAG &DAG, const SDLoc &DL, const SDValue *Parts,
       unsigned ValueBits = ValueVT.getSizeInBits();
 
       // Assemble the power of 2 part.
-      unsigned RoundParts =
-          (NumParts & (NumParts - 1)) ? 1 << Log2_32(NumParts) : NumParts;
+      unsigned RoundParts = llvm::bit_floor(NumParts);
       unsigned RoundBits = PartBits * RoundParts;
       EVT RoundVT = RoundBits == ValueBits ?
         ValueVT : EVT::getIntegerVT(*DAG.getContext(), RoundBits);
@@ -568,7 +567,7 @@ getCopyToParts(SelectionDAG &DAG, const SDLoc &DL, SDValue Val, SDValue *Parts,
     // The number of parts is not a power of 2.  Split off and copy the tail.
     assert(PartVT.isInteger() && ValueVT.isInteger() &&
            "Do not know what to expand to!");
-    unsigned RoundParts = 1 << Log2_32(NumParts);
+    unsigned RoundParts = llvm::bit_floor(NumParts);
     unsigned RoundBits = RoundParts * PartBits;
     unsigned OddParts = NumParts - RoundParts;
     SDValue OddVal = DAG.getNode(ISD::SRL, DL, ValueVT, Val,
@@ -2895,7 +2894,7 @@ void SelectionDAGBuilder::visitBitTestCase(BitTestBlock &BB,
   MVT VT = BB.RegVT;
   SDValue ShiftOp = DAG.getCopyFromReg(getControlRoot(), dl, Reg, VT);
   SDValue Cmp;
-  unsigned PopCount = countPopulation(B.Mask);
+  unsigned PopCount = llvm::popcount(B.Mask);
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   if (PopCount == 1) {
     // Testing for a single bit; just compare the shift count with what it
@@ -4672,6 +4671,12 @@ void SelectionDAGBuilder::visitAtomicRMW(const AtomicRMWInst &I) {
   case AtomicRMWInst::FSub: NT = ISD::ATOMIC_LOAD_FSUB; break;
   case AtomicRMWInst::FMax: NT = ISD::ATOMIC_LOAD_FMAX; break;
   case AtomicRMWInst::FMin: NT = ISD::ATOMIC_LOAD_FMIN; break;
+  case AtomicRMWInst::UIncWrap:
+    NT = ISD::ATOMIC_LOAD_UINC_WRAP;
+    break;
+  case AtomicRMWInst::UDecWrap:
+    NT = ISD::ATOMIC_LOAD_UDEC_WRAP;
+    break;
   }
   AtomicOrdering Ordering = I.getOrdering();
   SyncScope::ID SSID = I.getSyncScopeID();
@@ -6090,7 +6095,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
   case Intrinsic::dbg_addr:
   case Intrinsic::dbg_declare: {
     // Debug intrinsics are handled seperately in assignment tracking mode.
-    if (getEnableAssignmentTracking())
+    if (isAssignmentTrackingEnabled(*I.getFunction()->getParent()))
       return;
     // Assume dbg.addr and dbg.declare can not currently use DIArgList, i.e.
     // they are non-variadic.
@@ -6193,13 +6198,13 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
   }
   case Intrinsic::dbg_assign: {
     // Debug intrinsics are handled seperately in assignment tracking mode.
-    assert(getEnableAssignmentTracking() &&
+    assert(isAssignmentTrackingEnabled(*I.getFunction()->getParent()) &&
            "expected assignment tracking to be enabled");
     return;
   }
   case Intrinsic::dbg_value: {
     // Debug intrinsics are handled seperately in assignment tracking mode.
-    if (getEnableAssignmentTracking())
+    if (isAssignmentTrackingEnabled(*I.getFunction()->getParent()))
       return;
     const DbgValueInst &DI = cast<DbgValueInst>(I);
     assert(DI.getVariable() && "Missing variable");
@@ -8364,9 +8369,9 @@ void SelectionDAGBuilder::visitCall(const CallInst &I) {
     return;
   }
 
-  if (Function *F = I.getCalledFunction()) {
-    diagnoseDontCall(I);
+  diagnoseDontCall(I);
 
+  if (Function *F = I.getCalledFunction()) {
     if (F->isDeclaration()) {
       // Is this an LLVM intrinsic or a target-specific intrinsic?
       unsigned IID = F->getIntrinsicID();

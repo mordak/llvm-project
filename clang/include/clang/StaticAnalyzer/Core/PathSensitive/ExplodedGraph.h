@@ -30,7 +30,6 @@
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/GraphTraits.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Support/Allocator.h"
@@ -168,7 +167,7 @@ public:
 
   const ProgramStateRef &getState() const { return State; }
 
-  template <typename T> Optional<T> getLocationAs() const & {
+  template <typename T> std::optional<T> getLocationAs() const & {
     return Location.getAs<T>();
   }
 
