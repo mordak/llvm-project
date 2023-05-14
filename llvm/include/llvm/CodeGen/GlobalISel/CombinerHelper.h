@@ -19,8 +19,8 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/CodeGen/LowLevelType.h"
 #include "llvm/CodeGen/Register.h"
-#include "llvm/Support/LowLevelTypeImpl.h"
 #include "llvm/IR/InstrTypes.h"
 #include <functional>
 
@@ -78,14 +78,6 @@ struct ShiftOfShiftedLogic {
 };
 
 using BuildFnTy = std::function<void(MachineIRBuilder &)>;
-
-struct MergeTruncStoresInfo {
-  SmallVector<GStore *> FoundStores;
-  GStore *LowestIdxStore = nullptr;
-  Register WideSrcVal;
-  bool NeedBSwap = false;
-  bool NeedRotate = false;
-};
 
 using OperandBuildSteps =
     SmallVector<std::function<void(MachineInstrBuilder &)>, 4>;
@@ -309,6 +301,8 @@ public:
                                 ShiftOfShiftedLogic &MatchInfo);
   void applyShiftOfShiftedLogic(MachineInstr &MI,
                                 ShiftOfShiftedLogic &MatchInfo);
+
+  bool matchCommuteShift(MachineInstr &MI, BuildFnTy &MatchInfo);
 
   /// Transform a multiply by a power-of-2 value to a left shift.
   bool matchCombineMulToShl(MachineInstr &MI, unsigned &ShiftVal);
@@ -577,9 +571,6 @@ public:
   /// bswap.
   bool matchLoadOrCombine(MachineInstr &MI, BuildFnTy &MatchInfo);
 
-  bool matchTruncStoreMerge(MachineInstr &MI, MergeTruncStoresInfo &MatchInfo);
-  void applyTruncStoreMerge(MachineInstr &MI, MergeTruncStoresInfo &MatchInfo);
-
   bool matchExtendThroughPhis(MachineInstr &MI, MachineInstr *&ExtMI);
   void applyExtendThroughPhis(MachineInstr &MI, MachineInstr *&ExtMI);
 
@@ -788,6 +779,9 @@ public:
   ///   (X - Y) != X -> Y != 0
   ///   (X ^ Y) != X -> Y != 0
   bool matchRedundantBinOpInEquality(MachineInstr &MI, BuildFnTy &MatchInfo);
+
+  /// Match shifts greater or equal to the bitwidth of the operation.
+  bool matchShiftsTooBig(MachineInstr &MI);
 
 private:
   /// Given a non-indexed load or store instruction \p MI, find an offset that

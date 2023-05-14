@@ -167,10 +167,9 @@ static bool shouldGenerateNote(llvm::raw_string_ostream &os,
 /// Finds argument index of the out paramter in the call @c S
 /// corresponding to the symbol @c Sym.
 /// If none found, returns std::nullopt.
-static std::optional<unsigned> findArgIdxOfSymbol(ProgramStateRef CurrSt,
-                                                  const LocationContext *LCtx,
-                                                  SymbolRef &Sym,
-                                                  Optional<CallEventRef<>> CE) {
+static std::optional<unsigned>
+findArgIdxOfSymbol(ProgramStateRef CurrSt, const LocationContext *LCtx,
+                   SymbolRef &Sym, std::optional<CallEventRef<>> CE) {
   if (!CE)
     return std::nullopt;
 
@@ -235,8 +234,8 @@ static void generateDiagnosticsForCallLike(ProgramStateRef CurrSt,
     os << "Operator 'new'";
   } else {
     assert(isa<ObjCMessageExpr>(S));
-    CallEventRef<ObjCMethodCall> Call =
-        Mgr.getObjCMethodCall(cast<ObjCMessageExpr>(S), CurrSt, LCtx);
+    CallEventRef<ObjCMethodCall> Call = Mgr.getObjCMethodCall(
+        cast<ObjCMessageExpr>(S), CurrSt, LCtx, {nullptr, 0});
 
     switch (Call->getMessageKind()) {
     case OCM_Message:
@@ -251,7 +250,7 @@ static void generateDiagnosticsForCallLike(ProgramStateRef CurrSt,
     }
   }
 
-  Optional<CallEventRef<>> CE = Mgr.getCall(S, CurrSt, LCtx);
+  std::optional<CallEventRef<>> CE = Mgr.getCall(S, CurrSt, LCtx, {nullptr, 0});
   auto Idx = findArgIdxOfSymbol(CurrSt, LCtx, Sym, CE);
 
   // If index is not found, we assume that the symbol was returned.
@@ -731,7 +730,7 @@ static AllocationInfo GetAllocationSite(ProgramStateManager &StateMgr,
   const LocationContext *InterestingMethodContext = nullptr;
   if (InitMethodContext) {
     const ProgramPoint AllocPP = AllocationNode->getLocation();
-    if (Optional<StmtPoint> SP = AllocPP.getAs<StmtPoint>())
+    if (std::optional<StmtPoint> SP = AllocPP.getAs<StmtPoint>())
       if (const ObjCMessageExpr *ME = SP->getStmtAs<ObjCMessageExpr>())
         if (ME->getMethodFamily() == OMF_alloc)
           InterestingMethodContext = InitMethodContext;

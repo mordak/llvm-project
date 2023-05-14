@@ -72,6 +72,7 @@ Defined *ElfSym::globalOffsetTable;
 Defined *ElfSym::mipsGp;
 Defined *ElfSym::mipsGpDisp;
 Defined *ElfSym::mipsLocalGp;
+Defined *ElfSym::riscvGlobalPointer;
 Defined *ElfSym::relaIpltStart;
 Defined *ElfSym::relaIpltEnd;
 Defined *ElfSym::tlsModuleBase;

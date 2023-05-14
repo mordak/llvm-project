@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/Sema/TemplateDeduction.h"
 #include "TreeTransform.h"
 #include "TypeLocBuilder.h"
 #include "clang/AST/ASTContext.h"
@@ -37,15 +36,16 @@
 #include "clang/Basic/PartialDiagnostic.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/Specifiers.h"
+#include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Ownership.h"
 #include "clang/Sema/Sema.h"
 #include "clang/Sema/Template.h"
+#include "clang/Sema/TemplateDeduction.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/FoldingSet.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -720,7 +720,7 @@ private:
     // FIXME: What if we encounter multiple packs with different numbers of
     // pre-expanded expansions? (This should already have been diagnosed
     // during substitution.)
-    if (Optional<unsigned> ExpandedPackExpansions =
+    if (std::optional<unsigned> ExpandedPackExpansions =
             getExpandedPackSize(TemplateParams->getParam(Index)))
       FixedNumExpansions = ExpandedPackExpansions;
 
@@ -757,11 +757,8 @@ private:
       SmallVector<UnexpandedParameterPack, 2> Unexpanded;
       S.collectUnexpandedParameterPacks(Pattern, Unexpanded);
       for (unsigned I = 0, N = Unexpanded.size(); I != N; ++I) {
-        UnexpandedParameterPack U = Unexpanded[I];
-        if (U.first.is<const SubstTemplateTypeParmPackType *>() ||
-            U.first.is<const SubstNonTypeTemplateParmPackExpr *>())
-          continue;
-        auto [Depth, Index] = getDepthAndIndex(U);
+        unsigned Depth, Index;
+        std::tie(Depth, Index) = getDepthAndIndex(Unexpanded[I]);
         if (Depth == Info.getDeducedDepth())
           AddPack(Index);
       }
@@ -962,7 +959,7 @@ public:
 
       // If we have a pre-expanded pack and we didn't deduce enough elements
       // for it, fail deduction.
-      if (Optional<unsigned> Expansions = getExpandedPackSize(Param)) {
+      if (std::optional<unsigned> Expansions = getExpandedPackSize(Param)) {
         if (*Expansions != PackElements) {
           Info.Param = makeTemplateParameter(Param);
           Info.FirstArg = Result;
@@ -984,7 +981,7 @@ private:
   unsigned PackElements = 0;
   bool IsPartiallyExpanded = false;
   /// The number of expansions, if we have a fully-expanded pack in this scope.
-  Optional<unsigned> FixedNumExpansions;
+  std::optional<unsigned> FixedNumExpansions;
 
   SmallVector<DeducedPack, 2> Packs;
 };
@@ -1109,7 +1106,7 @@ DeduceTemplateArguments(Sema &S,
       // If the parameter type contains an explicitly-specified pack that we
       // could not expand, skip the number of parameters notionally created
       // by the expansion.
-      Optional<unsigned> NumExpansions = Expansion->getNumExpansions();
+      std::optional<unsigned> NumExpansions = Expansion->getNumExpansions();
       if (NumExpansions && !PackScope.isPartiallyExpanded()) {
         for (unsigned I = 0; I != *NumExpansions && ArgIdx < NumArgs;
              ++I, ++ArgIdx)
@@ -1617,7 +1614,9 @@ static Sema::TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
       llvm_unreachable("Type nodes handled above");
 
     case Type::Auto:
-      // FIXME: Implement deduction in dependent case.
+      // FIXME: It's not clear whether we should deduce the template arguments
+      // of a constrained deduced type. For now we treat them as a non-deduced
+      // context.
       if (P->isDependentType())
         return Sema::TDK_Success;
       [[fallthrough]];
@@ -2082,7 +2081,7 @@ static Sema::TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
             const auto *ACM = dyn_cast<ConstantMatrixType>(A);
             const auto *ADM = dyn_cast<DependentSizedMatrixType>(A);
             if (!ParamExpr->isValueDependent()) {
-              Optional<llvm::APSInt> ParamConst =
+              std::optional<llvm::APSInt> ParamConst =
                   ParamExpr->getIntegerConstantExpr(S.Context);
               if (!ParamConst)
                 return Sema::TDK_NonDeducedMismatch;
@@ -2094,7 +2093,7 @@ static Sema::TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
               }
 
               Expr *ArgExpr = (ADM->*GetArgDimensionExpr)();
-              if (Optional<llvm::APSInt> ArgConst =
+              if (std::optional<llvm::APSInt> ArgConst =
                       ArgExpr->getIntegerConstantExpr(S.Context))
                 if (*ArgConst == *ParamConst)
                   return Sema::TDK_Success;
@@ -2870,10 +2869,10 @@ CheckDeducedArgumentConstraints(Sema &S, TemplateDeclT *Template,
 
   bool NeedsReplacement = DeducedArgsNeedReplacement(Template);
   TemplateArgumentList DeducedTAL{TemplateArgumentList::OnStack,
-                                  SugaredDeducedArgs};
+                                  CanonicalDeducedArgs};
 
   MultiLevelTemplateArgumentList MLTAL = S.getTemplateInstantiationArgs(
-      Template, /*Final=*/true,
+      Template, /*Final=*/false,
       /*InnerMost=*/NeedsReplacement ? nullptr : &DeducedTAL,
       /*RelativeToPrimary=*/true, /*Pattern=*/
       nullptr, /*ForConstraintInstantiation=*/true);
@@ -2883,7 +2882,7 @@ CheckDeducedArgumentConstraints(Sema &S, TemplateDeclT *Template,
   // not class-scope explicit specialization, so replace with Deduced Args
   // instead of adding to inner-most.
   if (NeedsReplacement)
-    MLTAL.replaceInnermostTemplateArguments(SugaredDeducedArgs);
+    MLTAL.replaceInnermostTemplateArguments(Template, CanonicalDeducedArgs);
 
   if (S.CheckConstraintSatisfaction(Template, AssociatedConstraints, MLTAL,
                                     Info.getLocation(),
@@ -3267,7 +3266,7 @@ Sema::TemplateDeductionResult Sema::SubstituteExplicitTemplateArguments(
       auto *Param = TemplateParams->getParam(CanonicalBuilder.size() - 1);
       // If this is a fully-saturated fixed-size pack, it should be
       // fully-substituted, not partially-substituted.
-      Optional<unsigned> Expansions = getExpandedPackSize(Param);
+      std::optional<unsigned> Expansions = getExpandedPackSize(Param);
       if (!Expansions || Arg.pack_size() < *Expansions) {
         PartiallySubstitutedPackIndex = CanonicalBuilder.size() - 1;
         CurrentInstantiationScope->SetPartiallySubstitutedPack(
@@ -3593,11 +3592,28 @@ Sema::TemplateDeductionResult Sema::FinishTemplateArgumentDeduction(
   DeclContext *Owner = FunctionTemplate->getDeclContext();
   if (FunctionTemplate->getFriendObjectKind())
     Owner = FunctionTemplate->getLexicalDeclContext();
+  FunctionDecl *FD = FunctionTemplate->getTemplatedDecl();
+  // additional check for inline friend, 
+  // ```
+  //   template <class F1> int foo(F1 X);
+  //   template <int A1> struct A {
+  //     template <class F1> friend int foo(F1 X) { return A1; }
+  //   };
+  //   template struct A<1>;
+  //   int a = foo(1.0);
+  // ```
+  const FunctionDecl *FDFriend;
+  if (FD->getFriendObjectKind() == Decl::FriendObjectKind::FOK_None &&
+      FD->isDefined(FDFriend, /*CheckForPendingFriendDefinition*/ true) &&
+      FDFriend->getFriendObjectKind() != Decl::FriendObjectKind::FOK_None) {
+    FD = const_cast<FunctionDecl *>(FDFriend);
+    Owner = FD->getLexicalDeclContext();
+  }
   MultiLevelTemplateArgumentList SubstArgs(
       FunctionTemplate, CanonicalDeducedArgumentList->asArray(),
       /*Final=*/false);
   Specialization = cast_or_null<FunctionDecl>(
-      SubstDecl(FunctionTemplate->getTemplatedDecl(), Owner, SubstArgs));
+      SubstDecl(FD, Owner, SubstArgs));
   if (!Specialization || Specialization->isInvalidDecl())
     return TDK_SubstitutionFailure;
 
@@ -4184,7 +4200,8 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
       // If the parameter type contains an explicitly-specified pack that we
       // could not expand, skip the number of parameters notionally created
       // by the expansion.
-      Optional<unsigned> NumExpansions = ParamExpansion->getNumExpansions();
+      std::optional<unsigned> NumExpansions =
+          ParamExpansion->getNumExpansions();
       if (NumExpansions && !PackScope.isPartiallyExpanded()) {
         for (unsigned I = 0; I != *NumExpansions && ArgIdx < Args.size();
              ++I, ++ArgIdx) {
@@ -4656,8 +4673,8 @@ static bool CheckDeducedPlaceholderConstraints(Sema &S, const AutoType &Type,
                                   /*PartialTemplateArgs=*/false,
                                   SugaredConverted, CanonicalConverted))
     return true;
-  MultiLevelTemplateArgumentList MLTAL(Concept, SugaredConverted,
-                                       /*Final=*/true);
+  MultiLevelTemplateArgumentList MLTAL(Concept, CanonicalConverted,
+                                       /*Final=*/false);
   if (S.CheckConstraintSatisfaction(Concept, {Concept->getConstraintExpr()},
                                     MLTAL, TypeLoc.getLocalSourceRange(),
                                     Satisfaction))
@@ -5282,8 +5299,8 @@ FunctionTemplateDecl *Sema::getMoreSpecializedTemplate(
   //   function parameters that positionally correspond between the two
   //   templates are not of the same type, neither template is more specialized
   //   than the other.
-  if (!TemplateParameterListsAreEqual(
-          TPL1, TPL2, false, Sema::TPL_TemplateMatch, SourceLocation(), true))
+  if (!TemplateParameterListsAreEqual(TPL1, TPL2, false,
+                                      Sema::TPL_TemplateParamsEquivalent))
     return nullptr;
 
   for (unsigned i = 0; i < NumParams1; ++i)
@@ -5640,8 +5657,8 @@ getMoreSpecialized(Sema &S, QualType T1, QualType T2, TemplateLikeDecl *P1,
   // function parameters that positionally correspond between the two
   // templates are not of the same type, neither template is more specialized
   // than the other.
-  if (!S.TemplateParameterListsAreEqual(
-          TPL1, TPL2, false, Sema::TPL_TemplateMatch, SourceLocation(), true))
+  if (!S.TemplateParameterListsAreEqual(TPL1, TPL2, false,
+                                        Sema::TPL_TemplateParamsEquivalent))
     return nullptr;
 
   if (!TemplateArgumentListAreEqual(S.getASTContext())(P1, P2))

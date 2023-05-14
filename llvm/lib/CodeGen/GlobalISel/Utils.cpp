@@ -711,14 +711,14 @@ bool llvm::isKnownNeverNaN(Register Val, const MachineRegisterInfo &MRI,
 
 Align llvm::inferAlignFromPtrInfo(MachineFunction &MF,
                                   const MachinePointerInfo &MPO) {
-  auto PSV = MPO.V.dyn_cast<const PseudoSourceValue *>();
+  auto PSV = dyn_cast_if_present<const PseudoSourceValue *>(MPO.V);
   if (auto FSPV = dyn_cast_or_null<FixedStackPseudoSourceValue>(PSV)) {
     MachineFrameInfo &MFI = MF.getFrameInfo();
     return commonAlignment(MFI.getObjectAlign(FSPV->getFrameIndex()),
                            MPO.Offset);
   }
 
-  if (const Value *V = MPO.V.dyn_cast<const Value *>()) {
+  if (const Value *V = dyn_cast_if_present<const Value *>(MPO.V)) {
     const Module *M = MF.getFunction().getParent();
     return V->getPointerAlignment(M->getDataLayout());
   }
@@ -797,7 +797,7 @@ llvm::ConstantFoldCTLZ(Register Src, const MachineRegisterInfo &MRI) {
     auto MaybeCst = getIConstantVRegVal(R, MRI);
     if (!MaybeCst)
       return std::nullopt;
-    return MaybeCst->countLeadingZeros();
+    return MaybeCst->countl_zero();
   };
   if (Ty.isVector()) {
     // Try to constant fold each element.
@@ -1035,14 +1035,19 @@ std::optional<ValueAndVReg> getAnyConstantSplat(Register VReg,
   if (!MI)
     return std::nullopt;
 
-  if (!isBuildVectorOp(MI->getOpcode()))
+  bool isConcatVectorsOp = MI->getOpcode() == TargetOpcode::G_CONCAT_VECTORS;
+  if (!isBuildVectorOp(MI->getOpcode()) && !isConcatVectorsOp)
     return std::nullopt;
 
   std::optional<ValueAndVReg> SplatValAndReg;
   for (MachineOperand &Op : MI->uses()) {
     Register Element = Op.getReg();
+    // If we have a G_CONCAT_VECTOR, we recursively look into the
+    // vectors that we're concatenating to see if they're splats.
     auto ElementValAndReg =
-        getAnyConstantVRegValWithLookThrough(Element, MRI, true, true);
+        isConcatVectorsOp
+            ? getAnyConstantSplat(Element, MRI, AllowUndef)
+            : getAnyConstantVRegValWithLookThrough(Element, MRI, true, true);
 
     // If AllowUndef, treat undef as value that will result in a constant splat.
     if (!ElementValAndReg) {
@@ -1055,7 +1060,7 @@ std::optional<ValueAndVReg> getAnyConstantSplat(Register VReg,
     if (!SplatValAndReg)
       SplatValAndReg = ElementValAndReg;
 
-    // Different constant then the one already recorded, not a constant splat.
+    // Different constant than the one already recorded, not a constant splat.
     if (SplatValAndReg->Value != ElementValAndReg->Value)
       return std::nullopt;
   }

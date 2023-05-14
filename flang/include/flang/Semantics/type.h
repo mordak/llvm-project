@@ -266,7 +266,8 @@ public:
 
   bool MightBeParameterized() const;
   bool IsForwardReferenced() const;
-  bool HasDefaultInitialization(bool ignoreAllocatable = false) const;
+  bool HasDefaultInitialization(
+      bool ignoreAllocatable = false, bool ignorePointer = true) const;
   bool HasDestruction() const;
 
   // The "raw" type parameter list is a simple transcription from the
@@ -444,6 +445,8 @@ inline DerivedTypeSpec *DeclTypeSpec::AsDerived() {
 inline const DerivedTypeSpec *DeclTypeSpec::AsDerived() const {
   return const_cast<DeclTypeSpec *>(this)->AsDerived();
 }
+
+bool IsInteroperableIntrinsicType(const DeclTypeSpec &);
 
 } // namespace Fortran::semantics
 #endif // FORTRAN_SEMANTICS_TYPE_H_

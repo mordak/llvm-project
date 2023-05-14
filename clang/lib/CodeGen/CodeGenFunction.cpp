@@ -361,17 +361,18 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   bool HasOnlyLifetimeMarkers =
       HasCleanups && EHStack.containsOnlyLifetimeMarkers(PrologueCleanupDepth);
   bool EmitRetDbgLoc = !HasCleanups || HasOnlyLifetimeMarkers;
+
+  std::optional<ApplyDebugLocation> OAL;
   if (HasCleanups) {
     // Make sure the line table doesn't jump back into the body for
     // the ret after it's been at EndLoc.
-    Optional<ApplyDebugLocation> AL;
     if (CGDebugInfo *DI = getDebugInfo()) {
       if (OnlySimpleReturnStmts)
         DI->EmitLocation(Builder, EndLoc);
       else
         // We may not have a valid end location. Try to apply it anyway, and
         // fall back to an artificial location if needed.
-        AL = ApplyDebugLocation::CreateDefaultArtificial(*this, EndLoc);
+        OAL = ApplyDebugLocation::CreateDefaultArtificial(*this, EndLoc);
     }
 
     PopCleanupBlocks(PrologueCleanupDepth);
@@ -505,7 +506,7 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
                      llvm::utostr(LargestVectorWidth));
 
   // Add vscale_range attribute if appropriate.
-  Optional<std::pair<unsigned, unsigned>> VScaleRange =
+  std::optional<std::pair<unsigned, unsigned>> VScaleRange =
       getContext().getTargetInfo().getVScaleRange(getLangOpts());
   if (VScaleRange) {
     CurFn->addFnAttr(llvm::Attribute::getWithVScaleRangeArgs(
@@ -729,31 +730,38 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
 
   if (D) {
     const bool SanitizeBounds = SanOpts.hasOneOf(SanitizerKind::Bounds);
+    SanitizerMask no_sanitize_mask;
     bool NoSanitizeCoverage = false;
 
     for (auto *Attr : D->specific_attrs<NoSanitizeAttr>()) {
-      // Apply the no_sanitize* attributes to SanOpts.
-      SanitizerMask mask = Attr->getMask();
-      SanOpts.Mask &= ~mask;
-      if (mask & SanitizerKind::Address)
-        SanOpts.set(SanitizerKind::KernelAddress, false);
-      if (mask & SanitizerKind::KernelAddress)
-        SanOpts.set(SanitizerKind::Address, false);
-      if (mask & SanitizerKind::HWAddress)
-        SanOpts.set(SanitizerKind::KernelHWAddress, false);
-      if (mask & SanitizerKind::KernelHWAddress)
-        SanOpts.set(SanitizerKind::HWAddress, false);
-
+      no_sanitize_mask |= Attr->getMask();
       // SanitizeCoverage is not handled by SanOpts.
       if (Attr->hasCoverage())
         NoSanitizeCoverage = true;
     }
+
+    // Apply the no_sanitize* attributes to SanOpts.
+    SanOpts.Mask &= ~no_sanitize_mask;
+    if (no_sanitize_mask & SanitizerKind::Address)
+      SanOpts.set(SanitizerKind::KernelAddress, false);
+    if (no_sanitize_mask & SanitizerKind::KernelAddress)
+      SanOpts.set(SanitizerKind::Address, false);
+    if (no_sanitize_mask & SanitizerKind::HWAddress)
+      SanOpts.set(SanitizerKind::KernelHWAddress, false);
+    if (no_sanitize_mask & SanitizerKind::KernelHWAddress)
+      SanOpts.set(SanitizerKind::HWAddress, false);
 
     if (SanitizeBounds && !SanOpts.hasOneOf(SanitizerKind::Bounds))
       Fn->addFnAttr(llvm::Attribute::NoSanitizeBounds);
 
     if (NoSanitizeCoverage && CGM.getCodeGenOpts().hasSanitizeCoverage())
       Fn->addFnAttr(llvm::Attribute::NoSanitizeCoverage);
+
+    // Some passes need the non-negated no_sanitize attribute. Pass them on.
+    if (CGM.getCodeGenOpts().hasSanitizeBinaryMetadata()) {
+      if (no_sanitize_mask & SanitizerKind::Thread)
+        Fn->addFnAttr("no_sanitize_thread");
+    }
   }
 
   if (ShouldSkipSanitizerInstrumentation()) {
@@ -1103,8 +1111,9 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
     auto AI = CurFn->arg_begin();
     if (CurFnInfo->getReturnInfo().isSRetAfterThis())
       ++AI;
-    ReturnValue = Address(&*AI, ConvertType(RetTy),
-                          CurFnInfo->getReturnInfo().getIndirectAlign());
+    ReturnValue =
+        Address(&*AI, ConvertType(RetTy),
+                CurFnInfo->getReturnInfo().getIndirectAlign(), KnownNonNull);
     if (!CurFnInfo->getReturnInfo().getIndirectByVal()) {
       ReturnValuePointer =
           CreateDefaultAlignTempAlloca(Int8PtrTy, "result.ptr");
@@ -1124,8 +1133,8 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
         cast<llvm::GetElementPtrInst>(Addr)->getResultElementType();
     ReturnValuePointer = Address(Addr, Ty, getPointerAlign());
     Addr = Builder.CreateAlignedLoad(Ty, Addr, getPointerAlign(), "agg.result");
-    ReturnValue =
-        Address(Addr, ConvertType(RetTy), CGM.getNaturalTypeAlignment(RetTy));
+    ReturnValue = Address(Addr, ConvertType(RetTy),
+                          CGM.getNaturalTypeAlignment(RetTy), KnownNonNull);
   } else {
     ReturnValue = CreateIRTemp(RetTy, "retval");
 
@@ -2610,6 +2619,16 @@ void CodeGenFunction::checkTargetFeatures(SourceLocation Loc,
     }))
       CGM.getDiags().Report(Loc, diag::err_function_needs_feature)
           << FD->getDeclName() << TargetDecl->getDeclName() << MissingFeature;
+  } else if (!FD->isMultiVersion() && FD->hasAttr<TargetAttr>()) {
+    llvm::StringMap<bool> CalleeFeatureMap;
+    CGM.getContext().getFunctionFeatureMap(CalleeFeatureMap, TargetDecl);
+
+    for (const auto &F : CalleeFeatureMap) {
+      if (F.getValue() && (!CallerFeatureMap.lookup(F.getKey()) ||
+                           !CallerFeatureMap.find(F.getKey())->getValue()))
+        CGM.getDiags().Report(Loc, diag::err_function_needs_feature)
+            << FD->getDeclName() << TargetDecl->getDeclName() << F.getKey();
+    }
   }
 }
 

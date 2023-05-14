@@ -896,7 +896,7 @@ ELFDumper<ELFT>::dumpBBAddrMapSection(const Elf_Shdr *Shdr) {
   while (Cur && Cur.tell() < Content.size()) {
     if (Shdr->sh_type == ELF::SHT_LLVM_BB_ADDR_MAP) {
       Version = Data.getU8(Cur);
-      if (Cur && Version > 1)
+      if (Cur && Version > 2)
         return createStringError(
             errc::invalid_argument,
             "invalid SHT_LLVM_BB_ADDR_MAP section version: " +
@@ -907,11 +907,12 @@ ELFDumper<ELFT>::dumpBBAddrMapSection(const Elf_Shdr *Shdr) {
     uint64_t NumBlocks = Data.getULEB128(Cur);
     std::vector<ELFYAML::BBAddrMapEntry::BBEntry> BBEntries;
     // Read the specified number of BB entries, or until decoding fails.
-    for (uint64_t BlockID = 0; Cur && BlockID < NumBlocks; ++BlockID) {
+    for (uint64_t BlockIndex = 0; Cur && BlockIndex < NumBlocks; ++BlockIndex) {
+      uint32_t ID = Version >= 2 ? Data.getULEB128(Cur) : BlockIndex;
       uint64_t Offset = Data.getULEB128(Cur);
       uint64_t Size = Data.getULEB128(Cur);
       uint64_t Metadata = Data.getULEB128(Cur);
-      BBEntries.push_back({Offset, Size, Metadata});
+      BBEntries.push_back({ID, Offset, Size, Metadata});
     }
     Entries.push_back(
         {Version, Feature, Address, /*NumBlocks=*/{}, std::move(BBEntries)});
@@ -1220,6 +1221,7 @@ ELFDumper<ELFT>::dumpNoteSection(const Elf_Shdr *Shdr) {
 
   std::vector<ELFYAML::NoteEntry> Entries;
   ArrayRef<uint8_t> Content = *ContentOrErr;
+  size_t Align = std::max<size_t>(Shdr->sh_addralign, 4);
   while (!Content.empty()) {
     if (Content.size() < sizeof(Elf_Nhdr)) {
       S->Content = yaml::BinaryRef(*ContentOrErr);
@@ -1227,16 +1229,16 @@ ELFDumper<ELFT>::dumpNoteSection(const Elf_Shdr *Shdr) {
     }
 
     const Elf_Nhdr *Header = reinterpret_cast<const Elf_Nhdr *>(Content.data());
-    if (Content.size() < Header->getSize()) {
+    if (Content.size() < Header->getSize(Align)) {
       S->Content = yaml::BinaryRef(*ContentOrErr);
       return S.release();
     }
 
     Elf_Note Note(*Header);
     Entries.push_back(
-        {Note.getName(), Note.getDesc(), (ELFYAML::ELF_NT)Note.getType()});
+        {Note.getName(), Note.getDesc(Align), (ELFYAML::ELF_NT)Note.getType()});
 
-    Content = Content.drop_front(Header->getSize());
+    Content = Content.drop_front(Header->getSize(Align));
   }
 
   S->Notes = std::move(Entries);

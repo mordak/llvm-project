@@ -32,7 +32,7 @@ STATISTIC(NumDeadStore, "Number of dead stores eliminated");
 STATISTIC(NumGlobalCopies, "Number of allocas copied from constant global");
 
 static cl::opt<unsigned> MaxCopiedFromConstantUsers(
-    "instcombine-max-copied-from-constant-users", cl::init(128),
+    "instcombine-max-copied-from-constant-users", cl::init(300),
     cl::desc("Maximum users to visit in copy from constant transform"),
     cl::Hidden);
 
@@ -72,14 +72,14 @@ isOnlyCopiedFromConstantMemory(AAResults *AA, AllocaInst *V,
         continue;
       }
 
-      if (isa<PHINode>(I)) {
+      if (isa<PHINode, SelectInst>(I)) {
         // We set IsOffset=true, to forbid the memcpy from occurring after the
         // phi: If one of the phi operands is not based on the alloca, we
         // would incorrectly omit a write.
         Worklist.emplace_back(I, true);
         continue;
       }
-      if (isa<BitCastInst>(I) || isa<AddrSpaceCastInst>(I)) {
+      if (isa<BitCastInst, AddrSpaceCastInst>(I)) {
         // If uses of the bitcast are ok, we are ok.
         Worklist.emplace_back(I, IsOffset);
         continue;
@@ -219,7 +219,7 @@ static Instruction *simplifyAllocaArraySize(InstCombinerImpl &IC,
       // Now that I is pointing to the first non-allocation-inst in the block,
       // insert our getelementptr instruction...
       //
-      Type *IdxTy = IC.getDataLayout().getIntPtrType(AI.getType());
+      Type *IdxTy = IC.getDataLayout().getIndexType(AI.getType());
       Value *NullIdx = Constant::getNullValue(IdxTy);
       Value *Idx[2] = {NullIdx, NullIdx};
       Instruction *GEP = GetElementPtrInst::CreateInBounds(
@@ -235,11 +235,12 @@ static Instruction *simplifyAllocaArraySize(InstCombinerImpl &IC,
   if (isa<UndefValue>(AI.getArraySize()))
     return IC.replaceInstUsesWith(AI, Constant::getNullValue(AI.getType()));
 
-  // Ensure that the alloca array size argument has type intptr_t, so that
-  // any casting is exposed early.
-  Type *IntPtrTy = IC.getDataLayout().getIntPtrType(AI.getType());
-  if (AI.getArraySize()->getType() != IntPtrTy) {
-    Value *V = IC.Builder.CreateIntCast(AI.getArraySize(), IntPtrTy, false);
+  // Ensure that the alloca array size argument has type equal to the offset
+  // size of the alloca() pointer, which, in the tyical case, is intptr_t,
+  // so that any casting is exposed early.
+  Type *PtrIdxTy = IC.getDataLayout().getIndexType(AI.getType());
+  if (AI.getArraySize()->getType() != PtrIdxTy) {
+    Value *V = IC.Builder.CreateIntCast(AI.getArraySize(), PtrIdxTy, false);
     return IC.replaceOperand(AI, 0, V);
   }
 
@@ -259,35 +260,99 @@ namespace {
 // instruction.
 class PointerReplacer {
 public:
-  PointerReplacer(InstCombinerImpl &IC) : IC(IC) {}
+  PointerReplacer(InstCombinerImpl &IC, Instruction &Root, unsigned SrcAS)
+      : IC(IC), Root(Root), FromAS(SrcAS) {}
 
-  bool collectUsers(Instruction &I);
-  void replacePointer(Instruction &I, Value *V);
+  bool collectUsers();
+  void replacePointer(Value *V);
 
 private:
+  bool collectUsersRecursive(Instruction &I);
   void replace(Instruction *I);
   Value *getReplacement(Value *I);
+  bool isAvailable(Instruction *I) const {
+    return I == &Root || Worklist.contains(I);
+  }
 
+  bool isEqualOrValidAddrSpaceCast(const Instruction *I,
+                                   unsigned FromAS) const {
+    const auto *ASC = dyn_cast<AddrSpaceCastInst>(I);
+    if (!ASC)
+      return false;
+    unsigned ToAS = ASC->getDestAddressSpace();
+    return (FromAS == ToAS) || IC.isValidAddrSpaceCast(FromAS, ToAS);
+  }
+
+  SmallPtrSet<Instruction *, 32> ValuesToRevisit;
   SmallSetVector<Instruction *, 4> Worklist;
   MapVector<Value *, Value *> WorkMap;
   InstCombinerImpl &IC;
+  Instruction &Root;
+  unsigned FromAS;
 };
 } // end anonymous namespace
 
-bool PointerReplacer::collectUsers(Instruction &I) {
+bool PointerReplacer::collectUsers() {
+  if (!collectUsersRecursive(Root))
+    return false;
+
+  // Ensure that all outstanding (indirect) users of I
+  // are inserted into the Worklist. Return false
+  // otherwise.
+  for (auto *Inst : ValuesToRevisit)
+    if (!Worklist.contains(Inst))
+      return false;
+  return true;
+}
+
+bool PointerReplacer::collectUsersRecursive(Instruction &I) {
   for (auto *U : I.users()) {
     auto *Inst = cast<Instruction>(&*U);
     if (auto *Load = dyn_cast<LoadInst>(Inst)) {
       if (Load->isVolatile())
         return false;
       Worklist.insert(Load);
-    } else if (isa<GetElementPtrInst>(Inst) || isa<BitCastInst>(Inst)) {
+    } else if (auto *PHI = dyn_cast<PHINode>(Inst)) {
+      // All incoming values must be instructions for replacability
+      if (any_of(PHI->incoming_values(),
+                 [](Value *V) { return !isa<Instruction>(V); }))
+        return false;
+
+      // If at least one incoming value of the PHI is not in Worklist,
+      // store the PHI for revisiting and skip this iteration of the
+      // loop.
+      if (any_of(PHI->incoming_values(), [this](Value *V) {
+            return !isAvailable(cast<Instruction>(V));
+          })) {
+        ValuesToRevisit.insert(Inst);
+        continue;
+      }
+
+      Worklist.insert(PHI);
+      if (!collectUsersRecursive(*PHI))
+        return false;
+    } else if (auto *SI = dyn_cast<SelectInst>(Inst)) {
+      if (!isa<Instruction>(SI->getTrueValue()) ||
+          !isa<Instruction>(SI->getFalseValue()))
+        return false;
+
+      if (!isAvailable(cast<Instruction>(SI->getTrueValue())) ||
+          !isAvailable(cast<Instruction>(SI->getFalseValue()))) {
+        ValuesToRevisit.insert(Inst);
+        continue;
+      }
+      Worklist.insert(SI);
+      if (!collectUsersRecursive(*SI))
+        return false;
+    } else if (isa<GetElementPtrInst, BitCastInst>(Inst)) {
       Worklist.insert(Inst);
-      if (!collectUsers(*Inst))
+      if (!collectUsersRecursive(*Inst))
         return false;
     } else if (auto *MI = dyn_cast<MemTransferInst>(Inst)) {
       if (MI->isVolatile())
         return false;
+      Worklist.insert(Inst);
+    } else if (isEqualOrValidAddrSpaceCast(Inst, FromAS)) {
       Worklist.insert(Inst);
     } else if (Inst->isLifetimeStartOrEnd()) {
       continue;
@@ -318,6 +383,14 @@ void PointerReplacer::replace(Instruction *I) {
     IC.InsertNewInstWith(NewI, *LT);
     IC.replaceInstUsesWith(*LT, NewI);
     WorkMap[LT] = NewI;
+  } else if (auto *PHI = dyn_cast<PHINode>(I)) {
+    Type *NewTy = getReplacement(PHI->getIncomingValue(0))->getType();
+    auto *NewPHI = PHINode::Create(NewTy, PHI->getNumIncomingValues(),
+                                   PHI->getName(), PHI);
+    for (unsigned int I = 0; I < PHI->getNumIncomingValues(); ++I)
+      NewPHI->addIncoming(getReplacement(PHI->getIncomingValue(I)),
+                          PHI->getIncomingBlock(I));
+    WorkMap[PHI] = NewPHI;
   } else if (auto *GEP = dyn_cast<GetElementPtrInst>(I)) {
     auto *V = getReplacement(GEP->getPointerOperand());
     assert(V && "Operand not replaced");
@@ -338,6 +411,13 @@ void PointerReplacer::replace(Instruction *I) {
     IC.InsertNewInstWith(NewI, *BC);
     NewI->takeName(BC);
     WorkMap[BC] = NewI;
+  } else if (auto *SI = dyn_cast<SelectInst>(I)) {
+    auto *NewSI = SelectInst::Create(
+        SI->getCondition(), getReplacement(SI->getTrueValue()),
+        getReplacement(SI->getFalseValue()), SI->getName(), nullptr, SI);
+    IC.InsertNewInstWith(NewSI, *SI);
+    NewSI->takeName(SI);
+    WorkMap[SI] = NewSI;
   } else if (auto *MemCpy = dyn_cast<MemTransferInst>(I)) {
     auto *SrcV = getReplacement(MemCpy->getRawSource());
     // The pointer may appear in the destination of a copy, but we don't want to
@@ -359,18 +439,34 @@ void PointerReplacer::replace(Instruction *I) {
 
     IC.eraseInstFromFunction(*MemCpy);
     WorkMap[MemCpy] = NewI;
+  } else if (auto *ASC = dyn_cast<AddrSpaceCastInst>(I)) {
+    auto *V = getReplacement(ASC->getPointerOperand());
+    assert(V && "Operand not replaced");
+    assert(isEqualOrValidAddrSpaceCast(
+               ASC, V->getType()->getPointerAddressSpace()) &&
+           "Invalid address space cast!");
+    auto *NewV = V;
+    if (V->getType()->getPointerAddressSpace() !=
+        ASC->getType()->getPointerAddressSpace()) {
+      auto *NewI = new AddrSpaceCastInst(V, ASC->getType(), "");
+      NewI->takeName(ASC);
+      IC.InsertNewInstWith(NewI, *ASC);
+      NewV = NewI;
+    }
+    IC.replaceInstUsesWith(*ASC, NewV);
+    IC.eraseInstFromFunction(*ASC);
   } else {
     llvm_unreachable("should never reach here");
   }
 }
 
-void PointerReplacer::replacePointer(Instruction &I, Value *V) {
+void PointerReplacer::replacePointer(Value *V) {
 #ifndef NDEBUG
-  auto *PT = cast<PointerType>(I.getType());
+  auto *PT = cast<PointerType>(Root.getType());
   auto *NT = cast<PointerType>(V->getType());
-  assert(PT != NT && PT->hasSameElementTypeAs(NT) && "Invalid usage");
+  assert(PT != NT && "Invalid usage");
 #endif
-  WorkMap[&I] = V;
+  WorkMap[&Root] = V;
 
   for (Instruction *Workitem : Worklist)
     replace(Workitem);
@@ -451,13 +547,13 @@ Instruction *InstCombinerImpl::visitAllocaInst(AllocaInst &AI) {
         return NewI;
       }
 
-      PointerReplacer PtrReplacer(*this);
-      if (PtrReplacer.collectUsers(AI)) {
+      PointerReplacer PtrReplacer(*this, AI, SrcAddrSpace);
+      if (PtrReplacer.collectUsers()) {
         for (Instruction *Delete : ToDelete)
           eraseInstFromFunction(*Delete);
 
         Value *Cast = Builder.CreateBitCast(TheSrc, DestTy);
-        PtrReplacer.replacePointer(AI, Cast);
+        PtrReplacer.replacePointer(Cast);
         ++NumGlobalCopies;
       }
     }
@@ -957,6 +1053,8 @@ static bool canSimplifyNullLoadOrGEP(LoadInst &LI, Value *Op) {
 
 Instruction *InstCombinerImpl::visitLoadInst(LoadInst &LI) {
   Value *Op = LI.getOperand(0);
+  if (Value *Res = simplifyLoadInst(&LI, Op, SQ.getWithInstruction(&LI)))
+    return replaceInstUsesWith(LI, Res);
 
   // Try to canonicalize the loaded type.
   if (Instruction *Res = combineLoadToOperationType(*this, LI))

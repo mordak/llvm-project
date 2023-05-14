@@ -128,8 +128,8 @@ public:
   Instruction *commonCastTransforms(CastInst &CI);
   Instruction *commonPointerCastTransforms(CastInst &CI);
   Instruction *visitTrunc(TruncInst &CI);
-  Instruction *visitZExt(ZExtInst &CI);
-  Instruction *visitSExt(SExtInst &CI);
+  Instruction *visitZExt(ZExtInst &Zext);
+  Instruction *visitSExt(SExtInst &Sext);
   Instruction *visitFPTrunc(FPTruncInst &CI);
   Instruction *visitFPExt(CastInst &CI);
   Instruction *visitFPToUI(FPToUIInst &FI);
@@ -150,7 +150,6 @@ public:
   Instruction *visitPHINode(PHINode &PN);
   Instruction *visitGetElementPtrInst(GetElementPtrInst &GEP);
   Instruction *visitGEPOfGEP(GetElementPtrInst &GEP, GEPOperator *Src);
-  Instruction *visitGEPOfBitcast(BitCastInst *BCI, GetElementPtrInst &GEP);
   Instruction *visitAllocaInst(AllocaInst &AI);
   Instruction *visitAllocSite(Instruction &FI);
   Instruction *visitFree(CallInst &FI, Value *FreedOp);
@@ -249,9 +248,9 @@ private:
   /// \return null if the transformation cannot be performed. If the
   /// transformation can be performed the new instruction that replaces the
   /// (zext icmp) pair will be returned.
-  Instruction *transformZExtICmp(ICmpInst *ICI, ZExtInst &CI);
+  Instruction *transformZExtICmp(ICmpInst *Cmp, ZExtInst &Zext);
 
-  Instruction *transformSExtICmp(ICmpInst *ICI, Instruction &CI);
+  Instruction *transformSExtICmp(ICmpInst *Cmp, SExtInst &Sext);
 
   bool willNotOverflowSignedAdd(const Value *LHS, const Value *RHS,
                                 const Instruction &CxtI) const {
@@ -378,6 +377,7 @@ private:
   Instruction *foldLShrOverflowBit(BinaryOperator &I);
   Instruction *foldExtractOfOverflowIntrinsic(ExtractValueInst &EV);
   Instruction *foldIntrinsicWithOverflowCommon(IntrinsicInst *II);
+  Instruction *foldIntrinsicIsFPClass(IntrinsicInst &II);
   Instruction *foldFPSignBitOps(BinaryOperator &I);
   Instruction *foldFDivConstantDivisor(BinaryOperator &I);
 
@@ -549,7 +549,7 @@ public:
                            ICmpInst::Predicate Cond, Instruction &I);
   Instruction *foldSelectICmp(ICmpInst::Predicate Pred, SelectInst *SI,
                               Value *RHS, const ICmpInst &I);
-  Instruction *foldAllocaCmp(ICmpInst &ICI, const AllocaInst *Alloca);
+  bool foldAllocaCmp(AllocaInst *Alloca);
   Instruction *foldCmpLoadFromIndexedGlobal(LoadInst *LI,
                                             GetElementPtrInst *GEP,
                                             GlobalVariable *GV, CmpInst &ICI,
@@ -564,6 +564,7 @@ public:
   Instruction *foldICmpUsingKnownBits(ICmpInst &Cmp);
   Instruction *foldICmpWithDominatingICmp(ICmpInst &Cmp);
   Instruction *foldICmpWithConstant(ICmpInst &Cmp);
+  Instruction *foldICmpUsingBoolRange(ICmpInst &I);
   Instruction *foldICmpInstWithConstant(ICmpInst &Cmp);
   Instruction *foldICmpInstWithConstantNotInt(ICmpInst &Cmp);
   Instruction *foldICmpInstWithConstantAllowUndef(ICmpInst &Cmp,
@@ -623,6 +624,7 @@ public:
   Instruction *foldICmpEqIntrinsicWithConstant(ICmpInst &ICI, IntrinsicInst *II,
                                                const APInt &C);
   Instruction *foldICmpBitCast(ICmpInst &Cmp);
+  Instruction *foldICmpWithTrunc(ICmpInst &Cmp);
 
   // Helpers of visitSelectInst().
   Instruction *foldSelectOfBools(SelectInst &SI);
@@ -637,7 +639,6 @@ public:
 
   Value *insertRangeTest(Value *V, const APInt &Lo, const APInt &Hi,
                          bool isSigned, bool Inside);
-  Instruction *PromoteCastOfAllocation(BitCastInst &CI, AllocaInst &AI);
   bool mergeStoreIntoSuccessor(StoreInst &SI);
 
   /// Given an initial instruction, check to see if it is the root of a
@@ -650,11 +651,6 @@ public:
   Instruction *SimplifyAnyMemSet(AnyMemSetInst *MI);
 
   Value *EvaluateInDifferentType(Value *V, Type *Ty, bool isSigned);
-
-  /// Returns a value X such that Val = X * Scale, or null if none.
-  ///
-  /// If the multiplication is known not to overflow then NoSignedWrap is set.
-  Value *Descale(Value *Val, APInt Scale, bool &NoSignedWrap);
 };
 
 class Negator final {

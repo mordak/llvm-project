@@ -186,8 +186,8 @@ SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::USUBO, VT, Custom);
 
       // Support carry in as value rather than glue.
-      setOperationAction(ISD::ADDCARRY, VT, Custom);
-      setOperationAction(ISD::SUBCARRY, VT, Custom);
+      setOperationAction(ISD::UADDO_CARRY, VT, Custom);
+      setOperationAction(ISD::USUBO_CARRY, VT, Custom);
 
       // Lower ATOMIC_LOAD and ATOMIC_STORE into normal volatile loads and
       // stores, putting a serialization instruction after the stores.
@@ -399,9 +399,6 @@ SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &TM,
       // Map SETCCs onto one of VCE, VCH or VCHL, swapping the operands
       // and inverting the result as necessary.
       setOperationAction(ISD::SETCC, VT, Custom);
-      setOperationAction(ISD::STRICT_FSETCC, VT, Custom);
-      if (Subtarget.hasVectorEnhancements1())
-        setOperationAction(ISD::STRICT_FSETCCS, VT, Custom);
     }
   }
 
@@ -537,6 +534,15 @@ SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::STRICT_FCEIL, MVT::v2f64, Legal);
     setOperationAction(ISD::STRICT_FTRUNC, MVT::v2f64, Legal);
     setOperationAction(ISD::STRICT_FROUND, MVT::v2f64, Legal);
+
+    setOperationAction(ISD::SETCC, MVT::v2f64, Custom);
+    setOperationAction(ISD::SETCC, MVT::v4f32, Custom);
+    setOperationAction(ISD::STRICT_FSETCC, MVT::v2f64, Custom);
+    setOperationAction(ISD::STRICT_FSETCC, MVT::v4f32, Custom);
+    if (Subtarget.hasVectorEnhancements1()) {
+      setOperationAction(ISD::STRICT_FSETCCS, MVT::v2f64, Custom);
+      setOperationAction(ISD::STRICT_FSETCCS, MVT::v4f32, Custom);
+    }
   }
 
   // The vector enhancements facility 1 has instructions for these.
@@ -642,6 +648,8 @@ SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::VASTART, MVT::Other, Custom);
   setOperationAction(ISD::VACOPY,  MVT::Other, Custom);
   setOperationAction(ISD::VAEND,   MVT::Other, Expand);
+
+  setOperationAction(ISD::GET_ROUNDING, MVT::i32, Custom);
 
   // Codes for which we want to perform some z-specific combinations.
   setTargetDAGCombine({ISD::ZERO_EXTEND,
@@ -779,10 +787,10 @@ bool SystemZVectorConstantInfo::isVectorConstantLegal(
   // IMMEDIATE or a wraparound mask in VECTOR GENERATE MASK.
   uint64_t SplatBitsZ = SplatBits.getZExtValue();
   uint64_t SplatUndefZ = SplatUndef.getZExtValue();
-  uint64_t Lower =
-      (SplatUndefZ & ((uint64_t(1) << findFirstSet(SplatBitsZ)) - 1));
-  uint64_t Upper =
-      (SplatUndefZ & ~((uint64_t(1) << findLastSet(SplatBitsZ)) - 1));
+  unsigned LowerBits = llvm::countr_zero(SplatBitsZ);
+  unsigned UpperBits = llvm::countl_zero(SplatBitsZ);
+  uint64_t Lower = SplatUndefZ & maskTrailingOnes<uint64_t>(LowerBits);
+  uint64_t Upper = SplatUndefZ & maskLeadingOnes<uint64_t>(UpperBits);
   if (tryValue(SplatBitsZ | Upper | Lower))
     return true;
 
@@ -1103,19 +1111,18 @@ getSingleConstraintMatchWeight(AsmOperandInfo &info,
   case 'd': // Data register (equivalent to 'r')
   case 'h': // High-part register
   case 'r': // General-purpose register
-    if (CallOperandVal->getType()->isIntegerTy())
-      weight = CW_Register;
+    weight = CallOperandVal->getType()->isIntegerTy() ? CW_Register : CW_Default;
     break;
 
   case 'f': // Floating-point register
-    if (type->isFloatingPointTy())
-      weight = CW_Register;
+    if (!useSoftFloat())
+      weight = type->isFloatingPointTy() ? CW_Register : CW_Default;
     break;
 
   case 'v': // Vector register
-    if ((type->isVectorTy() || type->isFloatingPointTy()) &&
-        Subtarget.hasVector())
-      weight = CW_Register;
+    if (Subtarget.hasVector())
+      weight = (type->isVectorTy() || type->isFloatingPointTy()) ? CW_Register
+                                                                 : CW_Default;
     break;
 
   case 'I': // Unsigned 8-bit constant
@@ -1177,9 +1184,9 @@ SystemZTargetLowering::getRegForInlineAsmConstraint(
     default: break;
     case 'd': // Data register (equivalent to 'r')
     case 'r': // General-purpose register
-      if (VT == MVT::i64)
+      if (VT.getSizeInBits() == 64)
         return std::make_pair(0U, &SystemZ::GR64BitRegClass);
-      else if (VT == MVT::i128)
+      else if (VT.getSizeInBits() == 128)
         return std::make_pair(0U, &SystemZ::GR128BitRegClass);
       return std::make_pair(0U, &SystemZ::GR32BitRegClass);
 
@@ -1195,18 +1202,19 @@ SystemZTargetLowering::getRegForInlineAsmConstraint(
 
     case 'f': // Floating-point register
       if (!useSoftFloat()) {
-        if (VT == MVT::f64)
+        if (VT.getSizeInBits() == 64)
           return std::make_pair(0U, &SystemZ::FP64BitRegClass);
-        else if (VT == MVT::f128)
+        else if (VT.getSizeInBits() == 128)
           return std::make_pair(0U, &SystemZ::FP128BitRegClass);
         return std::make_pair(0U, &SystemZ::FP32BitRegClass);
       }
       break;
+
     case 'v': // Vector register
       if (Subtarget.hasVector()) {
-        if (VT == MVT::f32)
+        if (VT.getSizeInBits() == 32)
           return std::make_pair(0U, &SystemZ::VR32BitRegClass);
-        if (VT == MVT::f64)
+        if (VT.getSizeInBits() == 64)
           return std::make_pair(0U, &SystemZ::VR64BitRegClass);
         return std::make_pair(0U, &SystemZ::VR128BitRegClass);
       }
@@ -1214,15 +1222,22 @@ SystemZTargetLowering::getRegForInlineAsmConstraint(
     }
   }
   if (Constraint.size() > 0 && Constraint[0] == '{') {
+
+    // A clobber constraint (e.g. ~{f0}) will have MVT::Other which is illegal
+    // to check the size on.
+    auto getVTSizeInBits = [&VT]() {
+      return VT == MVT::Other ? 0 : VT.getSizeInBits();
+    };
+
     // We need to override the default register parsing for GPRs and FPRs
     // because the interpretation depends on VT.  The internal names of
     // the registers are also different from the external names
     // (F0D and F0S instead of F0, etc.).
     if (Constraint[1] == 'r') {
-      if (VT == MVT::i32)
+      if (getVTSizeInBits() == 32)
         return parseRegisterNumber(Constraint, &SystemZ::GR32BitRegClass,
                                    SystemZMC::GR32Regs, 16);
-      if (VT == MVT::i128)
+      if (getVTSizeInBits() == 128)
         return parseRegisterNumber(Constraint, &SystemZ::GR128BitRegClass,
                                    SystemZMC::GR128Regs, 16);
       return parseRegisterNumber(Constraint, &SystemZ::GR64BitRegClass,
@@ -1232,10 +1247,10 @@ SystemZTargetLowering::getRegForInlineAsmConstraint(
       if (useSoftFloat())
         return std::make_pair(
             0u, static_cast<const TargetRegisterClass *>(nullptr));
-      if (VT == MVT::f32)
+      if (getVTSizeInBits() == 32)
         return parseRegisterNumber(Constraint, &SystemZ::FP32BitRegClass,
                                    SystemZMC::FP32Regs, 16);
-      if (VT == MVT::f128)
+      if (getVTSizeInBits() == 128)
         return parseRegisterNumber(Constraint, &SystemZ::FP128BitRegClass,
                                    SystemZMC::FP128Regs, 16);
       return parseRegisterNumber(Constraint, &SystemZ::FP64BitRegClass,
@@ -1245,10 +1260,10 @@ SystemZTargetLowering::getRegForInlineAsmConstraint(
       if (!Subtarget.hasVector())
         return std::make_pair(
             0u, static_cast<const TargetRegisterClass *>(nullptr));
-      if (VT == MVT::f32)
+      if (getVTSizeInBits() == 32)
         return parseRegisterNumber(Constraint, &SystemZ::VR32BitRegClass,
                                    SystemZMC::VR32Regs, 32);
-      if (VT == MVT::f64)
+      if (getVTSizeInBits() == 64)
         return parseRegisterNumber(Constraint, &SystemZ::VR64BitRegClass,
                                    SystemZMC::VR64Regs, 32);
       return parseRegisterNumber(Constraint, &SystemZ::VR128BitRegClass,
@@ -1263,12 +1278,10 @@ SystemZTargetLowering::getRegForInlineAsmConstraint(
 Register
 SystemZTargetLowering::getRegisterByName(const char *RegName, LLT VT,
                                          const MachineFunction &MF) const {
-  const SystemZSubtarget *Subtarget = &MF.getSubtarget<SystemZSubtarget>();
-
   Register Reg =
       StringSwitch<Register>(RegName)
-          .Case("r4", Subtarget->isTargetXPLINK64() ? SystemZ::R4D : 0)
-          .Case("r15", Subtarget->isTargetELF() ? SystemZ::R15D : 0)
+          .Case("r4", Subtarget.isTargetXPLINK64() ? SystemZ::R4D : 0)
+          .Case("r15", Subtarget.isTargetELF() ? SystemZ::R15D : 0)
           .Default(0);
 
   if (Reg)
@@ -1431,10 +1444,8 @@ static SDValue convertValVTToLocVT(SelectionDAG &DAG, const SDLoc &DL,
 
 static SDValue lowerI128ToGR128(SelectionDAG &DAG, SDValue In) {
   SDLoc DL(In);
-  SDValue Lo = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i64, In,
-                           DAG.getIntPtrConstant(0, DL));
-  SDValue Hi = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i64, In,
-                           DAG.getIntPtrConstant(1, DL));
+  SDValue Lo, Hi;
+  std::tie(Lo, Hi) = DAG.SplitScalar(In, DL, MVT::i64, MVT::i64);
   SDNode *Pair = DAG.getMachineNode(SystemZ::PAIR128, DL,
                                     MVT::Untyped, Hi, Lo);
   return SDValue(Pair, 0);
@@ -1453,28 +1464,24 @@ bool SystemZTargetLowering::splitValueIntoRegisterParts(
     SelectionDAG &DAG, const SDLoc &DL, SDValue Val, SDValue *Parts,
     unsigned NumParts, MVT PartVT, std::optional<CallingConv::ID> CC) const {
   EVT ValueVT = Val.getValueType();
-  assert((ValueVT != MVT::i128 ||
-          ((NumParts == 1 && PartVT == MVT::Untyped) ||
-           (NumParts == 2 && PartVT == MVT::i64))) &&
-         "Unknown handling of i128 value.");
-  if (ValueVT == MVT::i128 && NumParts == 1) {
+  if (ValueVT.getSizeInBits() == 128 && NumParts == 1 && PartVT == MVT::Untyped) {
     // Inline assembly operand.
-    Parts[0] = lowerI128ToGR128(DAG, Val);
+    Parts[0] = lowerI128ToGR128(DAG, DAG.getBitcast(MVT::i128, Val));
     return true;
   }
+
   return false;
 }
 
 SDValue SystemZTargetLowering::joinRegisterPartsIntoValue(
     SelectionDAG &DAG, const SDLoc &DL, const SDValue *Parts, unsigned NumParts,
     MVT PartVT, EVT ValueVT, std::optional<CallingConv::ID> CC) const {
-  assert((ValueVT != MVT::i128 ||
-          ((NumParts == 1 && PartVT == MVT::Untyped) ||
-           (NumParts == 2 && PartVT == MVT::i64))) &&
-         "Unknown handling of i128 value.");
-  if (ValueVT == MVT::i128 && NumParts == 1)
+  if (ValueVT.getSizeInBits() == 128 && NumParts == 1 && PartVT == MVT::Untyped) {
     // Inline assembly operand.
-    return lowerGR128ToI128(DAG, Parts[0]);
+    SDValue Res = lowerGR128ToI128(DAG, Parts[0]);
+    return DAG.getBitcast(ValueVT, Res);
+  }
+
   return SDValue();
 }
 
@@ -1848,8 +1855,11 @@ SystemZTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   // Emit the call.
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
-  if (IsTailCall)
-    return DAG.getNode(SystemZISD::SIBCALL, DL, NodeTys, Ops);
+  if (IsTailCall) {
+    SDValue Ret = DAG.getNode(SystemZISD::SIBCALL, DL, NodeTys, Ops);
+    DAG.addNoMergeSiteInfo(Ret.getNode(), CLI.NoMerge);
+    return Ret;
+  }
   Chain = DAG.getNode(SystemZISD::CALL, DL, NodeTys, Ops);
   DAG.addNoMergeSiteInfo(Chain.getNode(), CLI.NoMerge);
   Glue = Chain.getValue(1);
@@ -1954,7 +1964,7 @@ SystemZTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
 
   // Quick exit for void returns
   if (RetLocs.empty())
-    return DAG.getNode(SystemZISD::RET_FLAG, DL, MVT::Other, Chain);
+    return DAG.getNode(SystemZISD::RET_GLUE, DL, MVT::Other, Chain);
 
   if (CallConv == CallingConv::GHC)
     report_fatal_error("GHC functions return void only");
@@ -1985,7 +1995,7 @@ SystemZTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   if (Glue.getNode())
     RetOps.push_back(Glue);
 
-  return DAG.getNode(SystemZISD::RET_FLAG, DL, MVT::Other, RetOps);
+  return DAG.getNode(SystemZISD::RET_GLUE, DL, MVT::Other, RetOps);
 }
 
 // Return true if Op is an intrinsic node with chain that returns the CC value
@@ -2423,6 +2433,12 @@ static void adjustForSubtraction(SelectionDAG &DAG, const SDLoc &DL,
       if (N->getOpcode() == ISD::SUB &&
           ((N->getOperand(0) == C.Op0 && N->getOperand(1) == C.Op1) ||
            (N->getOperand(0) == C.Op1 && N->getOperand(1) == C.Op0))) {
+        // Disable the nsw and nuw flags: the backend needs to handle
+        // overflow as well during comparison elimination.
+        SDNodeFlags Flags = N->getFlags();
+        Flags.setNoSignedWrap(false);
+        Flags.setNoUnsignedWrap(false);
+        N->setFlags(Flags);
         C.Op0 = SDValue(N, 0);
         C.Op1 = DAG.getConstant(0, DL, N->getValueType(0));
         return;
@@ -2533,9 +2549,8 @@ static unsigned getTestUnderMaskCond(unsigned BitSize, unsigned CCMask,
     return 0;
 
   // Work out the masks for the lowest and highest bits.
-  unsigned HighShift = 63 - countLeadingZeros(Mask);
-  uint64_t High = uint64_t(1) << HighShift;
-  uint64_t Low = uint64_t(1) << countTrailingZeros(Mask);
+  uint64_t High = llvm::bit_floor(Mask);
+  uint64_t Low = uint64_t(1) << llvm::countr_zero(Mask);
 
   // Signed ordered comparisons are effectively unsigned if the sign
   // bit is dropped.
@@ -3989,20 +4004,20 @@ SDValue SystemZTargetLowering::lowerXALUO(SDValue Op,
 }
 
 static bool isAddCarryChain(SDValue Carry) {
-  while (Carry.getOpcode() == ISD::ADDCARRY)
+  while (Carry.getOpcode() == ISD::UADDO_CARRY)
     Carry = Carry.getOperand(2);
   return Carry.getOpcode() == ISD::UADDO;
 }
 
 static bool isSubBorrowChain(SDValue Carry) {
-  while (Carry.getOpcode() == ISD::SUBCARRY)
+  while (Carry.getOpcode() == ISD::USUBO_CARRY)
     Carry = Carry.getOperand(2);
   return Carry.getOpcode() == ISD::USUBO;
 }
 
-// Lower ADDCARRY/SUBCARRY nodes.
-SDValue SystemZTargetLowering::lowerADDSUBCARRY(SDValue Op,
-                                                SelectionDAG &DAG) const {
+// Lower UADDO_CARRY/USUBO_CARRY nodes.
+SDValue SystemZTargetLowering::lowerUADDSUBO_CARRY(SDValue Op,
+                                                   SelectionDAG &DAG) const {
 
   SDNode *N = Op.getNode();
   MVT VT = N->getSimpleValueType(0);
@@ -4021,7 +4036,7 @@ SDValue SystemZTargetLowering::lowerADDSUBCARRY(SDValue Op,
 
   switch (Op.getOpcode()) {
   default: llvm_unreachable("Unknown instruction!");
-  case ISD::ADDCARRY:
+  case ISD::UADDO_CARRY:
     if (!isAddCarryChain(Carry))
       return SDValue();
 
@@ -4029,7 +4044,7 @@ SDValue SystemZTargetLowering::lowerADDSUBCARRY(SDValue Op,
     CCValid = SystemZ::CCMASK_LOGICAL;
     CCMask = SystemZ::CCMASK_LOGICAL_CARRY;
     break;
-  case ISD::SUBCARRY:
+  case ISD::USUBO_CARRY:
     if (!isSubBorrowChain(Carry))
       return SDValue();
 
@@ -4102,7 +4117,7 @@ SDValue SystemZTargetLowering::lowerCTPOP(SDValue Op,
 
   // Skip known-zero high parts of the operand.
   int64_t OrigBitSize = VT.getSizeInBits();
-  int64_t BitSize = (int64_t)1 << Log2_32_Ceil(NumSignificantBits);
+  int64_t BitSize = llvm::bit_ceil(NumSignificantBits);
   BitSize = std::min(BitSize, OrigBitSize);
 
   // The POPCNT instruction counts the number of bits in each byte.
@@ -4374,8 +4389,7 @@ SystemZTargetLowering::getTargetMMOFlags(const Instruction &I) const {
 SDValue SystemZTargetLowering::lowerSTACKSAVE(SDValue Op,
                                               SelectionDAG &DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
-  const SystemZSubtarget *Subtarget = &MF.getSubtarget<SystemZSubtarget>();
-  auto *Regs = Subtarget->getSpecialRegisters();
+  auto *Regs = Subtarget.getSpecialRegisters();
   if (MF.getFunction().getCallingConv() == CallingConv::GHC)
     report_fatal_error("Variable-sized stack allocations are not supported "
                        "in GHC calling convention");
@@ -4386,8 +4400,7 @@ SDValue SystemZTargetLowering::lowerSTACKSAVE(SDValue Op,
 SDValue SystemZTargetLowering::lowerSTACKRESTORE(SDValue Op,
                                                  SelectionDAG &DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
-  const SystemZSubtarget *Subtarget = &MF.getSubtarget<SystemZSubtarget>();
-  auto *Regs = Subtarget->getSpecialRegisters();
+  auto *Regs = Subtarget.getSpecialRegisters();
   bool StoreBackchain = MF.getFunction().hasFnAttribute("backchain");
 
   if (MF.getFunction().getCallingConv() == CallingConv::GHC)
@@ -5737,9 +5750,9 @@ SDValue SystemZTargetLowering::LowerOperation(SDValue Op,
   case ISD::UADDO:
   case ISD::USUBO:
     return lowerXALUO(Op, DAG);
-  case ISD::ADDCARRY:
-  case ISD::SUBCARRY:
-    return lowerADDSUBCARRY(Op, DAG);
+  case ISD::UADDO_CARRY:
+  case ISD::USUBO_CARRY:
+    return lowerUADDSUBO_CARRY(Op, DAG);
   case ISD::OR:
     return lowerOR(Op, DAG);
   case ISD::CTPOP:
@@ -5806,6 +5819,8 @@ SDValue SystemZTargetLowering::LowerOperation(SDValue Op,
     return lowerShift(Op, DAG, SystemZISD::VSRA_BY_SCALAR);
   case ISD::IS_FPCLASS:
     return lowerIS_FPCLASS(Op, DAG);
+  case ISD::GET_ROUNDING:
+    return lowerGET_ROUNDING(Op, DAG);
   default:
     llvm_unreachable("Unexpected node to lower");
   }
@@ -5906,7 +5921,7 @@ const char *SystemZTargetLowering::getTargetNodeName(unsigned Opcode) const {
 #define OPCODE(NAME) case SystemZISD::NAME: return "SystemZISD::" #NAME
   switch ((SystemZISD::NodeType)Opcode) {
     case SystemZISD::FIRST_NUMBER: break;
-    OPCODE(RET_FLAG);
+    OPCODE(RET_GLUE);
     OPCODE(CALL);
     OPCODE(SIBCALL);
     OPCODE(TLS_GDCALL);
@@ -7440,6 +7455,18 @@ SystemZTargetLowering::ComputeNumSignBitsForTargetNode(
   return 1;
 }
 
+bool SystemZTargetLowering::
+isGuaranteedNotToBeUndefOrPoisonForTargetNode(SDValue Op,
+         const APInt &DemandedElts, const SelectionDAG &DAG,
+         bool PoisonOnly, unsigned Depth) const {
+  switch (Op->getOpcode()) {
+  case SystemZISD::PCREL_WRAPPER:
+  case SystemZISD::PCREL_OFFSET:
+    return true;
+  }
+  return false;
+}
+
 unsigned
 SystemZTargetLowering::getStackProbeSize(const MachineFunction &MF) const {
   const TargetFrameLowering *TFI = Subtarget.getFrameLowering();
@@ -7563,10 +7590,10 @@ static void createPHIsForSelects(SmallVector<MachineInstr*, 8> &Selects,
     if (MI->getOperand(4).getImm() == (CCValid ^ CCMask))
       std::swap(TrueReg, FalseReg);
 
-    if (RegRewriteTable.find(TrueReg) != RegRewriteTable.end())
+    if (RegRewriteTable.contains(TrueReg))
       TrueReg = RegRewriteTable[TrueReg].first;
 
-    if (RegRewriteTable.find(FalseReg) != RegRewriteTable.end())
+    if (RegRewriteTable.contains(FalseReg))
       FalseReg = RegRewriteTable[FalseReg].second;
 
     DebugLoc DL = MI->getDebugLoc();
@@ -8484,11 +8511,13 @@ SystemZTargetLowering::emitMemMemWrapper(MachineInstr &MI,
           .addReg(RemSrcReg).addImm(SrcDisp);
       MBB->addSuccessor(AllDoneMBB);
       MBB = AllDoneMBB;
-      if (EndMBB) {
+      if (Opcode != SystemZ::MVC) {
         EXRL_MIB.addReg(SystemZ::CC, RegState::ImplicitDefine);
-        MBB->addLiveIn(SystemZ::CC);
+        if (EndMBB)
+          MBB->addLiveIn(SystemZ::CC);
       }
     }
+    MF.getProperties().reset(MachineFunctionProperties::Property::NoPHIs);
   }
 
   // Handle any remaining bytes with straight-line code.
@@ -9034,4 +9063,44 @@ SystemZTargetLowering::getRepRegClassFor(MVT VT) const {
   if (VT == MVT::Untyped)
     return &SystemZ::ADDR128BitRegClass;
   return TargetLowering::getRepRegClassFor(VT);
+}
+
+SDValue SystemZTargetLowering::lowerGET_ROUNDING(SDValue Op,
+                                                 SelectionDAG &DAG) const {
+  SDLoc dl(Op);
+  /*
+   The rounding method is in FPC Byte 3 bits 6-7, and has the following
+   settings:
+     00 Round to nearest
+     01 Round to 0
+     10 Round to +inf
+     11 Round to -inf
+
+  FLT_ROUNDS, on the other hand, expects the following:
+    -1 Undefined
+     0 Round to 0
+     1 Round to nearest
+     2 Round to +inf
+     3 Round to -inf
+  */
+
+  // Save FPC to register.
+  SDValue Chain = Op.getOperand(0);
+  SDValue EFPC(
+      DAG.getMachineNode(SystemZ::EFPC, dl, {MVT::i32, MVT::Other}, Chain), 0);
+  Chain = EFPC.getValue(1);
+
+  // Transform as necessary
+  SDValue CWD1 = DAG.getNode(ISD::AND, dl, MVT::i32, EFPC,
+                             DAG.getConstant(3, dl, MVT::i32));
+  // RetVal = (CWD1 ^ (CWD1 >> 1)) ^ 1
+  SDValue CWD2 = DAG.getNode(ISD::XOR, dl, MVT::i32, CWD1,
+                             DAG.getNode(ISD::SRL, dl, MVT::i32, CWD1,
+                                         DAG.getConstant(1, dl, MVT::i32)));
+
+  SDValue RetVal = DAG.getNode(ISD::XOR, dl, MVT::i32, CWD2,
+                               DAG.getConstant(1, dl, MVT::i32));
+  RetVal = DAG.getZExtOrTrunc(RetVal, dl, Op.getValueType());
+
+  return DAG.getMergeValues({RetVal, Chain}, dl);
 }

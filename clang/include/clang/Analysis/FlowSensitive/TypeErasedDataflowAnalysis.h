@@ -26,7 +26,6 @@
 #include "clang/Analysis/FlowSensitive/DataflowEnvironment.h"
 #include "clang/Analysis/FlowSensitive/DataflowLattice.h"
 #include "llvm/ADT/Any.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/Support/Error.h"
 
 namespace clang {
@@ -97,7 +96,7 @@ public:
 
   /// Applies the analysis transfer function for a given control flow graph
   /// element and type-erased lattice element.
-  virtual void transferTypeErased(const CFGElement *, TypeErasedLattice &,
+  virtual void transferTypeErased(const CFGElement &, TypeErasedLattice &,
                                   Environment &) = 0;
 
   /// Applies the analysis transfer function for a given edge from a CFG block
@@ -105,6 +104,7 @@ public:
   /// @param Stmt The condition which is responsible for the split in the CFG.
   /// @param Branch True if the edge goes to the basic block where the
   /// condition is true.
+  // FIXME: Change `Stmt` argument to a reference.
   virtual void transferBranchTypeErased(bool Branch, const Stmt *,
                                         TypeErasedLattice &, Environment &) = 0;
 
@@ -140,7 +140,7 @@ struct TypeErasedDataflowAnalysisState {
 ///   `std::nullopt` represent basic blocks that are not evaluated yet.
 TypeErasedDataflowAnalysisState transferBlock(
     const ControlFlowContext &CFCtx,
-    llvm::ArrayRef<llvm::Optional<TypeErasedDataflowAnalysisState>> BlockStates,
+    llvm::ArrayRef<std::optional<TypeErasedDataflowAnalysisState>> BlockStates,
     const CFGBlock &Block, const Environment &InitEnv,
     TypeErasedDataflowAnalysis &Analysis,
     std::function<void(const CFGElement &,
@@ -153,7 +153,7 @@ TypeErasedDataflowAnalysisState transferBlock(
 /// dataflow analysis cannot be performed successfully. Otherwise, calls
 /// `PostVisitCFG` on each CFG element with the final analysis results at that
 /// program point.
-llvm::Expected<std::vector<llvm::Optional<TypeErasedDataflowAnalysisState>>>
+llvm::Expected<std::vector<std::optional<TypeErasedDataflowAnalysisState>>>
 runTypeErasedDataflowAnalysis(
     const ControlFlowContext &CFCtx, TypeErasedDataflowAnalysis &Analysis,
     const Environment &InitEnv,

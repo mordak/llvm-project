@@ -381,18 +381,12 @@ static void replaceIterArgsAndYieldResults(scf::ForOp forOp) {
 /// Promotes the loop body of a forOp to its containing block if the forOp
 /// it can be determined that the loop has a single iteration.
 LogicalResult mlir::promoteIfSingleIteration(scf::ForOp forOp) {
-  auto lbCstOp = forOp.getLowerBound().getDefiningOp<arith::ConstantIndexOp>();
-  auto ubCstOp = forOp.getUpperBound().getDefiningOp<arith::ConstantIndexOp>();
-  auto stepCstOp = forOp.getStep().getDefiningOp<arith::ConstantIndexOp>();
-  if (!lbCstOp || !ubCstOp || !stepCstOp || lbCstOp.value() < 0 ||
-      ubCstOp.value() < 0 || stepCstOp.value() < 0)
-    return failure();
-  int64_t tripCount =
-      mlir::ceilDiv(ubCstOp.value() - lbCstOp.value(), stepCstOp.value());
-  if (tripCount != 1)
+  std::optional<int64_t> tripCount = constantTripCount(
+      forOp.getLowerBound(), forOp.getUpperBound(), forOp.getStep());
+  if (!tripCount.has_value() || tripCount != 1)
     return failure();
   auto iv = forOp.getInductionVar();
-  iv.replaceAllUsesWith(lbCstOp);
+  iv.replaceAllUsesWith(forOp.getLowerBound());
 
   replaceIterArgsAndYieldResults(forOp);
 
@@ -656,9 +650,9 @@ static void normalizeLoop(scf::ForOp loop, scf::ForOp outer, scf::ForOp inner) {
   loop.setStep(loopPieces.step);
 }
 
-void mlir::coalesceLoops(MutableArrayRef<scf::ForOp> loops) {
+LogicalResult mlir::coalesceLoops(MutableArrayRef<scf::ForOp> loops) {
   if (loops.size() < 2)
-    return;
+    return failure();
 
   scf::ForOp innermost = loops.back();
   scf::ForOp outermost = loops.front();
@@ -710,6 +704,7 @@ void mlir::coalesceLoops(MutableArrayRef<scf::ForOp> loops) {
       Block::iterator(second.getOperation()),
       innermost.getBody()->getOperations());
   second.erase();
+  return success();
 }
 
 void mlir::collapseParallelLoops(

@@ -19,6 +19,9 @@ header_restrictions = {
 
     "filesystem": "!defined(_LIBCPP_HAS_NO_FILESYSTEM_LIBRARY)",
 
+    # TODO LLVM17: simplify this to __cplusplus >= 202002L
+    "coroutine": "(defined(__cpp_impl_coroutine) && __cpp_impl_coroutine >= 201902L) || (defined(__cpp_coroutines) && __cpp_coroutines >= 201703L)",
+
     "clocale": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
     "codecvt": "!defined(_LIBCPP_HAS_NO_LOCALIZATION)",
     "fstream": "!defined(_LIBCPP_HAS_NO_LOCALIZATION) && !defined(_LIBCPP_HAS_NO_FSTREAM)",
@@ -40,7 +43,6 @@ header_restrictions = {
     "wchar.h": "!defined(_LIBCPP_HAS_NO_WIDE_CHARACTERS)",
 
     "experimental/algorithm": "__cplusplus >= 201103L",
-    "experimental/coroutine": "__cplusplus >= 201103L && !defined(_LIBCPP_HAS_NO_EXPERIMENTAL_COROUTINES)",
     "experimental/deque": "__cplusplus >= 201103L",
     "experimental/forward_list": "__cplusplus >= 201103L",
     "experimental/functional": "__cplusplus >= 201103L",
@@ -62,7 +64,7 @@ header_restrictions = {
 }
 
 private_headers_still_public_in_modules = [
-    '__assert', '__bsd_locale_defaults.h', '__bsd_locale_fallbacks.h', '__config',
+    '__assert', '__config',
     '__config_site.in', '__debug', '__hash_table',
     '__threading_support', '__tree', '__undef_macros', '__verbose_abort'
 ]
@@ -124,13 +126,11 @@ def main():
 
     toplevel_headers     = sorted(str(p.relative_to(include)) for p in include.glob('[a-z]*') if is_header(p))
     experimental_headers = sorted(str(p.relative_to(include)) for p in include.glob('experimental/[a-z]*') if is_header(p))
-    extended_headers     = sorted(str(p.relative_to(include)) for p in include.glob('ext/[a-z]*') if is_header(p))
-    public_headers       = toplevel_headers + experimental_headers + extended_headers
-    private_headers      = sorted(str(p.relative_to(include)) for p in include.rglob('*') if is_header(p) and str(p.relative_to(include)).startswith('__'))
+    public_headers       = toplevel_headers + experimental_headers
+    private_headers      = sorted(str(p.relative_to(include)) for p in include.rglob('*') if is_header(p) and str(p.relative_to(include)).startswith('__') and not p.name.startswith('pstl'))
     variables = {
         'toplevel_headers': toplevel_headers,
         'experimental_headers': experimental_headers,
-        'extended_headers': extended_headers,
         'public_headers': public_headers,
         'private_headers': private_headers,
         'header_restrictions': header_restrictions,

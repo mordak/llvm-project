@@ -13,17 +13,27 @@
 #ifndef DIALECTBASE_TD
 #define DIALECTBASE_TD
 
+// Helper for marking deprecated classes or defs in TableGen. To mark a def as
+// deprecated, mix in the `Deprecate` class with a reason.
+// Usage of a deprecated def within TableGen will cause a warning with the
+// given message.
+class Deprecated<string reason> {
+  string odsDeprecated = reason;
+}
+
+// Helper for marking entities in ODS generated C++ as deprecated.
+// Usage of such an entity from C++ code will cause a warning being emitted by
+// the C++ compiler with the given message.
+//
+// Note: Support has to be implemented by the code generator of a given
+// entity.
+class CppDeprecated<string reason> {
+  string odsCppDeprecated = reason;
+}
+
 //===----------------------------------------------------------------------===//
 // Dialect definitions
 //===----------------------------------------------------------------------===//
-
-// Generate 'fold' method with 'ArrayRef<Attribute>' parameter.
-// New code should prefer using 'kEmitFoldAdaptorFolder' and
-// consider 'kEmitRawAttributesFolder' deprecated and to be
-// removed in the future.
-defvar kEmitRawAttributesFolder = 0;
-// Generate 'fold' method with 'FoldAdaptor' parameter.
-defvar kEmitFoldAdaptorFolder = 1;
 
 class Dialect {
   // The name of the dialect.
@@ -94,8 +104,8 @@ class Dialect {
   // If this dialect can be extended at runtime with new operations or types.
   bit isExtensible = 0;
 
-  // Fold API to use for operations in this dialect.
-  int useFoldAPI = kEmitRawAttributesFolder;
+  // Whether inherent Attributes defined in ODS will be stored as Properties.
+  bit usePropertiesForAttributes = 0;
 }
 
 #endif // DIALECTBASE_TD

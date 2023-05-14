@@ -29,6 +29,8 @@ def err_drv_invalid_arch_name : Error<
   "invalid arch name '%0'">;
 def err_drv_invalid_riscv_arch_name : Error<
   "invalid arch name '%0', %1">;
+def err_drv_invalid_riscv_cpu_name_for_target : Error<
+  "cpu '%0' does not support rv%select{32|64}1">;
 def warn_drv_invalid_arch_name_with_suggestion : Warning<
   "ignoring invalid /arch: argument '%0'; for %select{64|32}1-bit expected one of %2">,
   InGroup<UnusedCommandLineArgument>;
@@ -112,6 +114,12 @@ def warn_drv_unsupported_option_for_target : Warning<
   InGroup<OptionIgnored>;
 def warn_drv_unsupported_option_for_flang : Warning<
   "the argument '%0' is not supported for option '%1'. Mapping to '%1%2'">,
+  InGroup<OptionIgnored>;
+def warn_drv_unsupported_diag_option_for_flang : Warning<
+  "The warning option '-%0' is not supported">,
+  InGroup<OptionIgnored>;
+def warn_drv_unsupported_option_for_processor : Warning<
+  "ignoring '%0' option as it is not currently supported for processor '%1'">,
   InGroup<OptionIgnored>;
 
 def err_drv_invalid_thread_model_for_target : Error<
@@ -215,6 +223,10 @@ def err_drv_malformed_sanitizer_coverage_allowlist : Error<
   "malformed sanitizer coverage allowlist: '%0'">;
 def err_drv_malformed_sanitizer_coverage_ignorelist : Error<
   "malformed sanitizer coverage ignorelist: '%0'">;
+def err_drv_malformed_sanitizer_metadata_ignorelist : Error<
+  "malformed sanitizer metadata ignorelist: '%0'">;
+def err_drv_unsupported_static_sanitizer_darwin : Error<
+  "static %0 runtime is not supported on darwin">;
 def err_drv_duplicate_config : Error<
   "no more than one option '--config' is allowed">;
 def err_drv_cannot_open_config_file : Error<
@@ -246,6 +258,7 @@ def warn_drv_unknown_argument_clang_cl : Warning<
 def warn_drv_unknown_argument_clang_cl_with_suggestion : Warning<
   "unknown argument ignored in clang-cl '%0'; did you mean '%1'?">,
   InGroup<UnknownArgument>;
+def err_drv_unknown_target_triple : Error<"unknown target triple '%0'">;
 
 def warn_drv_ycyu_different_arg_clang_cl : Warning<
   "support for '/Yc' and '/Yu' with different filenames not implemented yet; flags ignored">,
@@ -489,6 +502,9 @@ def err_test_module_file_extension_format : Error<
   "-ftest-module-file-extension argument '%0' is not of the required form "
   "'blockname:major:minor:hashed:user info'">;
 
+def err_drv_module_output_with_multiple_arch : Error<
+  "option '-fmodule-output' can't be used with multiple arch options">;
+
 def err_drv_extract_api_wrong_kind : Error<
   "header file '%0' input '%1' does not match the type of prior input "
   "in api extraction; use '-x %2' to override">;
@@ -683,6 +699,9 @@ def err_drv_dxc_missing_target_profile : Error<
   "target profile option (-T) is missing">;
 def err_drv_hlsl_unsupported_target : Error<
   "HLSL code generation is unsupported for target '%0'">;
+def warn_drv_dxc_missing_dxv : Warning<"dxv not found. "
+    "Resulting DXIL will not be validated or signed for use in release environments.">,
+    InGroup<DXILValidation>;
 
 def err_drv_invalid_range_dxil_validator_version : Error<
   "invalid validator version : %0\n"
@@ -703,4 +722,7 @@ def err_drv_riscv_unsupported_with_linker_relaxation : Error<
 
 def err_drv_loongarch_invalid_mfpu_EQ : Error<
   "invalid argument '%0' to -mfpu=; must be one of: 64, 32, none, 0 (alias for none)">;
+
+def err_drv_expand_response_file : Error<
+  "failed to expand response file: %0">;
 }

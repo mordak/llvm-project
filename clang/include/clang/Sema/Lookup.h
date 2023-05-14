@@ -26,7 +26,6 @@
 #include "clang/Basic/Specifiers.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/MapVector.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Casting.h"
 #include <cassert>
@@ -508,7 +507,7 @@ public:
         Paths = nullptr;
       }
     } else {
-      llvm::Optional<AmbiguityKind> SavedAK;
+      std::optional<AmbiguityKind> SavedAK;
       bool WasAmbiguous = false;
       if (ResultKind == Ambiguous) {
         SavedAK = Ambiguity;

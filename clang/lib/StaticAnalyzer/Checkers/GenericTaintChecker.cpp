@@ -26,12 +26,14 @@
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/ProgramStateTrait.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/YAMLTraits.h"
 
 #include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #define DEBUG_TYPE "taint-checker"
 
@@ -114,46 +116,110 @@ bool isStdin(SVal Val, const ASTContext &ACtx) {
   return false;
 }
 
-SVal getPointeeOf(const CheckerContext &C, Loc LValue) {
-  const QualType ArgTy = LValue.getType(C.getASTContext());
+SVal getPointeeOf(ProgramStateRef State, Loc LValue) {
+  const QualType ArgTy = LValue.getType(State->getStateManager().getContext());
   if (!ArgTy->isPointerType() || !ArgTy->getPointeeType()->isVoidType())
-    return C.getState()->getSVal(LValue);
+    return State->getSVal(LValue);
 
   // Do not dereference void pointers. Treat them as byte pointers instead.
   // FIXME: we might want to consider more than just the first byte.
-  return C.getState()->getSVal(LValue, C.getASTContext().CharTy);
+  return State->getSVal(LValue, State->getStateManager().getContext().CharTy);
 }
 
 /// Given a pointer/reference argument, return the value it refers to.
-Optional<SVal> getPointeeOf(const CheckerContext &C, SVal Arg) {
+std::optional<SVal> getPointeeOf(ProgramStateRef State, SVal Arg) {
   if (auto LValue = Arg.getAs<Loc>())
-    return getPointeeOf(C, *LValue);
+    return getPointeeOf(State, *LValue);
   return std::nullopt;
 }
 
 /// Given a pointer, return the SVal of its pointee or if it is tainted,
 /// otherwise return the pointer's SVal if tainted.
 /// Also considers stdin as a taint source.
-Optional<SVal> getTaintedPointeeOrPointer(const CheckerContext &C, SVal Arg) {
-  const ProgramStateRef State = C.getState();
-
-  if (auto Pointee = getPointeeOf(C, Arg))
+std::optional<SVal> getTaintedPointeeOrPointer(ProgramStateRef State,
+                                               SVal Arg) {
+  if (auto Pointee = getPointeeOf(State, Arg))
     if (isTainted(State, *Pointee)) // FIXME: isTainted(...) ? Pointee : None;
       return Pointee;
 
   if (isTainted(State, Arg))
     return Arg;
-
-  // FIXME: This should be done by the isTainted() API.
-  if (isStdin(Arg, C.getASTContext()))
-    return Arg;
-
   return std::nullopt;
 }
 
-bool isTaintedOrPointsToTainted(const Expr *E, const ProgramStateRef &State,
-                                CheckerContext &C) {
-  return getTaintedPointeeOrPointer(C, C.getSVal(E)).has_value();
+bool isTaintedOrPointsToTainted(ProgramStateRef State, SVal ExprSVal) {
+  return getTaintedPointeeOrPointer(State, ExprSVal).has_value();
+}
+
+/// Helps in printing taint diagnostics.
+/// Marks the incoming parameters of a function interesting (to be printed)
+/// when the return value, or the outgoing parameters are tainted.
+const NoteTag *taintOriginTrackerTag(CheckerContext &C,
+                                     std::vector<SymbolRef> TaintedSymbols,
+                                     std::vector<ArgIdxTy> TaintedArgs,
+                                     const LocationContext *CallLocation) {
+  return C.getNoteTag([TaintedSymbols = std::move(TaintedSymbols),
+                       TaintedArgs = std::move(TaintedArgs), CallLocation](
+                          PathSensitiveBugReport &BR) -> std::string {
+    SmallString<256> Msg;
+    // We give diagnostics only for taint related reports
+    if (!BR.isInteresting(CallLocation) ||
+        BR.getBugType().getCategory() != categories::TaintedData) {
+      return "";
+    }
+    if (TaintedSymbols.empty())
+      return "Taint originated here";
+
+    for (auto Sym : TaintedSymbols) {
+      BR.markInteresting(Sym);
+    }
+    LLVM_DEBUG(for (auto Arg
+                    : TaintedArgs) {
+      llvm::dbgs() << "Taint Propagated from argument " << Arg + 1 << "\n";
+    });
+    return "";
+  });
+}
+
+/// Helps in printing taint diagnostics.
+/// Marks the function interesting (to be printed)
+/// when the return value, or the outgoing parameters are tainted.
+const NoteTag *taintPropagationExplainerTag(
+    CheckerContext &C, std::vector<SymbolRef> TaintedSymbols,
+    std::vector<ArgIdxTy> TaintedArgs, const LocationContext *CallLocation) {
+  assert(TaintedSymbols.size() == TaintedArgs.size());
+  return C.getNoteTag([TaintedSymbols = std::move(TaintedSymbols),
+                       TaintedArgs = std::move(TaintedArgs), CallLocation](
+                          PathSensitiveBugReport &BR) -> std::string {
+    SmallString<256> Msg;
+    llvm::raw_svector_ostream Out(Msg);
+    // We give diagnostics only for taint related reports
+    if (TaintedSymbols.empty() ||
+        BR.getBugType().getCategory() != categories::TaintedData) {
+      return "";
+    }
+    int nofTaintedArgs = 0;
+    for (auto [Idx, Sym] : llvm::enumerate(TaintedSymbols)) {
+      if (BR.isInteresting(Sym)) {
+        BR.markInteresting(CallLocation);
+        if (TaintedArgs[Idx] != ReturnValueIndex) {
+          LLVM_DEBUG(llvm::dbgs() << "Taint Propagated to argument "
+                                  << TaintedArgs[Idx] + 1 << "\n");
+          if (nofTaintedArgs == 0)
+            Out << "Taint propagated to the ";
+          else
+            Out << ", ";
+          Out << TaintedArgs[Idx] + 1
+              << llvm::getOrdinalSuffix(TaintedArgs[Idx] + 1) << " argument";
+          nofTaintedArgs++;
+        } else {
+          LLVM_DEBUG(llvm::dbgs() << "Taint Propagated to return value.\n");
+          Out << "Taint propagated to the return value";
+        }
+      }
+    }
+    return std::string(Out.str());
+  });
 }
 
 /// ArgSet is used to describe arguments relevant for taint detection or
@@ -163,7 +229,7 @@ class ArgSet {
 public:
   ArgSet() = default;
   ArgSet(ArgVecTy &&DiscreteArgs,
-         Optional<ArgIdxTy> VariadicIndex = std::nullopt)
+         std::optional<ArgIdxTy> VariadicIndex = std::nullopt)
       : DiscreteArgs(std::move(DiscreteArgs)),
         VariadicIndex(std::move(VariadicIndex)) {}
 
@@ -178,7 +244,7 @@ public:
 
 private:
   ArgVecTy DiscreteArgs;
-  Optional<ArgIdxTy> VariadicIndex;
+  std::optional<ArgIdxTy> VariadicIndex;
 };
 
 /// A struct used to specify taint propagation rules for a function.
@@ -192,19 +258,19 @@ class GenericTaintRule {
   ArgSet SinkArgs;
   /// Arguments which should be sanitized on function return.
   ArgSet FilterArgs;
-  /// Arguments which can participate in taint propagationa. If any of the
+  /// Arguments which can participate in taint propagation. If any of the
   /// arguments in PropSrcArgs is tainted, all arguments in  PropDstArgs should
   /// be tainted.
   ArgSet PropSrcArgs;
   ArgSet PropDstArgs;
 
   /// A message that explains why the call is sensitive to taint.
-  Optional<StringRef> SinkMsg;
+  std::optional<StringRef> SinkMsg;
 
   GenericTaintRule() = default;
 
   GenericTaintRule(ArgSet &&Sink, ArgSet &&Filter, ArgSet &&Src, ArgSet &&Dst,
-                   Optional<StringRef> SinkMsg = std::nullopt)
+                   std::optional<StringRef> SinkMsg = std::nullopt)
       : SinkArgs(std::move(Sink)), FilterArgs(std::move(Filter)),
         PropSrcArgs(std::move(Src)), PropDstArgs(std::move(Dst)),
         SinkMsg(SinkMsg) {}
@@ -213,7 +279,7 @@ public:
   /// Make a rule that reports a warning if taint reaches any of \p FilterArgs
   /// arguments.
   static GenericTaintRule Sink(ArgSet &&SinkArgs,
-                               Optional<StringRef> Msg = std::nullopt) {
+                               std::optional<StringRef> Msg = std::nullopt) {
     return {std::move(SinkArgs), {}, {}, {}, Msg};
   }
 
@@ -234,9 +300,9 @@ public:
   }
 
   /// Make a rule that taints all PropDstArgs if any of PropSrcArgs is tainted.
-  static GenericTaintRule SinkProp(ArgSet &&SinkArgs, ArgSet &&SrcArgs,
-                                   ArgSet &&DstArgs,
-                                   Optional<StringRef> Msg = std::nullopt) {
+  static GenericTaintRule
+  SinkProp(ArgSet &&SinkArgs, ArgSet &&SrcArgs, ArgSet &&DstArgs,
+           std::optional<StringRef> Msg = std::nullopt) {
     return {
         std::move(SinkArgs), {}, std::move(SrcArgs), std::move(DstArgs), Msg};
   }
@@ -342,7 +408,7 @@ public:
                                CheckerContext &C) const;
 
 private:
-  const BugType BT{this, "Use of Untrusted Data", "Untrusted Data"};
+  const BugType BT{this, "Use of Untrusted Data", categories::TaintedData};
 
   bool checkUncontrolledFormatString(const CallEvent &Call,
                                      CheckerContext &C) const;
@@ -350,7 +416,7 @@ private:
   void taintUnsafeSocketProtocol(const CallEvent &Call,
                                  CheckerContext &C) const;
 
-  /// Default taint rules are initilized with the help of a CheckerContext to
+  /// Default taint rules are initalized with the help of a CheckerContext to
   /// access the names of built-in functions like memcpy.
   void initTaintRules(CheckerContext &C) const;
 
@@ -482,7 +548,7 @@ void GenericTaintRuleParser::parseConfig(const std::string &Option,
   validateArgVector(Option, P.DstArgs);
   bool IsSrcVariadic = P.VarType == TaintConfiguration::VariadicType::Src;
   bool IsDstVariadic = P.VarType == TaintConfiguration::VariadicType::Dst;
-  Optional<ArgIdxTy> JustVarIndex = P.VarIndex;
+  std::optional<ArgIdxTy> JustVarIndex = P.VarIndex;
 
   ArgSet SrcDesc(std::move(P.SrcArgs),
                  IsSrcVariadic ? JustVarIndex : std::nullopt);
@@ -725,7 +791,7 @@ void GenericTaintChecker::initTaintRules(CheckerContext &C) const {
   std::string Option{"Config"};
   StringRef ConfigFile =
       Mgr->getAnalyzerOptions().getCheckerStringOption(this, Option);
-  llvm::Optional<TaintConfiguration> Config =
+  std::optional<TaintConfiguration> Config =
       getConfiguration<TaintConfiguration>(*Mgr, this, Option, ConfigFile);
   if (!Config) {
     // We don't have external taint config, no parsing required.
@@ -787,22 +853,39 @@ void GenericTaintChecker::checkPostCall(const CallEvent &Call,
     llvm::dbgs() << "> actually wants to taint arg index: " << I << '\n';
   });
 
+  const NoteTag *InjectionTag = nullptr;
+  std::vector<SymbolRef> TaintedSymbols;
+  std::vector<ArgIdxTy> TaintedIndexes;
   for (ArgIdxTy ArgNum : *TaintArgs) {
     // Special handling for the tainted return value.
     if (ArgNum == ReturnValueIndex) {
       State = addTaint(State, Call.getReturnValue());
+      std::vector<SymbolRef> TaintedSyms =
+          getTaintedSymbols(State, Call.getReturnValue());
+      if (!TaintedSyms.empty()) {
+        TaintedSymbols.push_back(TaintedSyms[0]);
+        TaintedIndexes.push_back(ArgNum);
+      }
       continue;
     }
-
     // The arguments are pointer arguments. The data they are pointing at is
     // tainted after the call.
-    if (auto V = getPointeeOf(C, Call.getArgSVal(ArgNum)))
+    if (auto V = getPointeeOf(State, Call.getArgSVal(ArgNum))) {
       State = addTaint(State, *V);
+      std::vector<SymbolRef> TaintedSyms = getTaintedSymbols(State, *V);
+      if (!TaintedSyms.empty()) {
+        TaintedSymbols.push_back(TaintedSyms[0]);
+        TaintedIndexes.push_back(ArgNum);
+      }
+    }
   }
-
+  // Create a NoteTag callback, which prints to the user where the taintedness
+  // was propagated to.
+  InjectionTag = taintPropagationExplainerTag(C, TaintedSymbols, TaintedIndexes,
+                                              Call.getCalleeStackFrame(0));
   // Clear up the taint info from the state.
   State = State->remove<TaintArgsOnPostVisit>(CurrentFrame);
-  C.addTransition(State);
+  C.addTransition(State, InjectionTag);
 }
 
 void GenericTaintChecker::printState(raw_ostream &Out, ProgramStateRef State,
@@ -825,15 +908,19 @@ void GenericTaintRule::process(const GenericTaintChecker &Checker,
 
   /// Check for taint sinks.
   ForEachCallArg([this, &Checker, &C, &State](ArgIdxTy I, const Expr *E, SVal) {
-    if (SinkArgs.contains(I) && isTaintedOrPointsToTainted(E, State, C))
+    // Add taintedness to stdin parameters
+    if (isStdin(C.getSVal(E), C.getASTContext())) {
+      State = addTaint(State, C.getSVal(E));
+    }
+    if (SinkArgs.contains(I) && isTaintedOrPointsToTainted(State, C.getSVal(E)))
       Checker.generateReportIfTainted(E, SinkMsg.value_or(MsgCustomSink), C);
   });
 
   /// Check for taint filters.
-  ForEachCallArg([this, &C, &State](ArgIdxTy I, const Expr *E, SVal S) {
+  ForEachCallArg([this, &State](ArgIdxTy I, const Expr *E, SVal S) {
     if (FilterArgs.contains(I)) {
       State = removeTaint(State, S);
-      if (auto P = getPointeeOf(C, S))
+      if (auto P = getPointeeOf(State, S))
         State = removeTaint(State, *P);
     }
   });
@@ -842,11 +929,25 @@ void GenericTaintRule::process(const GenericTaintChecker &Checker,
   /// A rule is relevant if PropSrcArgs is empty, or if any of its signified
   /// args are tainted in context of the current CallEvent.
   bool IsMatching = PropSrcArgs.isEmpty();
-  ForEachCallArg(
-      [this, &C, &IsMatching, &State](ArgIdxTy I, const Expr *E, SVal) {
-        IsMatching = IsMatching || (PropSrcArgs.contains(I) &&
-                                    isTaintedOrPointsToTainted(E, State, C));
-      });
+  std::vector<SymbolRef> TaintedSymbols;
+  std::vector<ArgIdxTy> TaintedIndexes;
+  ForEachCallArg([this, &C, &IsMatching, &State, &TaintedSymbols,
+                  &TaintedIndexes](ArgIdxTy I, const Expr *E, SVal) {
+    std::optional<SVal> TaintedSVal =
+        getTaintedPointeeOrPointer(State, C.getSVal(E));
+    IsMatching =
+        IsMatching || (PropSrcArgs.contains(I) && TaintedSVal.has_value());
+
+    // We track back tainted arguments except for stdin
+    if (TaintedSVal && !isStdin(*TaintedSVal, C.getASTContext())) {
+      std::vector<SymbolRef> TaintedArgSyms =
+          getTaintedSymbols(State, *TaintedSVal);
+      if (!TaintedArgSyms.empty()) {
+        llvm::append_range(TaintedSymbols, TaintedArgSyms);
+        TaintedIndexes.push_back(I);
+      }
+    }
+  });
 
   if (!IsMatching)
     return;
@@ -889,7 +990,10 @@ void GenericTaintRule::process(const GenericTaintChecker &Checker,
 
   if (!Result.isEmpty())
     State = State->set<TaintArgsOnPostVisit>(C.getStackFrame(), Result);
-  C.addTransition(State);
+  const NoteTag *InjectionTag = taintOriginTrackerTag(
+      C, std::move(TaintedSymbols), std::move(TaintedIndexes),
+      Call.getCalleeStackFrame(0));
+  C.addTransition(State, InjectionTag);
 }
 
 bool GenericTaintRule::UntrustedEnv(CheckerContext &C) {
@@ -901,7 +1005,8 @@ bool GenericTaintRule::UntrustedEnv(CheckerContext &C) {
 bool GenericTaintChecker::generateReportIfTainted(const Expr *E, StringRef Msg,
                                                   CheckerContext &C) const {
   assert(E);
-  Optional<SVal> TaintedSVal{getTaintedPointeeOrPointer(C, C.getSVal(E))};
+  std::optional<SVal> TaintedSVal =
+      getTaintedPointeeOrPointer(C.getState(), C.getSVal(E));
 
   if (!TaintedSVal)
     return false;
@@ -910,7 +1015,10 @@ bool GenericTaintChecker::generateReportIfTainted(const Expr *E, StringRef Msg,
   if (ExplodedNode *N = C.generateNonFatalErrorNode()) {
     auto report = std::make_unique<PathSensitiveBugReport>(BT, Msg, N);
     report->addRange(E->getSourceRange());
-    report->addVisitor(std::make_unique<TaintBugVisitor>(*TaintedSVal));
+    for (auto TaintedSym : getTaintedSymbols(C.getState(), *TaintedSVal)) {
+      report->markInteresting(TaintedSym);
+    }
+
     C.emitReport(std::move(report));
     return true;
   }

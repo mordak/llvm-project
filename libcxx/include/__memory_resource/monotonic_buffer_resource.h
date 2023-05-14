@@ -18,7 +18,7 @@
 #  pragma GCC system_header
 #endif
 
-#if _LIBCPP_STD_VER > 14
+#if _LIBCPP_STD_VER >= 17
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
@@ -35,7 +35,9 @@ class _LIBCPP_TYPE_VIS monotonic_buffer_resource : public memory_resource {
     char* __start_;
     char* __cur_;
     size_t __align_;
-    size_t __allocation_size() { return (reinterpret_cast<char*>(this) - __start_) + sizeof(*this); }
+    _LIBCPP_HIDE_FROM_ABI size_t __allocation_size() {
+      return (reinterpret_cast<char*>(this) - __start_) + sizeof(*this);
+    }
     void* __try_allocate_from_chunk(size_t, size_t);
   };
 
@@ -80,7 +82,7 @@ public:
 
   monotonic_buffer_resource(const monotonic_buffer_resource&) = delete;
 
-  _LIBCPP_HIDE_FROM_ABI ~monotonic_buffer_resource() override { release(); }
+  _LIBCPP_HIDE_FROM_ABI_VIRTUAL ~monotonic_buffer_resource() override { release(); }
 
   monotonic_buffer_resource& operator=(const monotonic_buffer_resource&) = delete;
 
@@ -99,9 +101,9 @@ public:
 protected:
   void* do_allocate(size_t __bytes, size_t __alignment) override; // key function
 
-  _LIBCPP_HIDE_FROM_ABI void do_deallocate(void*, size_t, size_t) override {}
+  _LIBCPP_HIDE_FROM_ABI_VIRTUAL void do_deallocate(void*, size_t, size_t) override {}
 
-  _LIBCPP_HIDE_FROM_ABI bool do_is_equal(const memory_resource& __other) const _NOEXCEPT override {
+  _LIBCPP_HIDE_FROM_ABI_VIRTUAL bool do_is_equal(const memory_resource& __other) const _NOEXCEPT override {
     return this == std::addressof(__other);
   }
 
@@ -115,6 +117,6 @@ private:
 
 _LIBCPP_END_NAMESPACE_STD
 
-#endif // _LIBCPP_STD_VER > 14
+#endif // _LIBCPP_STD_VER >= 17
 
 #endif // _LIBCPP___MEMORY_RESOURCE_MONOTONIC_BUFFER_RESOURCE_H

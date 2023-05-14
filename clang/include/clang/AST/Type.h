@@ -34,7 +34,6 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FoldingSet.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/StringRef.h"
@@ -899,6 +898,9 @@ public:
 
   /// Return true if this is a trivially relocatable type.
   bool isTriviallyRelocatableType(const ASTContext &Context) const;
+
+  /// Return true if this is a trivially equality comparable type.
+  bool isTriviallyEqualityComparableType(const ASTContext &Context) const;
 
   /// Returns true if it is a class and it might be dynamic.
   bool mayBeDynamicClass() const;
@@ -1768,7 +1770,7 @@ protected:
 
     /// The kind of vector, either a generic vector type or some
     /// target-specific vector type such as for AltiVec or Neon.
-    unsigned VecKind : 3;
+    unsigned VecKind : 4;
     /// The number of elements in the vector.
     uint32_t NumElements;
   };
@@ -2030,6 +2032,13 @@ public:
   /// Returns true for SVE scalable vector types.
   bool isSVESizelessBuiltinType() const;
 
+  /// Returns true for RVV scalable vector types.
+  bool isRVVSizelessBuiltinType() const;
+
+  /// Check if this is a WebAssembly Reference Type.
+  bool isWebAssemblyReferenceType() const;
+  bool isWebAssemblyExternrefType() const;
+
   /// Determines if this is a sizeless type supported by the
   /// 'arm_sve_vector_bits' type attribute, which can be applied to a single
   /// SVE vector or predicate, excluding tuple types such as svint32x4_t.
@@ -2039,6 +2048,16 @@ public:
   /// This is used to represent fixed-length SVE vectors created with the
   /// 'arm_sve_vector_bits' type attribute as VectorType.
   QualType getSveEltType(const ASTContext &Ctx) const;
+
+  /// Determines if this is a sizeless type supported by the
+  /// 'riscv_rvv_vector_bits' type attribute, which can be applied to a single
+  /// RVV vector or mask.
+  bool isRVVVLSBuiltinType() const;
+
+  /// Returns the representative type for the element of an RVV builtin type.
+  /// This is used to represent fixed-length RVV vectors created with the
+  /// 'riscv_rvv_vector_bits' type attribute as VectorType.
+  QualType getRVVEltType(const ASTContext &Ctx) const;
 
   /// Types are partitioned into 3 broad categories (C99 6.2.5p1):
   /// object types, function types, and incomplete types.
@@ -2275,6 +2294,8 @@ public:
   bool isCUDADeviceBuiltinTextureType() const;
 
   bool isRVVType() const;
+
+  bool isRVVType(unsigned Bitwidth, bool IsFloat) const;
 
   /// Return the implicit lifetime for this type, which must not be dependent.
   Qualifiers::ObjCLifetime getObjCARCImplicitLifetime() const;
@@ -2553,7 +2574,7 @@ public:
   /// Note that nullability is only captured as sugar within the type
   /// system, not as part of the canonical type, so nullability will
   /// be lost by canonicalization and desugaring.
-  Optional<NullabilityKind> getNullability() const;
+  std::optional<NullabilityKind> getNullability() const;
 
   /// Determine whether the given type can have a nullability
   /// specifier applied to it, i.e., if it is any kind of pointer type.
@@ -2577,7 +2598,7 @@ public:
   /// the type parameters of the given declaration context in any type described
   /// within that context, or an empty optional to indicate that no
   /// substitution is required.
-  Optional<ArrayRef<QualType>>
+  std::optional<ArrayRef<QualType>>
   getObjCSubstitutions(const DeclContext *dc) const;
 
   /// Determines if this is an ObjC interface type that may accept type
@@ -2641,6 +2662,9 @@ public:
 // RVV Types
 #define RVV_TYPE(Name, Id, SingletonId) Id,
 #include "clang/Basic/RISCVVTypes.def"
+// WebAssembly reference types
+#define WASM_TYPE(Name, Id, SingletonId) Id,
+#include "clang/Basic/WebAssemblyReferenceTypes.def"
 // All other builtin types
 #define BUILTIN_TYPE(Id, SingletonId) Id,
 #define LAST_BUILTIN_TYPE(Id) LastKind = Id
@@ -2688,6 +2712,8 @@ public:
   }
 
   bool isSVEBool() const { return getKind() == Kind::SveBool; }
+
+  bool isSVECount() const { return getKind() == Kind::SveCount; }
 
   /// Determines whether the given kind corresponds to a placeholder type.
   static bool isPlaceholderTypeKind(Kind K) {
@@ -3386,7 +3412,10 @@ public:
     SveFixedLengthDataVector,
 
     /// is AArch64 SVE fixed-length predicate vector
-    SveFixedLengthPredicateVector
+    SveFixedLengthPredicateVector,
+
+    /// is RISC-V RVV fixed-length data vector
+    RVVFixedLengthDataVector,
   };
 
 protected:
@@ -4921,9 +4950,11 @@ public:
 
   bool isMSTypeSpec() const;
 
+  bool isWebAssemblyFuncrefSpec() const;
+
   bool isCallingConv() const;
 
-  llvm::Optional<NullabilityKind> getImmediateNullability() const;
+  std::optional<NullabilityKind> getImmediateNullability() const;
 
   /// Retrieve the attribute kind corresponding to the given
   /// nullability kind.
@@ -4953,7 +4984,7 @@ public:
   /// to the underlying modified type.
   ///
   /// \returns the top-level nullability, if present.
-  static Optional<NullabilityKind> stripOuterNullability(QualType &T);
+  static std::optional<NullabilityKind> stripOuterNullability(QualType &T);
 
   void Profile(llvm::FoldingSetNodeID &ID) {
     Profile(ID, getAttrKind(), ModifiedType, EquivalentType);
@@ -5094,7 +5125,7 @@ class SubstTemplateTypeParmType final
   Decl *AssociatedDecl;
 
   SubstTemplateTypeParmType(QualType Replacement, Decl *AssociatedDecl,
-                            unsigned Index, Optional<unsigned> PackIndex);
+                            unsigned Index, std::optional<unsigned> PackIndex);
 
 public:
   /// Gets the type that was substituted for the template
@@ -5117,7 +5148,7 @@ public:
   /// This should match the result of `getReplacedParameter()->getIndex()`.
   unsigned getIndex() const { return SubstTemplateTypeParmTypeBits.Index; }
 
-  Optional<unsigned> getPackIndex() const {
+  std::optional<unsigned> getPackIndex() const {
     if (SubstTemplateTypeParmTypeBits.PackIndex == 0)
       return std::nullopt;
     return SubstTemplateTypeParmTypeBits.PackIndex - 1;
@@ -5133,7 +5164,7 @@ public:
 
   static void Profile(llvm::FoldingSetNodeID &ID, QualType Replacement,
                       const Decl *AssociatedDecl, unsigned Index,
-                      Optional<unsigned> PackIndex) {
+                      std::optional<unsigned> PackIndex) {
     Replacement.Profile(ID);
     ID.AddPointer(AssociatedDecl);
     ID.AddInteger(Index);
@@ -5847,7 +5878,7 @@ class PackExpansionType : public Type, public llvm::FoldingSetNode {
   QualType Pattern;
 
   PackExpansionType(QualType Pattern, QualType Canon,
-                    Optional<unsigned> NumExpansions)
+                    std::optional<unsigned> NumExpansions)
       : Type(PackExpansion, Canon,
              (Pattern->getDependence() | TypeDependence::Dependent |
               TypeDependence::Instantiation) &
@@ -5865,7 +5896,7 @@ public:
 
   /// Retrieve the number of expansions that this pack expansion will
   /// generate, if known.
-  Optional<unsigned> getNumExpansions() const {
+  std::optional<unsigned> getNumExpansions() const {
     if (PackExpansionTypeBits.NumExpansions)
       return PackExpansionTypeBits.NumExpansions - 1;
     return std::nullopt;
@@ -5879,7 +5910,7 @@ public:
   }
 
   static void Profile(llvm::FoldingSetNodeID &ID, QualType Pattern,
-                      Optional<unsigned> NumExpansions) {
+                      std::optional<unsigned> NumExpansions) {
     ID.AddPointer(Pattern.getAsOpaquePtr());
     ID.AddBoolean(NumExpansions.has_value());
     if (NumExpansions)
@@ -7152,6 +7183,17 @@ inline bool Type::isRVVType() const {
   return
 #include "clang/Basic/RISCVVTypes.def"
     false; // end of boolean or operation.
+}
+
+inline bool Type::isRVVType(unsigned Bitwidth, bool IsFloat) const {
+  bool Ret = false;
+#define RVV_TYPE(Name, Id, SingletonId)
+#define RVV_VECTOR_TYPE(Name, Id, SingletonId, NumEls, ElBits, NF, IsSigned,   \
+                        IsFP)                                                  \
+  if (ElBits == Bitwidth && IsFloat == IsFP)                                   \
+    Ret |= isSpecificBuiltinType(BuiltinType::Id);
+#include "clang/Basic/RISCVVTypes.def"
+  return Ret;
 }
 
 inline bool Type::isTemplateTypeParmType() const {

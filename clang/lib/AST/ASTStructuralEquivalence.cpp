@@ -84,7 +84,6 @@
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/APSInt.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
@@ -1454,19 +1453,23 @@ static bool IsRecordContextStructurallyEquivalent(RecordDecl *D1,
   return true;
 }
 
+static bool NameIsStructurallyEquivalent(const TagDecl &D1, const TagDecl &D2) {
+  auto GetName = [](const TagDecl &D) -> const IdentifierInfo * {
+    if (const IdentifierInfo *Name = D.getIdentifier())
+      return Name;
+    if (const TypedefNameDecl *TypedefName = D.getTypedefNameForAnonDecl())
+      return TypedefName->getIdentifier();
+    return nullptr;
+  };
+  return IsStructurallyEquivalent(GetName(D1), GetName(D2));
+}
+
 /// Determine structural equivalence of two records.
 static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                                      RecordDecl *D1, RecordDecl *D2) {
-
-  // Check for equivalent structure names.
-  IdentifierInfo *Name1 = D1->getIdentifier();
-  if (!Name1 && D1->getTypedefNameForAnonDecl())
-    Name1 = D1->getTypedefNameForAnonDecl()->getIdentifier();
-  IdentifierInfo *Name2 = D2->getIdentifier();
-  if (!Name2 && D2->getTypedefNameForAnonDecl())
-    Name2 = D2->getTypedefNameForAnonDecl()->getIdentifier();
-  if (!IsStructurallyEquivalent(Name1, Name2))
+  if (!NameIsStructurallyEquivalent(*D1, *D2)) {
     return false;
+  }
 
   if (D1->isUnion() != D2->isUnion()) {
     if (Context.Complain) {
@@ -1482,9 +1485,9 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
   if (!D1->getDeclName() && !D2->getDeclName()) {
     // If both anonymous structs/unions are in a record context, make sure
     // they occur in the same location in the context records.
-    if (Optional<unsigned> Index1 =
+    if (std::optional<unsigned> Index1 =
             StructuralEquivalenceContext::findUntaggedStructOrUnionIndex(D1)) {
-      if (Optional<unsigned> Index2 =
+      if (std::optional<unsigned> Index2 =
               StructuralEquivalenceContext::findUntaggedStructOrUnionIndex(
                   D2)) {
         if (*Index1 != *Index2)
@@ -1728,16 +1731,9 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
 /// Determine structural equivalence of two enums.
 static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                                      EnumDecl *D1, EnumDecl *D2) {
-
-  // Check for equivalent enum names.
-  IdentifierInfo *Name1 = D1->getIdentifier();
-  if (!Name1 && D1->getTypedefNameForAnonDecl())
-    Name1 = D1->getTypedefNameForAnonDecl()->getIdentifier();
-  IdentifierInfo *Name2 = D2->getIdentifier();
-  if (!Name2 && D2->getTypedefNameForAnonDecl())
-    Name2 = D2->getTypedefNameForAnonDecl()->getIdentifier();
-  if (!IsStructurallyEquivalent(Name1, Name2))
+  if (!NameIsStructurallyEquivalent(*D1, *D2)) {
     return false;
+  }
 
   // Compare the definitions of these two enums. If either or both are
   // incomplete (i.e. forward declared), we assume that they are equivalent.
@@ -2156,7 +2152,7 @@ DiagnosticBuilder StructuralEquivalenceContext::Diag2(SourceLocation Loc,
   return ToCtx.getDiagnostics().Report(Loc, DiagID);
 }
 
-Optional<unsigned>
+std::optional<unsigned>
 StructuralEquivalenceContext::findUntaggedStructOrUnionIndex(RecordDecl *Anon) {
   ASTContext &Context = Anon->getASTContext();
   QualType AnonTy = Context.getRecordType(Anon);

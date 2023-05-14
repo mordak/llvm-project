@@ -2851,17 +2851,16 @@ static void findTypeLocationForBlockDecl(const TypeSourceInfo *TSInfo,
   }
 }
 
-static std::string
-formatBlockPlaceholder(const PrintingPolicy &Policy, const NamedDecl *BlockDecl,
-                       FunctionTypeLoc &Block, FunctionProtoTypeLoc &BlockProto,
-                       bool SuppressBlockName = false,
-                       bool SuppressBlock = false,
-                       Optional<ArrayRef<QualType>> ObjCSubsts = std::nullopt);
+static std::string formatBlockPlaceholder(
+    const PrintingPolicy &Policy, const NamedDecl *BlockDecl,
+    FunctionTypeLoc &Block, FunctionProtoTypeLoc &BlockProto,
+    bool SuppressBlockName = false, bool SuppressBlock = false,
+    std::optional<ArrayRef<QualType>> ObjCSubsts = std::nullopt);
 
 static std::string FormatFunctionParameter(
     const PrintingPolicy &Policy, const DeclaratorDecl *Param,
     bool SuppressName = false, bool SuppressBlock = false,
-    Optional<ArrayRef<QualType>> ObjCSubsts = std::nullopt) {
+    std::optional<ArrayRef<QualType>> ObjCSubsts = std::nullopt) {
   // Params are unavailable in FunctionTypeLoc if the FunctionType is invalid.
   // It would be better to pass in the param Type, which is usually available.
   // But this case is rare, so just pretend we fell back to int as elsewhere.
@@ -2956,7 +2955,7 @@ static std::string
 formatBlockPlaceholder(const PrintingPolicy &Policy, const NamedDecl *BlockDecl,
                        FunctionTypeLoc &Block, FunctionProtoTypeLoc &BlockProto,
                        bool SuppressBlockName, bool SuppressBlock,
-                       Optional<ArrayRef<QualType>> ObjCSubsts) {
+                       std::optional<ArrayRef<QualType>> ObjCSubsts) {
   std::string Result;
   QualType ResultType = Block.getTypePtr()->getReturnType();
   if (ObjCSubsts)
@@ -3625,7 +3624,7 @@ CodeCompletionString *CodeCompletionResult::createCodeCompletionStringForDecl(
 
       std::string Arg;
       QualType ParamType = (*P)->getType();
-      Optional<ArrayRef<QualType>> ObjCSubsts;
+      std::optional<ArrayRef<QualType>> ObjCSubsts;
       if (!CCContext.getBaseType().isNull())
         ObjCSubsts = CCContext.getBaseType()->getObjCSubstitutions(Method);
 
@@ -4149,7 +4148,7 @@ static void AddPrettyFunctionResults(const LangOptions &LangOpts,
 
 static void HandleCodeCompleteResults(Sema *S,
                                       CodeCompleteConsumer *CodeCompleter,
-                                      CodeCompletionContext Context,
+                                      const CodeCompletionContext &Context,
                                       CodeCompletionResult *Results,
                                       unsigned NumResults) {
   if (CodeCompleter)
@@ -4310,16 +4309,13 @@ void Sema::CodeCompleteModuleImport(SourceLocation ImportLoc,
                                         /*IsInclusionDirective=*/false);
     // Enumerate submodules.
     if (Mod) {
-      for (Module::submodule_iterator Sub = Mod->submodule_begin(),
-                                      SubEnd = Mod->submodule_end();
-           Sub != SubEnd; ++Sub) {
-
+      for (auto *Submodule : Mod->submodules()) {
         Builder.AddTypedTextChunk(
-            Builder.getAllocator().CopyString((*Sub)->Name));
+            Builder.getAllocator().CopyString(Submodule->Name));
         Results.AddResult(Result(
             Builder.TakeString(), CCP_Declaration, CXCursor_ModuleImportDecl,
-            (*Sub)->isAvailable() ? CXAvailability_Available
-                                  : CXAvailability_NotAvailable));
+            Submodule->isAvailable() ? CXAvailability_Available
+                                     : CXAvailability_NotAvailable));
       }
     }
   }
@@ -5082,9 +5078,11 @@ AddObjCProperties(const CodeCompletionContext &CCContext,
   }
 }
 
-static void AddRecordMembersCompletionResults(
-    Sema &SemaRef, ResultBuilder &Results, Scope *S, QualType BaseType,
-    ExprValueKind BaseKind, RecordDecl *RD, Optional<FixItHint> AccessOpFixIt) {
+static void
+AddRecordMembersCompletionResults(Sema &SemaRef, ResultBuilder &Results,
+                                  Scope *S, QualType BaseType,
+                                  ExprValueKind BaseKind, RecordDecl *RD,
+                                  std::optional<FixItHint> AccessOpFixIt) {
   // Indicate that we are performing a member access, and the cv-qualifiers
   // for the base object type.
   Results.setObjectTypeQualifiers(BaseType.getQualifiers(), BaseKind);
@@ -5183,7 +5181,7 @@ public:
     // We don't have the declared parameter types, only the actual types of
     // arguments we've seen. These are still valuable, as it's hard to render
     // a useful function completion with neither parameter types nor names!
-    llvm::Optional<SmallVector<QualType, 1>> ArgTypes;
+    std::optional<SmallVector<QualType, 1>> ArgTypes;
     // Whether this is accessed as T.member, T->member, or T::member.
     enum AccessOperator {
       Colons,
@@ -5650,7 +5648,7 @@ void Sema::CodeCompleteMemberReferenceExpr(Scope *S, Expr *Base,
                         &ResultBuilder::IsMember);
 
   auto DoCompletion = [&](Expr *Base, bool IsArrow,
-                          Optional<FixItHint> AccessOpFixIt) -> bool {
+                          std::optional<FixItHint> AccessOpFixIt) -> bool {
     if (!Base)
       return false;
 
@@ -6208,7 +6206,7 @@ QualType Sema::ProduceCallSignatureHelp(Expr *Fn, ArrayRef<Expr *> Args,
 //     Returns an out-of-range index.
 //   - we saw no designators, just positional arguments.
 //     Returns std::nullopt.
-static llvm::Optional<unsigned>
+static std::optional<unsigned>
 getNextAggregateIndexAfterDesignatedInit(const ResultCandidate &Aggregate,
                                          ArrayRef<Expr *> Args) {
   static constexpr unsigned Invalid = std::numeric_limits<unsigned>::max();
@@ -6216,7 +6214,7 @@ getNextAggregateIndexAfterDesignatedInit(const ResultCandidate &Aggregate,
 
   // Look for designated initializers.
   // They're in their syntactic form, not yet resolved to fields.
-  IdentifierInfo *DesignatedFieldName = nullptr;
+  const IdentifierInfo *DesignatedFieldName = nullptr;
   unsigned ArgsAfterDesignator = 0;
   for (const Expr *Arg : Args) {
     if (const auto *DIE = dyn_cast<DesignatedInitExpr>(Arg)) {
@@ -6422,7 +6420,7 @@ static QualType getDesignatedType(QualType BaseType, const Designation &Desig) {
       assert(D.isFieldDesignator());
       auto *RD = getAsRecordDecl(BaseType);
       if (RD && RD->isCompleteDefinition()) {
-        for (const auto *Member : RD->lookup(D.getField()))
+        for (const auto *Member : RD->lookup(D.getFieldDecl()))
           if (const FieldDecl *FD = llvm::dyn_cast<FieldDecl>(Member)) {
             NextType = FD->getType();
             break;
@@ -8722,7 +8720,7 @@ typedef llvm::DenseMap<Selector,
 /// indexed by selector so they can be easily found.
 static void FindImplementableMethods(ASTContext &Context,
                                      ObjCContainerDecl *Container,
-                                     Optional<bool> WantInstanceMethods,
+                                     std::optional<bool> WantInstanceMethods,
                                      QualType ReturnType,
                                      KnownMethodsMap &KnownMethods,
                                      bool InOriginalClass = true) {
@@ -9446,7 +9444,8 @@ static void AddObjCKeyValueCompletions(ObjCPropertyDecl *Property,
   }
 }
 
-void Sema::CodeCompleteObjCMethodDecl(Scope *S, Optional<bool> IsInstanceMethod,
+void Sema::CodeCompleteObjCMethodDecl(Scope *S,
+                                      std::optional<bool> IsInstanceMethod,
                                       ParsedType ReturnTy) {
   // Determine the return type of the method we're declaring, if
   // provided.

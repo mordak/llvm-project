@@ -10,11 +10,11 @@
 //
 //===--------------------------------------------------------------------===//
 
+#include "CXType.h"
 #include "CIndexer.h"
 #include "CXCursor.h"
 #include "CXString.h"
 #include "CXTranslationUnit.h"
-#include "CXType.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
@@ -181,7 +181,7 @@ static inline CXTranslationUnit GetTU(CXType CT) {
   return static_cast<CXTranslationUnit>(CT.data[1]);
 }
 
-static Optional<ArrayRef<TemplateArgument>>
+static std::optional<ArrayRef<TemplateArgument>>
 GetTemplateArguments(QualType Type) {
   assert(!Type.isNull());
   if (const auto *Specialization = Type->getAs<TemplateSpecializationType>())
@@ -197,13 +197,14 @@ GetTemplateArguments(QualType Type) {
   return std::nullopt;
 }
 
-static Optional<QualType> TemplateArgumentToQualType(const TemplateArgument &A) {
+static std::optional<QualType>
+TemplateArgumentToQualType(const TemplateArgument &A) {
   if (A.getKind() == TemplateArgument::Type)
     return A.getAsType();
   return std::nullopt;
 }
 
-static Optional<QualType>
+static std::optional<QualType>
 FindTemplateArgumentTypeAt(ArrayRef<TemplateArgument> TA, unsigned index) {
   unsigned current = 0;
   for (const auto &A : TA) {
@@ -321,8 +322,6 @@ CXType clang_getTypedefDeclUnderlyingType(CXCursor C) {
       QualType T = TD->getUnderlyingType();
       return MakeCXType(T, TU);
     }
-
-    return MakeCXType(QualType(), TU);
   }
 
   return MakeCXType(QualType(), TU);
@@ -339,8 +338,6 @@ CXType clang_getEnumDeclIntegerType(CXCursor C) {
       QualType T = TD->getIntegerType();
       return MakeCXType(T, TU);
     }
-
-    return MakeCXType(QualType(), TU);
   }
 
   return MakeCXType(QualType(), TU);
@@ -355,8 +352,6 @@ long long clang_getEnumConstantDeclValue(CXCursor C) {
     if (const EnumConstantDecl *TD = dyn_cast_or_null<EnumConstantDecl>(D)) {
       return TD->getInitVal().getSExtValue();
     }
-
-    return LLONG_MIN;
   }
 
   return LLONG_MIN;
@@ -371,8 +366,6 @@ unsigned long long clang_getEnumConstantDeclUnsignedValue(CXCursor C) {
     if (const EnumConstantDecl *TD = dyn_cast_or_null<EnumConstantDecl>(D)) {
       return TD->getInitVal().getZExtValue();
     }
-
-    return ULLONG_MAX;
   }
 
   return ULLONG_MAX;
@@ -385,7 +378,7 @@ int clang_getFieldDeclBitWidth(CXCursor C) {
     const Decl *D = getCursorDecl(C);
 
     if (const FieldDecl *FD = dyn_cast_or_null<FieldDecl>(D)) {
-      if (FD->isBitField())
+      if (FD->isBitField() && !FD->getBitWidth()->isValueDependent())
         return FD->getBitWidthValue(getCursorContext(C));
     }
   }
@@ -1176,7 +1169,7 @@ CXType clang_Type_getTemplateArgumentAsType(CXType CT, unsigned index) {
   if (!TA)
     return MakeCXType(QualType(), GetTU(CT));
 
-  Optional<QualType> QT = FindTemplateArgumentTypeAt(*TA, index);
+  std::optional<QualType> QT = FindTemplateArgumentTypeAt(*TA, index);
   return MakeCXType(QT.value_or(QualType()), GetTU(CT));
 }
 

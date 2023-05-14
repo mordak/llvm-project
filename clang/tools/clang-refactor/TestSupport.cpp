@@ -176,11 +176,11 @@ std::pair<unsigned, unsigned> getLineColumn(StringRef Filename,
 
 bool TestRefactoringResultConsumer::handleAllResults() {
   bool Failed = false;
-  for (auto &Group : llvm::enumerate(Results)) {
+  for (const auto &Group : llvm::enumerate(Results)) {
     // All ranges in the group must produce the same result.
-    Optional<tooling::AtomicChanges> CanonicalResult;
-    Optional<std::string> CanonicalErrorMessage;
-    for (auto &I : llvm::enumerate(Group.value())) {
+    std::optional<tooling::AtomicChanges> CanonicalResult;
+    std::optional<std::string> CanonicalErrorMessage;
+    for (const auto &I : llvm::enumerate(Group.value())) {
       Expected<tooling::AtomicChanges> &Result = I.value();
       std::string ErrorMessage;
       bool HasResult = !!Result;
@@ -292,7 +292,7 @@ static unsigned addEndLineOffsetAndEndColumn(StringRef Source, unsigned Offset,
       Source, LineStart == StringRef::npos ? 0 : LineStart + 1, Column - 1);
 }
 
-Optional<TestSelectionRangesInFile>
+std::optional<TestSelectionRangesInFile>
 findTestSelectionRanges(StringRef Filename) {
   ErrorOr<std::unique_ptr<MemoryBuffer>> ErrOrFile =
       MemoryBuffer::getFile(Filename);

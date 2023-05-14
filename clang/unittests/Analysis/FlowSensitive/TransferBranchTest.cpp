@@ -14,7 +14,6 @@
 #include "TestingSupport.h"
 #include "clang/Analysis/FlowSensitive/DataflowAnalysis.h"
 #include "clang/Tooling/Tooling.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Testing/Annotations/Annotations.h"
 #include "llvm/Testing/Support/Error.h"
@@ -27,7 +26,7 @@ namespace {
 using namespace ast_matchers;
 
 struct TestLattice {
-  llvm::Optional<bool> Branch;
+  std::optional<bool> Branch;
   static TestLattice bottom() { return {}; }
 
   // Does not matter for this test, but we must provide some definition of join.
@@ -45,7 +44,7 @@ public:
   explicit TestPropagationAnalysis(ASTContext &Context)
       : DataflowAnalysis<TestPropagationAnalysis, TestLattice>(Context) {}
   static TestLattice initialElement() { return TestLattice::bottom(); }
-  void transfer(const CFGElement *, TestLattice &, Environment &) {}
+  void transfer(const CFGElement &, TestLattice &, Environment &) {}
   void transferBranch(bool Branch, const Stmt *S, TestLattice &L,
                       Environment &Env) {
     L.Branch = Branch;

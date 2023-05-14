@@ -26,7 +26,6 @@
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Lex/PreprocessorOptions.h"
 #include "clang/Lex/Token.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
@@ -1259,9 +1258,9 @@ const char *Lexer::SkipEscapedNewLines(const char *P) {
   }
 }
 
-Optional<Token> Lexer::findNextToken(SourceLocation Loc,
-                                     const SourceManager &SM,
-                                     const LangOptions &LangOpts) {
+std::optional<Token> Lexer::findNextToken(SourceLocation Loc,
+                                          const SourceManager &SM,
+                                          const LangOptions &LangOpts) {
   if (Loc.isMacroID()) {
     if (!Lexer::isAtEndOfMacroExpansion(Loc, SM, LangOpts, &Loc))
       return std::nullopt;
@@ -1295,7 +1294,7 @@ Optional<Token> Lexer::findNextToken(SourceLocation Loc,
 SourceLocation Lexer::findLocationAfterToken(
     SourceLocation Loc, tok::TokenKind TKind, const SourceManager &SM,
     const LangOptions &LangOpts, bool SkipTrailingWhitespaceAndNewLine) {
-  Optional<Token> Tok = findNextToken(Loc, SM, LangOpts);
+  std::optional<Token> Tok = findNextToken(Loc, SM, LangOpts);
   if (!Tok || Tok->isNot(TKind))
     return {};
   SourceLocation TokenLoc = Tok->getLocation();
@@ -2280,7 +2279,7 @@ void Lexer::codeCompleteIncludedFile(const char *PathStart,
     ++CompletionPoint;
     if (Next == (IsAngled ? '>' : '"'))
       break;
-    if (llvm::is_contained(SlashChars, Next))
+    if (SlashChars.contains(Next))
       break;
   }
 
@@ -2786,7 +2785,7 @@ bool Lexer::SkipBlockComment(Token &Result, const char *CurPtr,
           // Adjust the pointer to point directly after the first slash. It's
           // not necessary to set C here, it will be overwritten at the end of
           // the outer loop.
-          CurPtr += llvm::countTrailingZeros<unsigned>(cmp) + 1;
+          CurPtr += llvm::countr_zero<unsigned>(cmp) + 1;
           goto FoundSlash;
         }
         CurPtr += 16;
@@ -3257,9 +3256,9 @@ bool Lexer::isCodeCompletionPoint(const char *CurPtr) const {
   return false;
 }
 
-llvm::Optional<uint32_t> Lexer::tryReadNumericUCN(const char *&StartPtr,
-                                                  const char *SlashLoc,
-                                                  Token *Result) {
+std::optional<uint32_t> Lexer::tryReadNumericUCN(const char *&StartPtr,
+                                                 const char *SlashLoc,
+                                                 Token *Result) {
   unsigned CharSize;
   char Kind = getCharAndSize(StartPtr, CharSize);
   assert((Kind == 'u' || Kind == 'U') && "expected a UCN");
@@ -3349,8 +3348,8 @@ llvm::Optional<uint32_t> Lexer::tryReadNumericUCN(const char *&StartPtr,
   }
 
   if (Delimited && PP) {
-    Diag(SlashLoc, PP->getLangOpts().CPlusPlus2b
-                       ? diag::warn_cxx2b_delimited_escape_sequence
+    Diag(SlashLoc, PP->getLangOpts().CPlusPlus23
+                       ? diag::warn_cxx23_delimited_escape_sequence
                        : diag::ext_delimited_escape_sequence)
         << /*delimited*/ 0 << (PP->getLangOpts().CPlusPlus ? 1 : 0);
   }
@@ -3371,9 +3370,9 @@ llvm::Optional<uint32_t> Lexer::tryReadNumericUCN(const char *&StartPtr,
   return CodePoint;
 }
 
-llvm::Optional<uint32_t> Lexer::tryReadNamedUCN(const char *&StartPtr,
-                                                const char *SlashLoc,
-                                                Token *Result) {
+std::optional<uint32_t> Lexer::tryReadNamedUCN(const char *&StartPtr,
+                                               const char *SlashLoc,
+                                               Token *Result) {
   unsigned CharSize;
   bool Diagnose = Result && !isLexingRawMode();
 
@@ -3437,8 +3436,8 @@ llvm::Optional<uint32_t> Lexer::tryReadNamedUCN(const char *&StartPtr,
   }
 
   if (Diagnose && Match)
-    Diag(SlashLoc, PP->getLangOpts().CPlusPlus2b
-                       ? diag::warn_cxx2b_delimited_escape_sequence
+    Diag(SlashLoc, PP->getLangOpts().CPlusPlus23
+                       ? diag::warn_cxx23_delimited_escape_sequence
                        : diag::ext_delimited_escape_sequence)
         << /*named*/ 1 << (PP->getLangOpts().CPlusPlus ? 1 : 0);
 
@@ -3462,14 +3461,14 @@ llvm::Optional<uint32_t> Lexer::tryReadNamedUCN(const char *&StartPtr,
   } else {
     StartPtr = CurPtr;
   }
-  return Match ? llvm::Optional<uint32_t>(*Match) : std::nullopt;
+  return Match ? std::optional<uint32_t>(*Match) : std::nullopt;
 }
 
 uint32_t Lexer::tryReadUCN(const char *&StartPtr, const char *SlashLoc,
                            Token *Result) {
 
   unsigned CharSize;
-  llvm::Optional<uint32_t> CodePointOpt;
+  std::optional<uint32_t> CodePointOpt;
   char Kind = getCharAndSize(StartPtr, CharSize);
   if (Kind == 'u' || Kind == 'U')
     CodePointOpt = tryReadNumericUCN(StartPtr, SlashLoc, Result);
@@ -4362,11 +4361,9 @@ HandleDirective:
   FormTokenWithChars(Result, CurPtr, tok::hash);
   PP->HandleDirective(Result);
 
-  if (PP->hadModuleLoaderFatalFailure()) {
+  if (PP->hadModuleLoaderFatalFailure())
     // With a fatal failure in the module loader, we abort parsing.
-    assert(Result.is(tok::eof) && "Preprocessor did not set tok:eof");
     return true;
-  }
 
   // We parsed the directive; lex a token with the new state.
   return false;
@@ -4407,6 +4404,22 @@ bool Lexer::LexDependencyDirectiveToken(Token &Result) {
   if (NextDepDirectiveTokenIndex > 1 || DDTok.Kind != tok::hash) {
     // Read something other than a preprocessor directive hash.
     MIOpt.ReadToken();
+  }
+
+  if (ParsingFilename && DDTok.is(tok::less)) {
+    BufferPtr = BufferStart + DDTok.Offset;
+    LexAngledStringLiteral(Result, BufferPtr + 1);
+    if (Result.isNot(tok::header_name))
+      return true;
+    // Advance the index of lexed tokens.
+    while (true) {
+      const dependency_directives_scan::Token &NextTok =
+          DepDirectives.front().Tokens[NextDepDirectiveTokenIndex];
+      if (BufferStart + NextTok.Offset >= BufferPtr)
+        break;
+      ++NextDepDirectiveTokenIndex;
+    }
+    return true;
   }
 
   const char *TokPtr = convertDependencyDirectiveToken(DDTok, Result);
@@ -4467,6 +4480,7 @@ bool Lexer::LexDependencyDirectiveTokenWhileSkipping(Token &Result) {
     case pp_pragma_push_macro:
     case pp_pragma_pop_macro:
     case pp_pragma_include_alias:
+    case pp_pragma_system_header:
     case pp_include_next:
     case decl_at_import:
     case cxx_module_decl:

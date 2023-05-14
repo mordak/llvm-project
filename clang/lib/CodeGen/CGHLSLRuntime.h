@@ -19,7 +19,6 @@
 
 #include "clang/Basic/HLSLRuntime.h"
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Frontend/HLSL/HLSLResource.h"
@@ -51,7 +50,7 @@ class CGHLSLRuntime {
 public:
   struct BufferResBinding {
     // The ID like 2 in register(b2, space1).
-    llvm::Optional<unsigned> Reg;
+    std::optional<unsigned> Reg;
     // The Space like 1 is register(b2, space1).
     // Default value is 0.
     unsigned Space;

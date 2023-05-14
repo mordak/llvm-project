@@ -183,7 +183,7 @@ CXXNewExpr::CXXNewExpr(bool IsGlobalNew, FunctionDecl *OperatorNew,
                        FunctionDecl *OperatorDelete, bool ShouldPassAlignment,
                        bool UsualArrayDeleteWantsSize,
                        ArrayRef<Expr *> PlacementArgs, SourceRange TypeIdParens,
-                       Optional<Expr *> ArraySize,
+                       std::optional<Expr *> ArraySize,
                        InitializationStyle InitializationStyle,
                        Expr *Initializer, QualType Ty,
                        TypeSourceInfo *AllocatedTypeInfo, SourceRange Range,
@@ -245,7 +245,7 @@ CXXNewExpr::Create(const ASTContext &Ctx, bool IsGlobalNew,
                    FunctionDecl *OperatorNew, FunctionDecl *OperatorDelete,
                    bool ShouldPassAlignment, bool UsualArrayDeleteWantsSize,
                    ArrayRef<Expr *> PlacementArgs, SourceRange TypeIdParens,
-                   Optional<Expr *> ArraySize,
+                   std::optional<Expr *> ArraySize,
                    InitializationStyle InitializationStyle, Expr *Initializer,
                    QualType Ty, TypeSourceInfo *AllocatedTypeInfo,
                    SourceRange Range, SourceRange DirectInitRange) {
@@ -1392,17 +1392,16 @@ ExprWithCleanups *ExprWithCleanups::Create(const ASTContext &C,
   return new (buffer) ExprWithCleanups(empty, numObjects);
 }
 
-CXXUnresolvedConstructExpr::CXXUnresolvedConstructExpr(QualType T,
-                                                       TypeSourceInfo *TSI,
-                                                       SourceLocation LParenLoc,
-                                                       ArrayRef<Expr *> Args,
-                                                       SourceLocation RParenLoc)
+CXXUnresolvedConstructExpr::CXXUnresolvedConstructExpr(
+    QualType T, TypeSourceInfo *TSI, SourceLocation LParenLoc,
+    ArrayRef<Expr *> Args, SourceLocation RParenLoc, bool IsListInit)
     : Expr(CXXUnresolvedConstructExprClass, T,
            (TSI->getType()->isLValueReferenceType()   ? VK_LValue
             : TSI->getType()->isRValueReferenceType() ? VK_XValue
                                                       : VK_PRValue),
            OK_Ordinary),
-      TSI(TSI), LParenLoc(LParenLoc), RParenLoc(RParenLoc) {
+      TypeAndInitForm(TSI, IsListInit), LParenLoc(LParenLoc),
+      RParenLoc(RParenLoc) {
   CXXUnresolvedConstructExprBits.NumArgs = Args.size();
   auto **StoredArgs = getTrailingObjects<Expr *>();
   for (unsigned I = 0; I != Args.size(); ++I)
@@ -1411,11 +1410,12 @@ CXXUnresolvedConstructExpr::CXXUnresolvedConstructExpr(QualType T,
 }
 
 CXXUnresolvedConstructExpr *CXXUnresolvedConstructExpr::Create(
-    const ASTContext &Context, QualType T, TypeSourceInfo *TSI, SourceLocation LParenLoc,
-    ArrayRef<Expr *> Args, SourceLocation RParenLoc) {
+    const ASTContext &Context, QualType T, TypeSourceInfo *TSI,
+    SourceLocation LParenLoc, ArrayRef<Expr *> Args, SourceLocation RParenLoc,
+    bool IsListInit) {
   void *Mem = Context.Allocate(totalSizeToAlloc<Expr *>(Args.size()));
-  return new (Mem)
-      CXXUnresolvedConstructExpr(T, TSI, LParenLoc, Args, RParenLoc);
+  return new (Mem) CXXUnresolvedConstructExpr(T, TSI, LParenLoc, Args,
+                                              RParenLoc, IsListInit);
 }
 
 CXXUnresolvedConstructExpr *
@@ -1426,7 +1426,7 @@ CXXUnresolvedConstructExpr::CreateEmpty(const ASTContext &Context,
 }
 
 SourceLocation CXXUnresolvedConstructExpr::getBeginLoc() const {
-  return TSI->getTypeLoc().getBeginLoc();
+  return TypeAndInitForm.getPointer()->getTypeLoc().getBeginLoc();
 }
 
 CXXDependentScopeMemberExpr::CXXDependentScopeMemberExpr(
@@ -1621,12 +1621,12 @@ CXXRecordDecl *UnresolvedMemberExpr::getNamingClass() {
   return Record;
 }
 
-SizeOfPackExpr *
-SizeOfPackExpr::Create(ASTContext &Context, SourceLocation OperatorLoc,
-                       NamedDecl *Pack, SourceLocation PackLoc,
-                       SourceLocation RParenLoc,
-                       Optional<unsigned> Length,
-                       ArrayRef<TemplateArgument> PartialArgs) {
+SizeOfPackExpr *SizeOfPackExpr::Create(ASTContext &Context,
+                                       SourceLocation OperatorLoc,
+                                       NamedDecl *Pack, SourceLocation PackLoc,
+                                       SourceLocation RParenLoc,
+                                       std::optional<unsigned> Length,
+                                       ArrayRef<TemplateArgument> PartialArgs) {
   void *Storage =
       Context.Allocate(totalSizeToAlloc<TemplateArgument>(PartialArgs.size()));
   return new (Storage) SizeOfPackExpr(Context.getSizeType(), OperatorLoc, Pack,

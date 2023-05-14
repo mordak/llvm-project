@@ -19,7 +19,6 @@
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FoldingSet.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -533,7 +532,7 @@ public:
 };
 
 class PathDiagnosticEventPiece : public PathDiagnosticSpotPiece {
-  Optional<bool> IsPrunable;
+  std::optional<bool> IsPrunable;
 
 public:
   PathDiagnosticEventPiece(const PathDiagnosticLocation &pos,

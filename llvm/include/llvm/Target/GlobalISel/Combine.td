@@ -205,6 +205,12 @@ def ptr_add_immed_chain : GICombineRule<
          [{ return Helper.matchPtrAddImmedChain(*${d}, ${matchinfo}); }]),
   (apply [{ Helper.applyPtrAddImmedChain(*${d}, ${matchinfo}); }])>;
 
+def shifts_too_big : GICombineRule<
+  (defs root:$root),
+  (match (wip_match_opcode G_SHL, G_ASHR, G_LSHR):$root,
+         [{ return Helper.matchShiftsTooBig(*${root}); }]),
+  (apply [{ Helper.replaceInstWithUndef(*${root}); }])>;
+
 // Fold shift (shift base x), y -> shift base, (x+y), if shifts are same
 def shift_immed_matchdata : GIDefMatchData<"RegisterImmPair">;
 def shift_immed_chain : GICombineRule<
@@ -236,6 +242,14 @@ def reduce_shl_of_extend : GICombineRule<
   (match (G_SHL $dst, $src0, $src1):$mi,
          [{ return Helper.matchCombineShlOfExtend(*${mi}, ${matchinfo}); }]),
   (apply [{ Helper.applyCombineShlOfExtend(*${mi}, ${matchinfo}); }])>;
+
+// Combine (shl (add x, c1), c2) -> (add (shl x, c2), c1 << c2)
+// Combine (shl (or x, c1), c2) -> (or (shl x, c2), c1 << c2)
+def commute_shift : GICombineRule<
+  (defs root:$d, build_fn_matchinfo:$matchinfo),
+  (match (wip_match_opcode G_SHL):$d,
+         [{ return Helper.matchCommuteShift(*${d}, ${matchinfo}); }]),
+  (apply [{ Helper.applyBuildFn(*${d}, ${matchinfo}); }])>;
 
 def narrow_binop_feeding_and : GICombineRule<
   (defs root:$root, build_fn_matchinfo:$matchinfo),
@@ -709,14 +723,6 @@ def load_or_combine : GICombineRule<
     [{ return Helper.matchLoadOrCombine(*${root}, ${info}); }]),
   (apply [{ Helper.applyBuildFn(*${root}, ${info}); }])>;
 
-
-def truncstore_merge_matcdata : GIDefMatchData<"MergeTruncStoresInfo">;
-def truncstore_merge : GICombineRule<
-  (defs root:$root, truncstore_merge_matcdata:$info),
-  (match (wip_match_opcode G_STORE):$root,
-   [{ return Helper.matchTruncStoreMerge(*${root}, ${info}); }]),
-  (apply [{ Helper.applyTruncStoreMerge(*${root}, ${info}); }])>;
-
 def extend_through_phis_matchdata: GIDefMatchData<"MachineInstr*">;
 def extend_through_phis : GICombineRule<
   (defs root:$root, extend_through_phis_matchdata:$matchinfo),
@@ -1030,6 +1036,14 @@ def bitcast_bitcast_fold : GICombineRule<
       [{ return MRI.getType(${src0}.getReg()) == MRI.getType(${dst}.getReg()); }]),
   (apply [{ Helper.replaceSingleDefInstWithReg(*${op}, ${src0}.getReg()); }])>;
 
+
+def fptrunc_fpext_fold : GICombineRule<
+  (defs root:$dst),
+  (match (G_FPTRUNC $dst, $src1):$op, (G_FPEXT $src1, $src0),
+      [{ return MRI.getType(${src0}.getReg()) == MRI.getType(${dst}.getReg()); }]),
+  (apply [{ Helper.replaceSingleDefInstWithReg(*${op}, ${src0}.getReg()); }])>;
+
+
 def select_to_minmax: GICombineRule<
   (defs root:$root, build_fn_matchinfo:$info),
   (match (wip_match_opcode G_SELECT):$root,
@@ -1057,7 +1071,7 @@ def identity_combines : GICombineGroup<[select_same_val, right_identity_zero,
                                         add_sub_reg, buildvector_identity_fold,
                                         trunc_buildvector_fold,
                                         trunc_lshr_buildvector_fold,
-                                        bitcast_bitcast_fold]>;
+                                        bitcast_bitcast_fold, fptrunc_fpext_fold]>;
 
 def const_combines : GICombineGroup<[constant_fp_op, const_ptradd_to_i2p,
                                      overlapping_and, mulo_by_2, mulo_by_0,
@@ -1089,7 +1103,7 @@ def fma_combines : GICombineGroup<[combine_fadd_fmul_to_fmad_or_fma,
 def all_combines : GICombineGroup<[trivial_combines, insert_vec_elt_combines,
     extract_vec_elt_combines, combines_for_extload,
     combine_indexed_load_store, undef_combines, identity_combines, phi_combines,
-    simplify_add_to_sub, hoist_logic_op_with_same_opcode_hands,
+    simplify_add_to_sub, hoist_logic_op_with_same_opcode_hands, shifts_too_big,
     reassocs, ptr_add_immed_chain,
     shl_ashr_to_sext_inreg, sext_inreg_of_load,
     width_reduction_combines, select_combines,
@@ -1099,7 +1113,7 @@ def all_combines : GICombineGroup<[trivial_combines, insert_vec_elt_combines,
     unmerge_zext_to_zext, merge_unmerge, trunc_ext_fold, trunc_shift,
     const_combines, xor_of_and_with_same_reg, ptr_add_with_zero,
     shift_immed_chain, shift_of_shifted_logic_chain, load_or_combine,
-    truncstore_merge, div_rem_to_divrem, funnel_shift_combines,
+    div_rem_to_divrem, funnel_shift_combines, commute_shift,
     form_bitfield_extract, constant_fold, fabs_fneg_fold,
     intdiv_combines, mulh_combines, redundant_neg_operands,
     and_or_disjoint_mask, fma_combines, fold_binop_into_select,

@@ -64,7 +64,8 @@ class LoongArchAsmParser : public MCTargetAsmParser {
                                       unsigned Kind) override;
 
   bool generateImmOutOfRangeError(OperandVector &Operands, uint64_t ErrorInfo,
-                                  int64_t Lower, int64_t Upper, Twine Msg);
+                                  int64_t Lower, int64_t Upper,
+                                  const Twine &Msg);
 
   /// Helper for processing MC instructions that have been successfully matched
   /// by MatchAndEmitInstruction.
@@ -318,7 +319,8 @@ public:
     LoongArchMCExpr::VariantKind VK = LoongArchMCExpr::VK_LoongArch_None;
     bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
     bool IsValidKind = VK == LoongArchMCExpr::VK_LoongArch_None ||
-                       VK == LoongArchMCExpr::VK_LoongArch_B16;
+                       VK == LoongArchMCExpr::VK_LoongArch_B16 ||
+                       VK == LoongArchMCExpr::VK_LoongArch_PCALA_LO12;
     return IsConstantImm
                ? isShiftedInt<16, 2>(Imm) && IsValidKind
                : LoongArchAsmParser::classifySymbolRef(getImm(), VK) &&
@@ -443,7 +445,7 @@ public:
   }
 
   void print(raw_ostream &OS) const override {
-    auto RegName = [](unsigned Reg) {
+    auto RegName = [](MCRegister Reg) {
       if (Reg)
         return LoongArchInstPrinter::getRegisterName(Reg);
       else
@@ -1241,7 +1243,7 @@ LoongArchAsmParser::validateTargetOperandClass(MCParsedAsmOperand &AsmOp,
 
 bool LoongArchAsmParser::generateImmOutOfRangeError(
     OperandVector &Operands, uint64_t ErrorInfo, int64_t Lower, int64_t Upper,
-    Twine Msg = "immediate must be an integer in the range") {
+    const Twine &Msg = "immediate must be an integer in the range") {
   SMLoc ErrorLoc = ((LoongArchOperand &)*Operands[ErrorInfo]).getStartLoc();
   return Error(ErrorLoc, Msg + " [" + Twine(Lower) + ", " + Twine(Upper) + "]");
 }

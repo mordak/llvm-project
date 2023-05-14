@@ -113,11 +113,18 @@ int main(int argc, const char **argv) {
   if (OptInputs.empty()) {
     llvm::LineEditor LE("clang-repl");
     // FIXME: Add LE.setListCompleter
-    while (llvm::Optional<std::string> Line = LE.readLine()) {
+    while (std::optional<std::string> Line = LE.readLine()) {
       if (*Line == R"(%quit)")
         break;
       if (*Line == R"(%undo)") {
         if (auto Err = Interp->Undo()) {
+          llvm::logAllUnhandledErrors(std::move(Err), llvm::errs(), "error: ");
+          HasError = true;
+        }
+        continue;
+      }
+      if (Line->rfind("%lib ", 0) == 0) {
+        if (auto Err = Interp->LoadDynamicLibrary(Line->data() + 5)) {
           llvm::logAllUnhandledErrors(std::move(Err), llvm::errs(), "error: ");
           HasError = true;
         }

@@ -131,6 +131,9 @@ void ScalarEnumerationTraits<ELFYAML::ELF_NT>::enumeration(
   ECase(NT_ARM_HW_WATCH);
   ECase(NT_ARM_SVE);
   ECase(NT_ARM_PAC_MASK);
+  ECase(NT_ARM_SSVE);
+  ECase(NT_ARM_ZA);
+  ECase(NT_ARM_ZT);
   ECase(NT_FILE);
   ECase(NT_PRXFPREG);
   ECase(NT_SIGINFO);
@@ -587,6 +590,8 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX90A, EF_AMDGPU_MACH);
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX90C, EF_AMDGPU_MACH);
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX940, EF_AMDGPU_MACH);
+    BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX941, EF_AMDGPU_MACH);
+    BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX942, EF_AMDGPU_MACH);
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX1010, EF_AMDGPU_MACH);
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX1011, EF_AMDGPU_MACH);
     BCaseMask(EF_AMDGPU_MACH_AMDGCN_GFX1012, EF_AMDGPU_MACH);
@@ -706,6 +711,10 @@ void ScalarEnumerationTraits<ELFYAML::ELF_SHT>::enumeration(
     break;
   case ELF::EM_MSP430:
     ECase(SHT_MSP430_ATTRIBUTES);
+    break;
+  case ELF::EM_AARCH64:
+    ECase(SHT_AARCH64_MEMTAG_GLOBALS_STATIC);
+    ECase(SHT_AARCH64_MEMTAG_GLOBALS_DYNAMIC);
     break;
   default:
     // Nothing to do.
@@ -1803,6 +1812,7 @@ void MappingTraits<ELFYAML::BBAddrMapEntry>::mapping(
 void MappingTraits<ELFYAML::BBAddrMapEntry::BBEntry>::mapping(
     IO &IO, ELFYAML::BBAddrMapEntry::BBEntry &E) {
   assert(IO.getContext() && "The IO context is not initialized");
+  IO.mapOptional("ID", E.ID);
   IO.mapRequired("AddressOffset", E.AddressOffset);
   IO.mapRequired("Size", E.Size);
   IO.mapRequired("Metadata", E.Metadata);

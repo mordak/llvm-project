@@ -29,7 +29,6 @@
 #include "clang/StaticAnalyzer/Core/PathSensitive/StoreRef.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/SymExpr.h"
 #include "llvm/ADT/APSInt.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -72,8 +71,8 @@ const ElementRegion *StoreManager::GetElementZeroRegion(const SubRegion *R,
   return MRMgr.getElementRegion(T, idx, R, Ctx);
 }
 
-Optional<const MemRegion *> StoreManager::castRegion(const MemRegion *R,
-                                                     QualType CastToTy) {
+std::optional<const MemRegion *> StoreManager::castRegion(const MemRegion *R,
+                                                          QualType CastToTy) {
   ASTContext &Ctx = StateMgr.getContext();
 
   // Handle casts to Objective-C objects.
@@ -315,7 +314,8 @@ static const CXXRecordDecl *getCXXRecordType(const MemRegion *MR) {
   return nullptr;
 }
 
-Optional<SVal> StoreManager::evalBaseToDerived(SVal Base, QualType TargetType) {
+std::optional<SVal> StoreManager::evalBaseToDerived(SVal Base,
+                                                    QualType TargetType) {
   const MemRegion *MR = Base.getAsRegion();
   if (!MR)
     return UnknownVal();

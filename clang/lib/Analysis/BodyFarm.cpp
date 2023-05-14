@@ -698,7 +698,7 @@ static Stmt *create_OSAtomicCompareAndSwap(ASTContext &C, const FunctionDecl *D)
 }
 
 Stmt *BodyFarm::getBody(const FunctionDecl *D) {
-  Optional<Stmt *> &Val = Bodies[D];
+  std::optional<Stmt *> &Val = Bodies[D];
   if (Val)
     return *Val;
 
@@ -717,6 +717,7 @@ Stmt *BodyFarm::getBody(const FunctionDecl *D) {
     switch (BuiltinID) {
     case Builtin::BIas_const:
     case Builtin::BIforward:
+    case Builtin::BIforward_like:
     case Builtin::BImove:
     case Builtin::BImove_if_noexcept:
       FF = create_std_move_forward;
@@ -873,7 +874,7 @@ Stmt *BodyFarm::getBody(const ObjCMethodDecl *D) {
   if (!D->isImplicit())
     return nullptr;
 
-  Optional<Stmt *> &Val = Bodies[D];
+  std::optional<Stmt *> &Val = Bodies[D];
   if (Val)
     return *Val;
   Val = nullptr;
