@@ -5924,7 +5924,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
 
 
 namespace {
-static Optional<std::string> findFile(StringRef path1, const Twine &path2) {
+static std::optional<std::string> findFile(StringRef path1, const Twine &path2) {
   SmallString<128> s;
   llvm::sys::path::append(s, path1, path2);
 
@@ -5934,7 +5934,7 @@ static Optional<std::string> findFile(StringRef path1, const Twine &path2) {
 }
 
 // Must be in sync with findMajMinShlib in lld/ELF/DriverUtils.cpp.
-llvm::Optional<std::string> findMajMinShlib(StringRef dir, const Twine& libNameSo) {
+std::optional<std::string> findMajMinShlib(StringRef dir, const Twine& libNameSo) {
   // Handle OpenBSD-style maj/min shlib scheme
   llvm::SmallString<128> Scratch;
   const StringRef LibName = (libNameSo + ".").toStringRef(Scratch);
