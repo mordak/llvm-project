@@ -1618,7 +1618,7 @@ static void CollectARMPACBTIOptions(const ToolChain &TC, const ArgList &Args,
         Args.MakeArgString(Twine("-msign-return-address-key=") + Key));
   if (IndirectBranches)
     CmdArgs.push_back("-mbranch-target-enforce");
-  } else {
+  else {
     if (Triple.isOSOpenBSD()) {
       CmdArgs.push_back("-msign-return-address=non-leaf");
       CmdArgs.push_back("-msign-return-address-key=a_key");
