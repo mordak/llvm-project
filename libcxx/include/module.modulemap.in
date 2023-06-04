@@ -267,6 +267,7 @@ module std [system] {
       module find_if_not                     { private header "__algorithm/find_if_not.h" }
       module for_each                        { private header "__algorithm/for_each.h" }
       module for_each_n                      { private header "__algorithm/for_each_n.h" }
+      module for_each_segment                { private header "__algorithm/for_each_segment.h" }
       module generate                        { private header "__algorithm/generate.h" }
       module generate_n                      { private header "__algorithm/generate_n.h" }
       module half_positive                   { private header "__algorithm/half_positive.h" }
@@ -338,8 +339,23 @@ module std [system] {
       module pstl_backends_cpu_backends_for_each {
         private header "__algorithm/pstl_backends/cpu_backends/for_each.h"
       }
+      module pstl_backends_cpu_backends_merge {
+        private header "__algorithm/pstl_backends/cpu_backends/merge.h"
+      }
       module pstl_backends_cpu_backends_serial {
         private header "__algorithm/pstl_backends/cpu_backends/serial.h"
+      }
+      module pstl_backends_cpu_backends_stable_sort {
+        private header "__algorithm/pstl_backends/cpu_backends/stable_sort.h"
+      }
+      module pstl_backends_cpu_backends_thread {
+        private header "__algorithm/pstl_backends/cpu_backends/thread.h"
+      }
+      module pstl_backends_cpu_backends_transform {
+        private header "__algorithm/pstl_backends/cpu_backends/transform.h"
+      }
+      module pstl_backends_cpu_backends_transform_reduce {
+        private header "__algorithm/pstl_backends/cpu_backends/transform_reduce.h"
       }
       module push_heap                       { private header "__algorithm/push_heap.h" }
       module ranges_adjacent_find            { private header "__algorithm/ranges_adjacent_find.h" }
@@ -575,6 +591,7 @@ module std [system] {
         private header "__algorithm/ranges_stable_sort.h"
         export functional.__functional.ranges_operations
       }
+      module ranges_starts_with         { private header "__algorithm/ranges_starts_with.h" }
       module ranges_swap_ranges {
         private header "__algorithm/ranges_swap_ranges.h"
         export algorithm.__algorithm.in_in_result
@@ -841,18 +858,6 @@ module std [system] {
 
     module __condition_variable {
       module condition_variable { private header "__condition_variable/condition_variable.h" }
-    }
-  }
-  module coroutine {
-    header "coroutine"
-    export compare
-    export *
-
-    module __coroutine {
-      module coroutine_handle           { private header "__coroutine/coroutine_handle.h" }
-      module coroutine_traits           { private header "__coroutine/coroutine_traits.h" }
-      module noop_coroutine_handle      { private header "__coroutine/noop_coroutine_handle.h" }
-      module trivial_awaitables         { private header "__coroutine/trivial_awaitables.h" }
     }
   }
   module deque {
@@ -1136,7 +1141,8 @@ module std [system] {
   }
 
   module __debug_utils {
-    module randomize_range { private header "__debug_utils/randomize_range.h" }
+    module randomize_range            { private header "__debug_utils/randomize_range.h" }
+    module strict_weak_ordering_check { private header "__debug_utils/strict_weak_ordering_check.h" }
   }
 
   module limits {
@@ -1157,6 +1163,16 @@ module std [system] {
     header "map"
     export initializer_list
     export *
+  }
+  module mdspan {
+    header "mdspan"
+    export array
+    export span
+    export *
+
+    module __mdspan {
+      module extents                         { private header "__mdspan/extents.h" }
+    }
   }
   module memory {
     header "memory"
@@ -1445,6 +1461,14 @@ module std [system] {
     header "stdexcept"
     export *
   }
+  module stop_token {
+    export *
+    module __stop_token {
+      module atomic_unique_lock   { private header "__stop_token/atomic_unique_lock.h" }
+      module intrusive_list_view  { private header "__stop_token/intrusive_list_view.h" }
+      module intrusive_shared_ptr { private header "__stop_token/intrusive_shared_ptr.h" }
+    }
+  }
   module streambuf {
     @requires_LIBCXX_ENABLE_LOCALIZATION@
     header "streambuf"
@@ -1549,6 +1573,7 @@ module std [system] {
     module has_unique_object_representation          { private header "__type_traits/has_unique_object_representation.h" }
     module has_virtual_destructor                    { private header "__type_traits/has_virtual_destructor.h" }
     module integral_constant                         { private header "__type_traits/integral_constant.h" }
+    module invoke                                    { private header "__type_traits/invoke.h" }
     module is_abstract                               { private header "__type_traits/is_abstract.h" }
     module is_aggregate                              { private header "__type_traits/is_aggregate.h" }
     module is_allocator                              { private header "__type_traits/is_allocator.h" }
@@ -1661,6 +1686,7 @@ module std [system] {
     module nat                                       { private header "__type_traits/nat.h" }
     module negation                                  { private header "__type_traits/negation.h" }
     module noexcept_move_assign_container            { private header "__type_traits/noexcept_move_assign_container.h" }
+    module operation_traits                          { private header "__type_traits/operation_traits.h" }
     module predicate_traits                          { private header "__type_traits/predicate_traits.h" }
     module promote                                   { private header "__type_traits/promote.h" }
     module rank                                      { private header "__type_traits/rank.h" }
@@ -1776,6 +1802,20 @@ module std [system] {
   module __tree              {         header "__tree"              export * }
   module __undef_macros      {         header "__undef_macros"      export * }
   module __verbose_abort     {         header "__verbose_abort"     export * }
+
+  // This one needs to appear after __tree to work around issues with modules in Objective-C++ mode.
+  module coroutine {
+    header "coroutine"
+    export compare
+    export *
+
+    module __coroutine {
+      module coroutine_handle           { private header "__coroutine/coroutine_handle.h" }
+      module coroutine_traits           { private header "__coroutine/coroutine_traits.h" }
+      module noop_coroutine_handle      { private header "__coroutine/noop_coroutine_handle.h" }
+      module trivial_awaitables         { private header "__coroutine/trivial_awaitables.h" }
+    }
+  }
 
   module experimental {
     requires cplusplus11

@@ -397,14 +397,17 @@ DwarfDebug::DwarfDebug(AsmPrinter *A)
   // 1: For ELF when requested.
   // 2: For XCOFF64: the AIX assembler will fill in debug section lengths
   //    according to the DWARF64 format for 64-bit assembly, so we must use
-  //    DWARF64 in the compiler too for 64-bit mode.
+  //    DWARF64 in the compiler for 64-bit mode on non-integrated-as mode.
+  bool IsXcoff = TT.isOSBinFormatXCOFF();
+  bool UseIntegratedAs = Asm->OutStreamer->isIntegratedAssemblerRequired();
   Dwarf64 &=
-      ((Asm->TM.Options.MCOptions.Dwarf64 || MMI->getModule()->isDwarf64()) &&
-       TT.isOSBinFormatELF()) ||
-      TT.isOSBinFormatXCOFF();
+      ((TT.isOSBinFormatELF() || (IsXcoff && UseIntegratedAs)) &&
+       (Asm->TM.Options.MCOptions.Dwarf64 || MMI->getModule()->isDwarf64())) ||
+      (IsXcoff && !UseIntegratedAs);
 
-  if (!Dwarf64 && TT.isArch64Bit() && TT.isOSBinFormatXCOFF())
-    report_fatal_error("XCOFF requires DWARF64 for 64-bit mode!");
+  if (!Dwarf64 && TT.isArch64Bit() && IsXcoff && !UseIntegratedAs)
+    report_fatal_error(
+        "XCOFF requires DWARF64 for 64-bit mode on non-integrated-as mode!");
 
   UseRangesSection = !NoDwarfRangesSection && !TT.isNVPTX();
 
@@ -704,8 +707,8 @@ static void interpretValues(const MachineInstr *CurMI,
     if (MI.isDebugInstr())
       return;
 
-    for (const MachineOperand &MO : MI.operands()) {
-      if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical()) {
+    for (const MachineOperand &MO : MI.all_defs()) {
+      if (MO.getReg().isPhysical()) {
         for (auto &FwdReg : ForwardedRegWorklist)
           if (TRI.regsOverlap(FwdReg.first, MO.getReg()))
             Defs.insert(FwdReg.first);
@@ -1091,6 +1094,13 @@ DwarfDebug::getOrCreateDwarfCompileUnit(const DICompileUnit *DIUnit) {
   if (auto *CU = CUMap.lookup(DIUnit))
     return *CU;
 
+  if (useSplitDwarf() &&
+      !shareAcrossDWOCUs() &&
+      (!DIUnit->getSplitDebugInlining() ||
+       DIUnit->getEmissionKind() == DICompileUnit::FullDebug) &&
+      !CUMap.empty()) {
+    return *CUMap.begin()->second;
+  }
   CompilationDir = DIUnit->getDirectory();
 
   auto OwnedUnit = std::make_unique<DwarfCompileUnit>(
@@ -1294,6 +1304,8 @@ void DwarfDebug::finalizeModuleInfo() {
   if (CUMap.size() > 1)
     DWOName = Asm->TM.Options.MCOptions.SplitDwarfFile;
 
+  bool HasEmittedSplitCU = false;
+
   // Handle anything that needs to be done on a per-unit basis after
   // all other generation.
   for (const auto &P : CUMap) {
@@ -1312,6 +1324,10 @@ void DwarfDebug::finalizeModuleInfo() {
     bool HasSplitUnit = SkCU && !TheCU.getUnitDie().children().empty();
 
     if (HasSplitUnit) {
+      (void)HasEmittedSplitCU;
+      assert((shareAcrossDWOCUs() || !HasEmittedSplitCU) &&
+             "Multiple CUs emitted into a single dwo file");
+      HasEmittedSplitCU = true;
       dwarf::Attribute attrDWOName = getDwarfVersion() >= 5
                                          ? dwarf::DW_AT_dwo_name
                                          : dwarf::DW_AT_GNU_dwo_name;
@@ -2264,7 +2280,7 @@ void DwarfDebug::endFunctionImpl(const MachineFunction *MF) {
 
   LexicalScope *FnScope = LScopes.getCurrentFunctionScope();
   assert(!FnScope || SP == FnScope->getScopeNode());
-  DwarfCompileUnit &TheCU = *CUMap.lookup(SP->getUnit());
+  DwarfCompileUnit &TheCU = getOrCreateDwarfCompileUnit(SP->getUnit());
   if (TheCU.getCUNode()->isDebugDirectivesOnly()) {
     PrevLabel = nullptr;
     CurFn = nullptr;

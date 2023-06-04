@@ -135,7 +135,7 @@ def err_drv_invalid_unwindlib_name : Error<
 def err_drv_incompatible_unwindlib : Error<
   "--rtlib=libgcc requires --unwindlib=libgcc">;
 def err_drv_incompatible_options : Error<
-  "The combination of '%0' and '%1' is incompatible">;
+  "the combination of '%0' and '%1' is incompatible">;
 def err_drv_invalid_stdlib_name : Error<
   "invalid library name in argument '%0'">;
 def err_drv_invalid_output_with_multiple_archs : Error<
@@ -619,6 +619,9 @@ def warn_drv_darwin_sdk_invalid_settings : Warning<
   "SDK settings were ignored as 'SDKSettings.json' could not be parsed">,
   InGroup<DiagGroup<"darwin-sdk-settings">>;
 
+def err_drv_darwin_sdk_missing_arclite : Error<
+  "SDK does not contain 'libarclite' at the path '%0'; try increasing the minimum deployment target">;
+
 def err_drv_trivial_auto_var_init_stop_after_missing_dependency : Error<
   "'-ftrivial-auto-var-init-stop-after=*' is used without "
   "'-ftrivial-auto-var-init=zero' or '-ftrivial-auto-var-init=pattern'">;
@@ -649,6 +652,8 @@ def err_drv_invalid_object_mode : Error<
   "OBJECT_MODE setting %0 is not recognized and is not a valid setting">;
 
 def err_aix_unsupported_tls_model : Error<"TLS model '%0' is not yet supported on AIX">;
+def err_roptr_requires_data_sections: Error<"-mxcoff-roptr is supported only with -fdata-sections">;
+def err_roptr_cannot_build_shared: Error<"-mxcoff-roptr is not supported with -shared">;
 
 def err_invalid_cxx_abi : Error<"invalid C++ ABI name '%0'">;
 def err_unsupported_cxx_abi : Error<"C++ ABI '%0' is not supported on target triple '%1'">;

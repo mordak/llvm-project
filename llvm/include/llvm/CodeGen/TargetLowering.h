@@ -459,6 +459,11 @@ public:
     return true;
   }
 
+  virtual bool shouldExpandGetVectorLength(EVT CountVT, unsigned VF,
+                                           bool IsScalable) const {
+    return true;
+  }
+
   // Return true if op(vecreduce(x), vecreduce(y)) should be reassociated to
   // vecreduce(op(x, y)) for the reduction opcode RedOpc.
   virtual bool shouldReassociateReduction(unsigned RedOpc, EVT VT) const {
@@ -608,13 +613,13 @@ public:
     return isLoadBitCastBeneficial(StoreVT, BitcastVT, DAG, MMO);
   }
 
-  /// Return true if it is expected to be cheaper to do a store of a non-zero
-  /// vector constant with the given size and type for the address space than to
+  /// Return true if it is expected to be cheaper to do a store of vector
+  /// constant with the given size and type for the address space than to
   /// store the individual scalar element constants.
-  virtual bool storeOfVectorConstantIsCheap(EVT MemVT,
+  virtual bool storeOfVectorConstantIsCheap(bool IsZero, EVT MemVT,
                                             unsigned NumElem,
                                             unsigned AddrSpace) const {
-    return false;
+    return IsZero;
   }
 
   /// Allow store merging for the specified type after legalization in addition
@@ -2902,8 +2907,9 @@ public:
 
   /// Try to optimize extending or truncating conversion instructions (like
   /// zext, trunc, fptoui, uitofp) for the target.
-  virtual bool optimizeExtendOrTruncateConversion(Instruction *I,
-                                                  Loop *L) const {
+  virtual bool
+  optimizeExtendOrTruncateConversion(Instruction *I, Loop *L,
+                                     const TargetTransformInfo &TTI) const {
     return false;
   }
 
@@ -3191,7 +3197,7 @@ public:
   /// If one cannot be created using all the given inputs, nullptr should be
   /// returned.
   virtual Value *createComplexDeinterleavingIR(
-      Instruction *I, ComplexDeinterleavingOperation OperationType,
+      IRBuilderBase &B, ComplexDeinterleavingOperation OperationType,
       ComplexDeinterleavingRotation Rotation, Value *InputA, Value *InputB,
       Value *Accumulator = nullptr) const {
     return nullptr;

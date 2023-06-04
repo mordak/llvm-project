@@ -123,6 +123,10 @@ public:
   bool hasStdExtZfhOrZfhminOrZhinxOrZhinxmin() const {
     return hasStdExtZfhOrZfhmin() || hasStdExtZhinxOrZhinxmin();
   }
+  bool hasHalfFPLoadStoreMove() const {
+    return HasStdExtZfh || HasStdExtZfhmin || HasStdExtZfbfmin ||
+           HasStdExtZvfbfwma;
+  }
   bool is64Bit() const { return IsRV64; }
   MVT getXLenVT() const { return XLenVT; }
   unsigned getXLen() const { return XLen; }
@@ -148,6 +152,11 @@ public:
     return VLen == 0 ? 65536 : VLen;
   }
   RISCVABI::ABI getTargetABI() const { return TargetABI; }
+  bool isSoftFPABI() const {
+    return TargetABI == RISCVABI::ABI_LP64 ||
+           TargetABI == RISCVABI::ABI_ILP32 ||
+           TargetABI == RISCVABI::ABI_ILP32E;
+  }
   bool isRegisterReservedByUser(Register i) const {
     assert(i < RISCV::NUM_TARGET_REGS && "Register out of range");
     return UserReservedRegister[i];
@@ -165,6 +174,7 @@ public:
   bool hasVInstructionsF64() const { return HasStdExtZve64d && HasStdExtD; }
   // F16 and F64 both require F32.
   bool hasVInstructionsAnyF() const { return hasVInstructionsF32(); }
+  bool hasVInstructionsFullMultiply() const { return HasStdExtV; }
   unsigned getMaxInterleaveFactor() const {
     return hasVInstructions() ? MaxInterleaveFactor : 1;
   }

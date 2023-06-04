@@ -1109,7 +1109,7 @@ INTERCEPTOR(int, pthread_key_create, __sanitizer_pthread_key_t *key,
 #if SANITIZER_NETBSD
 INTERCEPTOR(int, __libc_thr_keycreate, __sanitizer_pthread_key_t *m,
             void (*dtor)(void *value))
-ALIAS(WRAPPER_NAME(pthread_key_create));
+ALIAS(WRAP(pthread_key_create));
 #endif
 
 INTERCEPTOR(int, pthread_join, void *thread, void **retval) {
@@ -1421,6 +1421,7 @@ int OnExit() {
   } while (false)
 
 #include "sanitizer_common/sanitizer_platform_interceptors.h"
+#include "sanitizer_common/sanitizer_common_interceptors_memintrinsics.inc"
 #include "sanitizer_common/sanitizer_common_interceptors.inc"
 
 static uptr signal_impl(int signo, uptr cb);

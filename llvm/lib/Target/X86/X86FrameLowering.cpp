@@ -108,28 +108,12 @@ bool X86FrameLowering::hasFP(const MachineFunction &MF) const {
           SaveArgs);
 }
 
-static unsigned getSUBriOpcode(bool IsLP64, int64_t Imm) {
-  if (IsLP64) {
-    if (isInt<8>(Imm))
-      return X86::SUB64ri8;
-    return X86::SUB64ri32;
-  } else {
-    if (isInt<8>(Imm))
-      return X86::SUB32ri8;
-    return X86::SUB32ri;
-  }
+static unsigned getSUBriOpcode(bool IsLP64) {
+  return IsLP64 ? X86::SUB64ri32 : X86::SUB32ri;
 }
 
-static unsigned getADDriOpcode(bool IsLP64, int64_t Imm) {
-  if (IsLP64) {
-    if (isInt<8>(Imm))
-      return X86::ADD64ri8;
-    return X86::ADD64ri32;
-  } else {
-    if (isInt<8>(Imm))
-      return X86::ADD32ri8;
-    return X86::ADD32ri;
-  }
+static unsigned getADDriOpcode(bool IsLP64) {
+  return IsLP64 ? X86::ADD64ri32 : X86::ADD32ri;
 }
 
 static unsigned getSUBrrOpcode(bool IsLP64) {
@@ -141,14 +125,7 @@ static unsigned getADDrrOpcode(bool IsLP64) {
 }
 
 static unsigned getANDriOpcode(bool IsLP64, int64_t Imm) {
-  if (IsLP64) {
-    if (isInt<8>(Imm))
-      return X86::AND64ri8;
-    return X86::AND64ri32;
-  }
-  if (isInt<8>(Imm))
-    return X86::AND32ri8;
-  return X86::AND32ri;
+  return IsLP64 ? X86::AND64ri32 : X86::AND32ri;
 }
 
 static unsigned getLEArOpcode(bool IsLP64) {
@@ -366,8 +343,8 @@ MachineInstrBuilder X86FrameLowering::BuildStackAdjustment(
   } else {
     bool IsSub = Offset < 0;
     uint64_t AbsOffset = IsSub ? -Offset : Offset;
-    const unsigned Opc = IsSub ? getSUBriOpcode(Uses64BitFramePtr, AbsOffset)
-                               : getADDriOpcode(Uses64BitFramePtr, AbsOffset);
+    const unsigned Opc = IsSub ? getSUBriOpcode(Uses64BitFramePtr)
+                               : getADDriOpcode(Uses64BitFramePtr);
     MI = BuildMI(MBB, MBBI, DL, TII.get(Opc), StackPtr)
              .addReg(StackPtr)
              .addImm(AbsOffset);
@@ -403,9 +380,8 @@ int X86FrameLowering::mergeSPUpdates(MachineBasicBlock &MBB,
   unsigned Opc = PI->getOpcode();
   int Offset = 0;
 
-  if ((Opc == X86::ADD64ri32 || Opc == X86::ADD64ri8 ||
-       Opc == X86::ADD32ri || Opc == X86::ADD32ri8) &&
-      PI->getOperand(0).getReg() == StackPtr){
+  if ((Opc == X86::ADD64ri32 || Opc == X86::ADD32ri) &&
+      PI->getOperand(0).getReg() == StackPtr) {
     assert(PI->getOperand(1).getReg() == StackPtr);
     Offset = PI->getOperand(2).getImm();
   } else if ((Opc == X86::LEA32r || Opc == X86::LEA64_32r) &&
@@ -416,8 +392,7 @@ int X86FrameLowering::mergeSPUpdates(MachineBasicBlock &MBB,
              PI->getOperand(5).getReg() == X86::NoRegister) {
     // For LEAs we have: def = lea SP, FI, noreg, Offset, noreg.
     Offset = PI->getOperand(4).getImm();
-  } else if ((Opc == X86::SUB64ri32 || Opc == X86::SUB64ri8 ||
-              Opc == X86::SUB32ri || Opc == X86::SUB32ri8) &&
+  } else if ((Opc == X86::SUB64ri32 || Opc == X86::SUB32ri) &&
              PI->getOperand(0).getReg() == StackPtr) {
     assert(PI->getOperand(1).getReg() == StackPtr);
     Offset = -PI->getOperand(2).getImm();
@@ -445,6 +420,10 @@ void X86FrameLowering::BuildCFI(MachineBasicBlock &MBB,
                                 MachineInstr::MIFlag Flag) const {
   MachineFunction &MF = *MBB.getParent();
   unsigned CFIIndex = MF.addFrameInst(CFIInst);
+
+  if (CFIInst.getOperation() == MCCFIInstruction::OpAdjustCfaOffset)
+    MF.getInfo<X86MachineFunctionInfo>()->setHasCFIAdjustCfa(true);
+
   BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
       .addCFIIndex(CFIIndex)
       .setMIFlag(Flag);
@@ -836,7 +815,7 @@ void X86FrameLowering::emitStackProbeInlineGenericLoop(
   // save loop bound
   {
     const unsigned BoundOffset = alignDown(Offset, StackProbeSize);
-    const unsigned SUBOpc = getSUBriOpcode(Uses64BitFramePtr, BoundOffset);
+    const unsigned SUBOpc = getSUBriOpcode(Uses64BitFramePtr);
     BuildMI(MBB, MBBI, DL, TII.get(SUBOpc), FinalStackProbed)
         .addReg(FinalStackProbed)
         .addImm(BoundOffset)
@@ -1259,11 +1238,19 @@ uint64_t X86FrameLowering::calculateMaxStackAlign(const MachineFunction &MF) con
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   Align MaxAlign = MFI.getMaxAlign(); // Desired stack alignment.
   Align StackAlign = getStackAlign();
-  if (MF.getFunction().hasFnAttribute("stackrealign")) {
+  bool HasRealign = MF.getFunction().hasFnAttribute("stackrealign");
+  if (HasRealign) {
     if (MFI.hasCalls())
       MaxAlign = (StackAlign > MaxAlign) ? StackAlign : MaxAlign;
     else if (MaxAlign < SlotSize)
       MaxAlign = Align(SlotSize);
+  }
+
+  if (!Is64Bit && MF.getFunction().getCallingConv() == CallingConv::X86_INTR) {
+    if (HasRealign)
+      MaxAlign = (MaxAlign > 16) ? MaxAlign : Align(16);
+    else
+      MaxAlign = Align(16);
   }
   return MaxAlign.value();
 }
@@ -1339,7 +1326,7 @@ void X86FrameLowering::BuildStackAlignAND(MachineBasicBlock &MBB,
 
       {
         const unsigned SUBOpc =
-            getSUBriOpcode(Uses64BitFramePtr, StackProbeSize);
+            getSUBriOpcode(Uses64BitFramePtr);
         BuildMI(headMBB, DL, TII.get(SUBOpc), StackPtr)
             .addReg(StackPtr)
             .addImm(StackProbeSize)
@@ -1370,7 +1357,7 @@ void X86FrameLowering::BuildStackAlignAND(MachineBasicBlock &MBB,
             .setMIFlag(MachineInstr::FrameSetup);
 
         const unsigned SUBOpc =
-            getSUBriOpcode(Uses64BitFramePtr, StackProbeSize);
+            getSUBriOpcode(Uses64BitFramePtr);
         BuildMI(bodyMBB, DL, TII.get(SUBOpc), StackPtr)
             .addReg(StackPtr)
             .addImm(StackProbeSize)
@@ -1802,7 +1789,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
         } else {
           // No initial context, store null so that there's no pointer that
           // could be misused.
-          BuildMI(MBB, MBBI, DL, TII.get(X86::PUSH64i8))
+          BuildMI(MBB, MBBI, DL, TII.get(X86::PUSH64i32))
               .addImm(0)
               .setMIFlag(MachineInstr::FrameSetup);
         }
@@ -1821,7 +1808,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
             .addImm(8)
             .addUse(X86::NoRegister)
             .setMIFlag(MachineInstr::FrameSetup);
-        BuildMI(MBB, MBBI, DL, TII.get(X86::SUB64ri8), X86::RSP)
+        BuildMI(MBB, MBBI, DL, TII.get(X86::SUB64ri32), X86::RSP)
             .addUse(X86::RSP)
             .addImm(8)
             .setMIFlag(MachineInstr::FrameSetup);
@@ -2485,7 +2472,7 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
           (Opc != X86::POP64r || !PI->getFlag(MachineInstr::FrameDestroy)) &&
           (Opc != X86::LEAVE64 || !PI->getFlag(MachineInstr::FrameDestroy)) &&
           (Opc != X86::BTR64ri8 || !PI->getFlag(MachineInstr::FrameDestroy)) &&
-          (Opc != X86::ADD64ri8 || !PI->getFlag(MachineInstr::FrameDestroy)))
+          (Opc != X86::ADD64ri32 || !PI->getFlag(MachineInstr::FrameDestroy)))
         break;
       FirstCSPop = PI;
     }
@@ -3345,9 +3332,9 @@ void X86FrameLowering::adjustForSegmentedStacks(
             Reg11)
         .addImm(X86FI->getArgumentStackSize());
   } else {
-    BuildMI(allocMBB, DL, TII.get(X86::PUSHi32))
+    BuildMI(allocMBB, DL, TII.get(X86::PUSH32i))
       .addImm(X86FI->getArgumentStackSize());
-    BuildMI(allocMBB, DL, TII.get(X86::PUSHi32))
+    BuildMI(allocMBB, DL, TII.get(X86::PUSH32i))
       .addImm(StackSize);
   }
 
@@ -3862,7 +3849,7 @@ MachineBasicBlock::iterator X86FrameLowering::restoreWin32EHStackPointers(
 
   if (UsedReg == FramePtr) {
     // ADD $offset, %ebp
-    unsigned ADDri = getADDriOpcode(false, EndOffset);
+    unsigned ADDri = getADDriOpcode(false);
     BuildMI(MBB, MBBI, DL, TII.get(ADDri), FramePtr)
         .addReg(FramePtr)
         .addImm(EndOffset)
@@ -3897,7 +3884,23 @@ int X86FrameLowering::getInitialCFAOffset(const MachineFunction &MF) const {
 
 Register
 X86FrameLowering::getInitialCFARegister(const MachineFunction &MF) const {
-  return TRI->getDwarfRegNum(StackPtr, true);
+  return StackPtr;
+}
+
+TargetFrameLowering::DwarfFrameBase
+X86FrameLowering::getDwarfFrameBase(const MachineFunction &MF) const {
+  const TargetRegisterInfo *RI = MF.getSubtarget().getRegisterInfo();
+  Register FrameRegister = RI->getFrameRegister(MF);
+  if (getInitialCFARegister(MF) == FrameRegister &&
+      MF.getInfo<X86MachineFunctionInfo>()->hasCFIAdjustCfa()) {
+    DwarfFrameBase FrameBase;
+    FrameBase.Kind = DwarfFrameBase::CFA;
+    FrameBase.Location.Offset =
+        -MF.getFrameInfo().getStackSize() - getInitialCFAOffset(MF);
+    return FrameBase;
+  }
+
+  return DwarfFrameBase{DwarfFrameBase::Register, {FrameRegister}};
 }
 
 namespace {

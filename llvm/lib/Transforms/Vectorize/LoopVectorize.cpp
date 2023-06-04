@@ -1083,15 +1083,15 @@ void InnerLoopVectorizer::collectPoisonGeneratingRecipes(
 
       // This recipe contributes to the address computation of a widen
       // load/store. If the underlying instruction has poison-generating flags,
-      // either drop them directly if the recipe already models the flags or
-      // collect them in a set.
-      // TODO: Migrate all relevant recipes to hold their own flags.
-      Instruction *Instr = CurRec->getUnderlyingInstr();
-      if (Instr && Instr->hasPoisonGeneratingFlags()) {
-        if (auto *RecWithFlags = dyn_cast<VPRecipeWithIRFlags>(CurRec))
-          RecWithFlags->dropPoisonGeneratingFlags();
-        else
-          State.MayGeneratePoisonRecipes.insert(CurRec);
+      // drop them directly.
+      if (auto *RecWithFlags = dyn_cast<VPRecipeWithIRFlags>(CurRec)) {
+        RecWithFlags->dropPoisonGeneratingFlags();
+      } else {
+        Instruction *Instr = CurRec->getUnderlyingInstr();
+        (void)Instr;
+        assert((!Instr || !Instr->hasPoisonGeneratingFlags()) &&
+               "found instruction with poison generating flags not covered by "
+               "VPRecipeWithIRFlags");
       }
 
       // Add new definitions to the worklist.
@@ -2799,14 +2799,7 @@ void InnerLoopVectorizer::scalarizeInstruction(const Instruction *Instr,
   if (!IsVoidRetTy)
     Cloned->setName(Instr->getName() + ".cloned");
 
-  // If the scalarized instruction contributes to the address computation of a
-  // widen masked load/store which was in a basic block that needed predication
-  // and is not predicated after vectorization, we can't propagate
-  // poison-generating flags (nuw/nsw, exact, inbounds, etc.). The scalarized
-  // instruction could feed a poison value to the base address of the widen
-  // load/store.
-  if (State.MayGeneratePoisonRecipes.contains(RepRecipe))
-    Cloned->dropPoisonGeneratingFlags();
+  RepRecipe->setFlags(Cloned);
 
   if (Instr->getDebugLoc())
     State.setDebugLocFromInst(Instr);
@@ -4443,10 +4436,10 @@ bool LoopVectorizationCostModel::isPredicatedInst(Instruction *I) const {
     // both speculation safety (which follows from the same argument as loads),
     // but also must prove the value being stored is correct.  The easiest
     // form of the later is to require that all values stored are the same.
-    if (Legal->isUniformMemOp(*I) &&
-      (isa<LoadInst>(I) ||
-       (isa<StoreInst>(I) &&
-        TheLoop->isLoopInvariant(cast<StoreInst>(I)->getValueOperand()))) &&
+    if (Legal->isInvariant(getLoadStorePointerOperand(I)) &&
+        (isa<LoadInst>(I) ||
+         (isa<StoreInst>(I) &&
+          TheLoop->isLoopInvariant(cast<StoreInst>(I)->getValueOperand()))) &&
         !Legal->blockNeedsPredication(I->getParent()))
       return false;
     return true;
@@ -4517,7 +4510,8 @@ LoopVectorizationCostModel::getDivRemSpeculationCost(Instruction *I,
   // second vector operand. One example of this are shifts on x86.
   Value *Op2 = I->getOperand(1);
   auto Op2Info = TTI.getOperandInfo(Op2);
-  if (Op2Info.Kind == TargetTransformInfo::OK_AnyValue && Legal->isUniform(Op2))
+  if (Op2Info.Kind == TargetTransformInfo::OK_AnyValue &&
+      Legal->isInvariant(Op2))
     Op2Info.Kind = TargetTransformInfo::OK_UniformValue;
 
   SmallVector<const Value *, 4> Operands(I->operand_values());
@@ -4681,7 +4675,7 @@ void LoopVectorizationCostModel::collectLoopUniforms(ElementCount VF) {
   // Return true if all lanes perform the same memory operation, and we can
   // thus chose to execute only one.
   auto isUniformMemOpUse = [&](Instruction *I) {
-    if (!Legal->isUniformMemOp(*I))
+    if (!Legal->isUniformMemOp(*I, VF))
       return false;
     if (isa<LoadInst>(I))
       // Loading the same address always produces the same result - at least
@@ -4708,13 +4702,10 @@ void LoopVectorizationCostModel::collectLoopUniforms(ElementCount VF) {
   // I, I is known to not require scalarization, and the pointer is not also
   // stored.
   auto isVectorizedMemAccessUse = [&](Instruction *I, Value *Ptr) -> bool {
-    auto GetStoredValue = [I]() -> Value * {
-      if (!isa<StoreInst>(I))
-        return nullptr;
-      return I->getOperand(0);
-    };
-    return getLoadStorePointerOperand(I) == Ptr && isUniformDecision(I, VF) &&
-           GetStoredValue() != Ptr;
+    if (isa<StoreInst>(I) && I->getOperand(0) == Ptr)
+      return false;
+    return getLoadStorePointerOperand(I) == Ptr &&
+           (isUniformDecision(I, VF) || Legal->isInvariant(Ptr));
   };
 
   // Holds a list of values which are known to have at least one uniform use.
@@ -4760,10 +4751,8 @@ void LoopVectorizationCostModel::collectLoopUniforms(ElementCount VF) {
       if (isUniformMemOpUse(&I))
         addToWorklistIfAllowed(&I);
 
-      if (isVectorizedMemAccessUse(&I, Ptr)) {
-        assert(isUniformDecision(&I, VF) && "consistency check");
+      if (isVectorizedMemAccessUse(&I, Ptr))
         HasUniformUse.insert(Ptr);
-      }
     }
 
   // Add to the worklist any operands which have *only* uniform (e.g. lane 0
@@ -6508,7 +6497,7 @@ LoopVectorizationCostModel::getConsecutiveMemOpCost(Instruction *I,
 InstructionCost
 LoopVectorizationCostModel::getUniformMemOpCost(Instruction *I,
                                                 ElementCount VF) {
-  assert(Legal->isUniformMemOp(*I));
+  assert(Legal->isUniformMemOp(*I, VF));
 
   Type *ValTy = getLoadStoreType(I);
   auto *VectorTy = cast<VectorType>(ToVectorTy(ValTy, VF));
@@ -6523,7 +6512,7 @@ LoopVectorizationCostModel::getUniformMemOpCost(Instruction *I,
   }
   StoreInst *SI = cast<StoreInst>(I);
 
-  bool isLoopInvariantStoreValue = Legal->isUniform(SI->getValueOperand());
+  bool isLoopInvariantStoreValue = Legal->isInvariant(SI->getValueOperand());
   return TTI.getAddressComputationCost(ValTy) +
          TTI.getMemoryOpCost(Instruction::Store, ValTy, Alignment, AS,
                              CostKind) +
@@ -6884,7 +6873,7 @@ void LoopVectorizationCostModel::setCostBasedWideningDecision(ElementCount VF) {
       if (isa<StoreInst>(&I) && isScalarWithPredication(&I, VF))
         NumPredStores++;
 
-      if (Legal->isUniformMemOp(I)) {
+      if (Legal->isUniformMemOp(I, VF)) {
         auto isLegalToScalarize = [&]() {
           if (!VF.isScalable())
             // Scalarization of fixed length vectors "just works".
@@ -7198,7 +7187,8 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, ElementCount VF,
     // second vector operand. One example of this are shifts on x86.
     Value *Op2 = I->getOperand(1);
     auto Op2Info = TTI.getOperandInfo(Op2);
-    if (Op2Info.Kind == TargetTransformInfo::OK_AnyValue && Legal->isUniform(Op2))
+    if (Op2Info.Kind == TargetTransformInfo::OK_AnyValue &&
+        Legal->isInvariant(Op2))
       Op2Info.Kind = TargetTransformInfo::OK_UniformValue;
 
     SmallVector<const Value *, 4> Operands(I->operand_values());
@@ -7750,7 +7740,10 @@ SCEV2ValueTy LoopVectorizationPlanner::executePlan(
     LoopVectorizeHints Hints(L, true, *ORE);
     Hints.setAlreadyVectorized();
   }
-  AddRuntimeUnrollDisableMetaData(L);
+  TargetTransformInfo::UnrollingPreferences UP;
+  TTI.getUnrollingPreferences(L, *PSE.getSE(), UP, ORE);
+  if (!UP.UnrollVectorizedLoop || CanonicalIVStartValue)
+    AddRuntimeUnrollDisableMetaData(L);
 
   // 3. Fix the vectorized code: take care of header phi's, live-outs,
   //    predication, updating analyses.
@@ -8494,7 +8487,7 @@ VPRecipeBase *VPRecipeBuilder::tryToWiden(Instruction *I,
       Ops[1] = SafeRHS;
       return new VPWidenRecipe(*I, make_range(Ops.begin(), Ops.end()));
     }
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   }
   case Instruction::Add:
   case Instruction::And:
@@ -9576,9 +9569,10 @@ void VPReplicateRecipe::execute(VPTransformState &State) {
     return;
   }
 
-  // A store of a loop varying value to a loop invariant address only
-  // needs only the last copy of the store.
-  if (isa<StoreInst>(UI) && getOperand(1)->isLiveIn()) {
+  // A store of a loop varying value to a uniform address only needs the last
+  // copy of the store.
+  if (isa<StoreInst>(UI) &&
+      vputils::isUniformAfterVectorization(getOperand(1))) {
     auto Lane = VPLane::getLastLaneForVF(State.VF);
     State.ILV->scalarizeInstruction(UI, this, VPIteration(State.UF - 1, Lane),
                                     State);

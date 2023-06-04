@@ -91,7 +91,7 @@ Operation *Operation::create(Location location, OperationName name,
   unsigned numSuccessors = successors.size();
   unsigned numOperands = operands.size();
   unsigned numResults = resultTypes.size();
-  int opPropertiesAllocSize = name.getOpPropertyByteSize();
+  int opPropertiesAllocSize = llvm::alignTo<8>(name.getOpPropertyByteSize());
 
   // If the operation is known to have no operands, don't allocate an operand
   // storage.
@@ -303,18 +303,36 @@ DictionaryAttr Operation::getAttrDictionary() {
 void Operation::setAttrs(DictionaryAttr newAttrs) {
   assert(newAttrs && "expected valid attribute dictionary");
   if (getPropertiesStorageSize()) {
-    attrs = DictionaryAttr::get(getContext(), {});
-    for (const NamedAttribute &attr : newAttrs)
-      setAttr(attr.getName(), attr.getValue());
-    return;
+    // We're spliting the providing DictionaryAttr by removing the inherentAttr
+    // which will be stored in the properties.
+    SmallVector<NamedAttribute> discardableAttrs;
+    discardableAttrs.reserve(newAttrs.size());
+    for (NamedAttribute attr : newAttrs) {
+      if (std::optional<Attribute> inherentAttr =
+              getInherentAttr(attr.getName()))
+        setInherentAttr(attr.getName(), attr.getValue());
+      else
+        discardableAttrs.push_back(attr);
+    }
+    if (discardableAttrs.size() != newAttrs.size())
+      newAttrs = DictionaryAttr::get(getContext(), discardableAttrs);
   }
   attrs = newAttrs;
 }
 void Operation::setAttrs(ArrayRef<NamedAttribute> newAttrs) {
   if (getPropertiesStorageSize()) {
-    setAttrs(DictionaryAttr::get(getContext(), {}));
-    for (const NamedAttribute &attr : newAttrs)
-      setAttr(attr.getName(), attr.getValue());
+    // We're spliting the providing array of attributes by removing the inherentAttr
+    // which will be stored in the properties.
+    SmallVector<NamedAttribute> discardableAttrs;
+    discardableAttrs.reserve(newAttrs.size());
+    for (NamedAttribute attr : newAttrs) {
+      if (std::optional<Attribute> inherentAttr =
+              getInherentAttr(attr.getName()))
+        setInherentAttr(attr.getName(), attr.getValue());
+      else
+        discardableAttrs.push_back(attr);
+    }
+    attrs = DictionaryAttr::get(getContext(), discardableAttrs);
     return;
   }
   attrs = DictionaryAttr::get(getContext(), newAttrs);
@@ -1255,52 +1273,6 @@ LogicalResult OpTrait::impl::verifyIsIsolatedFromAbove(Operation *isolatedOp) {
 bool OpTrait::hasElementwiseMappableTraits(Operation *op) {
   return op->hasTrait<Elementwise>() && op->hasTrait<Scalarizable>() &&
          op->hasTrait<Vectorizable>() && op->hasTrait<Tensorizable>();
-}
-
-//===----------------------------------------------------------------------===//
-// CastOpInterface
-//===----------------------------------------------------------------------===//
-
-/// Attempt to fold the given cast operation.
-LogicalResult
-impl::foldCastInterfaceOp(Operation *op, ArrayRef<Attribute> attrOperands,
-                          SmallVectorImpl<OpFoldResult> &foldResults) {
-  OperandRange operands = op->getOperands();
-  if (operands.empty())
-    return failure();
-  ResultRange results = op->getResults();
-
-  // Check for the case where the input and output types match 1-1.
-  if (operands.getTypes() == results.getTypes()) {
-    foldResults.append(operands.begin(), operands.end());
-    return success();
-  }
-
-  return failure();
-}
-
-/// Attempt to verify the given cast operation.
-LogicalResult impl::verifyCastInterfaceOp(
-    Operation *op, function_ref<bool(TypeRange, TypeRange)> areCastCompatible) {
-  auto resultTypes = op->getResultTypes();
-  if (resultTypes.empty())
-    return op->emitOpError()
-           << "expected at least one result for cast operation";
-
-  auto operandTypes = op->getOperandTypes();
-  if (!areCastCompatible(operandTypes, resultTypes)) {
-    InFlightDiagnostic diag = op->emitOpError("operand type");
-    if (operandTypes.empty())
-      diag << "s []";
-    else if (llvm::size(operandTypes) == 1)
-      diag << " " << *operandTypes.begin();
-    else
-      diag << "s " << operandTypes;
-    return diag << " and result type" << (resultTypes.size() == 1 ? " " : "s ")
-                << resultTypes << " are cast incompatible";
-  }
-
-  return success();
 }
 
 //===----------------------------------------------------------------------===//
