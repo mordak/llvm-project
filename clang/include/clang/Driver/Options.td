@@ -4256,9 +4256,9 @@ def pedantic : Flag<["-", "--"], "pedantic">, Group<pedantic_Group>, Flags<[CC1O
 // Commit 7f85c560b43bd1b2ebf77cc443281b474b5e19c6 re-added -p as another
 // option, referencing AIX. We deliberately added -p as an alias of -pg (below)
 // in 4a39d3fe14b39d088ca94a7747e4bab1dac261b1 and will keep it that way for now.
-def p : Flag<["-"], "p">, Alias<pg>;
 def pg : Flag<["-"], "pg">, HelpText<"Enable mcount instrumentation">, Flags<[CC1Option]>,
   MarshallingInfoFlag<CodeGenOpts<"InstrumentForProfiling">>;
+def p : Flag<["-"], "p">, Alias<pg>;
 def pipe : Flag<["-", "--"], "pipe">,
   HelpText<"Use pipes between commands, when possible">;
 def prebind__all__twolevel__modules : Flag<["-"], "prebind_all_twolevel_modules">;
