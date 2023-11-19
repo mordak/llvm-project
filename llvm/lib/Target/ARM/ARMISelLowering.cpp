@@ -21335,6 +21335,8 @@ bool ARMTargetLowering::shouldInsertFencesForAtomic(
 }
 
 bool ARMTargetLowering::useLoadStackGuardNode() const {
+  if (Subtarget->getTargetTriple().isOSOpenBSD())
+    return false;
   // ROPI/RWPI are not supported currently.
   return !Subtarget->isROPI() && !Subtarget->isRWPI();
 }
