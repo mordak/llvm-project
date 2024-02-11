@@ -46,6 +46,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/SaveAndRestore.h"
 #include <map>
 #include <optional>
 #include <set>
@@ -2435,6 +2436,114 @@ static bool CheckConstexprFunctionBody(Sema &SemaRef, const FunctionDecl *Dcl,
   }
 
   return true;
+}
+
+bool Sema::CheckImmediateEscalatingFunctionDefinition(
+    FunctionDecl *FD, const sema::FunctionScopeInfo *FSI) {
+  if (!getLangOpts().CPlusPlus20 || !FD->isImmediateEscalating())
+    return true;
+  FD->setBodyContainsImmediateEscalatingExpressions(
+      FSI->FoundImmediateEscalatingExpression);
+  if (FSI->FoundImmediateEscalatingExpression) {
+    auto it = UndefinedButUsed.find(FD->getCanonicalDecl());
+    if (it != UndefinedButUsed.end()) {
+      Diag(it->second, diag::err_immediate_function_used_before_definition)
+          << it->first;
+      Diag(FD->getLocation(), diag::note_defined_here) << FD;
+      if (FD->isImmediateFunction() && !FD->isConsteval())
+        DiagnoseImmediateEscalatingReason(FD);
+      return false;
+    }
+  }
+  return true;
+}
+
+void Sema::DiagnoseImmediateEscalatingReason(FunctionDecl *FD) {
+  assert(FD->isImmediateEscalating() && !FD->isConsteval() &&
+         "expected an immediate function");
+  assert(FD->hasBody() && "expected the function to have a body");
+  struct ImmediateEscalatingExpressionsVisitor
+      : public RecursiveASTVisitor<ImmediateEscalatingExpressionsVisitor> {
+
+    using Base = RecursiveASTVisitor<ImmediateEscalatingExpressionsVisitor>;
+    Sema &SemaRef;
+
+    const FunctionDecl *ImmediateFn;
+    bool ImmediateFnIsConstructor;
+    CXXConstructorDecl *CurrentConstructor = nullptr;
+    CXXCtorInitializer *CurrentInit = nullptr;
+
+    ImmediateEscalatingExpressionsVisitor(Sema &SemaRef, FunctionDecl *FD)
+        : SemaRef(SemaRef), ImmediateFn(FD),
+          ImmediateFnIsConstructor(isa<CXXConstructorDecl>(FD)) {}
+
+    bool shouldVisitImplicitCode() const { return true; }
+    bool shouldVisitLambdaBody() const { return false; }
+
+    void Diag(const Expr *E, const FunctionDecl *Fn, bool IsCall) {
+      SourceLocation Loc = E->getBeginLoc();
+      SourceRange Range = E->getSourceRange();
+      if (CurrentConstructor && CurrentInit) {
+        Loc = CurrentConstructor->getLocation();
+        Range = CurrentInit->isWritten() ? CurrentInit->getSourceRange()
+                                         : SourceRange();
+      }
+      SemaRef.Diag(Loc, diag::note_immediate_function_reason)
+          << ImmediateFn << Fn << Fn->isConsteval() << IsCall
+          << isa<CXXConstructorDecl>(Fn) << ImmediateFnIsConstructor
+          << (CurrentInit != nullptr)
+          << (CurrentInit && !CurrentInit->isWritten())
+          << (CurrentInit ? CurrentInit->getAnyMember() : nullptr) << Range;
+    }
+    bool TraverseCallExpr(CallExpr *E) {
+      if (const auto *DR =
+              dyn_cast<DeclRefExpr>(E->getCallee()->IgnoreImplicit());
+          DR && DR->isImmediateEscalating()) {
+        Diag(E, E->getDirectCallee(), /*IsCall=*/true);
+        return false;
+      }
+
+      for (Expr *A : E->arguments())
+        if (!getDerived().TraverseStmt(A))
+          return false;
+
+      return true;
+    }
+
+    bool VisitDeclRefExpr(DeclRefExpr *E) {
+      if (const auto *ReferencedFn = dyn_cast<FunctionDecl>(E->getDecl());
+          ReferencedFn && E->isImmediateEscalating()) {
+        Diag(E, ReferencedFn, /*IsCall=*/false);
+        return false;
+      }
+
+      return true;
+    }
+
+    bool VisitCXXConstructExpr(CXXConstructExpr *E) {
+      CXXConstructorDecl *D = E->getConstructor();
+      if (E->isImmediateEscalating()) {
+        Diag(E, D, /*IsCall=*/true);
+        return false;
+      }
+      return true;
+    }
+
+    bool TraverseConstructorInitializer(CXXCtorInitializer *Init) {
+      llvm::SaveAndRestore RAII(CurrentInit, Init);
+      return Base::TraverseConstructorInitializer(Init);
+    }
+
+    bool TraverseCXXConstructorDecl(CXXConstructorDecl *Ctr) {
+      llvm::SaveAndRestore RAII(CurrentConstructor, Ctr);
+      return Base::TraverseCXXConstructorDecl(Ctr);
+    }
+
+    bool TraverseType(QualType T) { return true; }
+    bool VisitBlockExpr(BlockExpr *T) { return true; }
+
+  } Visitor(*this, FD);
+  Visitor.TraverseDecl(FD);
 }
 
 /// Get the class that is directly named by the current context. This is the
@@ -6002,9 +6111,9 @@ void AbstractUsageInfo::CheckType(const NamedDecl *D, TypeLoc TL,
 /// Check for invalid uses of an abstract type in a function declaration.
 static void CheckAbstractClassUsage(AbstractUsageInfo &Info,
                                     FunctionDecl *FD) {
-  // No need to do the check on definitions, which require that
-  // the return/param types be complete.
-  if (FD->doesThisDeclarationHaveABody())
+  // Only definitions are required to refer to complete and
+  // non-abstract types.
+  if (!FD->doesThisDeclarationHaveABody())
     return;
 
   // For safety's sake, just ignore it if we don't have type source
@@ -8127,7 +8236,8 @@ private:
 
       if (Diagnose == ExplainDeleted) {
         S.Diag(Subobj.Loc, diag::note_defaulted_comparison_no_viable_function)
-            << FD << (OO == OO_ExclaimEqual) << Subobj.Kind << Subobj.Decl;
+            << FD << (OO == OO_EqualEqual || OO == OO_ExclaimEqual)
+            << Subobj.Kind << Subobj.Decl;
 
         // For a three-way comparison, list both the candidates for the
         // original operator and the candidates for the synthesized operator.
@@ -8582,8 +8692,8 @@ bool Sema::CheckExplicitlyDefaultedComparison(Scope *S, FunctionDecl *FD,
   // C++2a [class.compare.default]p1:
   //   A defaulted comparison operator function for some class C shall be a
   //   non-template function declared in the member-specification of C that is
-  //    -- a non-static const member of C having one parameter of type
-  //       const C&, or
+  //    -- a non-static const non-volatile member of C having one parameter of
+  //       type const C& and either no ref-qualifier or the ref-qualifier &, or
   //    -- a friend of C having two parameters of type const C& or two
   //       parameters of type C.
 
@@ -8592,6 +8702,17 @@ bool Sema::CheckExplicitlyDefaultedComparison(Scope *S, FunctionDecl *FD,
   if (IsMethod) {
     auto *MD = cast<CXXMethodDecl>(FD);
     assert(!MD->isStatic() && "comparison function cannot be a static member");
+
+    if (MD->getRefQualifier() == RQ_RValue) {
+      Diag(MD->getLocation(), diag::err_ref_qualifier_comparison_operator);
+
+      // Remove the ref qualifier to recover.
+      const auto *FPT = MD->getType()->castAs<FunctionProtoType>();
+      FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+      EPI.RefQualifier = RQ_None;
+      MD->setType(Context.getFunctionType(FPT->getReturnType(),
+                                          FPT->getParamTypes(), EPI));
+    }
 
     // If we're out-of-class, this is the class we're comparing.
     if (!RD)
@@ -8612,6 +8733,17 @@ bool Sema::CheckExplicitlyDefaultedComparison(Scope *S, FunctionDecl *FD,
       const auto *FPT = MD->getType()->castAs<FunctionProtoType>();
       FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
       EPI.TypeQuals.addConst();
+      MD->setType(Context.getFunctionType(FPT->getReturnType(),
+                                          FPT->getParamTypes(), EPI));
+    }
+
+    if (MD->isVolatile()) {
+      Diag(MD->getLocation(), diag::err_volatile_comparison_operator);
+
+      // Remove the 'volatile' from the type to recover.
+      const auto *FPT = MD->getType()->castAs<FunctionProtoType>();
+      FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
+      EPI.TypeQuals.removeVolatile();
       MD->setType(Context.getFunctionType(FPT->getReturnType(),
                                           FPT->getParamTypes(), EPI));
     }
@@ -11256,6 +11388,20 @@ Decl *Sema::ActOnStartNamespaceDef(Scope *NamespcScope,
 
   NamespaceDecl *PrevNS = nullptr;
   if (II) {
+    // C++ [namespace.std]p7:
+    //   A translation unit shall not declare namespace std to be an inline
+    //   namespace (9.8.2).
+    //
+    // Precondition: the std namespace is in the file scope and is declared to
+    // be inline
+    auto DiagnoseInlineStdNS = [&]() {
+      assert(IsInline && II->isStr("std") &&
+             CurContext->getRedeclContext()->isTranslationUnit() &&
+             "Precondition of DiagnoseInlineStdNS not met");
+      Diag(InlineLoc, diag::err_inline_namespace_std)
+          << SourceRange(InlineLoc, InlineLoc.getLocWithOffset(6));
+      IsInline = false;
+    };
     // C++ [namespace.def]p2:
     //   The identifier in an original-namespace-definition shall not
     //   have been previously defined in the declarative region in
@@ -11276,7 +11422,10 @@ Decl *Sema::ActOnStartNamespaceDef(Scope *NamespcScope,
 
     if (PrevNS) {
       // This is an extended namespace definition.
-      if (IsInline != PrevNS->isInline())
+      if (IsInline && II->isStr("std") &&
+          CurContext->getRedeclContext()->isTranslationUnit())
+        DiagnoseInlineStdNS();
+      else if (IsInline != PrevNS->isInline())
         DiagnoseNamespaceInlineMismatch(*this, NamespaceLoc, Loc, II,
                                         &IsInline, PrevNS);
     } else if (PrevDecl) {
@@ -11288,6 +11437,8 @@ Decl *Sema::ActOnStartNamespaceDef(Scope *NamespcScope,
       // Continue on to push Namespc as current DeclContext and return it.
     } else if (II->isStr("std") &&
                CurContext->getRedeclContext()->isTranslationUnit()) {
+      if (IsInline)
+        DiagnoseInlineStdNS();
       // This is the first "real" definition of the namespace "std", so update
       // our cache of the "std" namespace to point at this definition.
       PrevNS = getStdNamespace();
@@ -15703,7 +15854,11 @@ void Sema::FinalizeVarWithDestructor(VarDecl *VD, const RecordType *Record) {
     return;
 
   CXXDestructorDecl *Destructor = LookupDestructor(ClassDecl);
-
+  // The result of `LookupDestructor` might be nullptr if the destructor is
+  // invalid, in which case it is marked as `IneligibleOrNotSelected` and
+  // will not be selected by `CXXRecordDecl::getDestructor()`.
+  if (!Destructor)
+    return;
   // If this is an array, we'll require the destructor during initialization, so
   // we can skip over this. We still want to emit exit-time destructor warnings
   // though.
@@ -16339,15 +16494,18 @@ bool Sema::CheckLiteralOperatorDeclaration(FunctionDecl *FnDecl) {
     }
   }
 
-  StringRef LiteralName
-    = FnDecl->getDeclName().getCXXLiteralIdentifier()->getName();
-  if (LiteralName[0] != '_' &&
+  const IdentifierInfo *II = FnDecl->getDeclName().getCXXLiteralIdentifier();
+  ReservedLiteralSuffixIdStatus Status = II->isReservedLiteralSuffixId();
+  if (Status != ReservedLiteralSuffixIdStatus::NotReserved &&
       !getSourceManager().isInSystemHeader(FnDecl->getLocation())) {
-    // C++11 [usrlit.suffix]p1:
-    //   Literal suffix identifiers that do not start with an underscore
-    //   are reserved for future standardization.
+    // C++23 [usrlit.suffix]p1:
+    //   Literal suffix identifiers that do not start with an underscore are
+    //   reserved for future standardization. Literal suffix identifiers that
+    //   contain a double underscore __ are reserved for use by C++
+    //   implementations.
     Diag(FnDecl->getLocation(), diag::warn_user_literal_reserved)
-      << StringLiteralParser::isValidUDSuffix(getLangOpts(), LiteralName);
+        << static_cast<int>(Status)
+        << StringLiteralParser::isValidUDSuffix(getLangOpts(), II->getName());
   }
 
   return false;
@@ -16363,11 +16521,7 @@ Decl *Sema::ActOnStartLinkageSpecification(Scope *S, SourceLocation ExternLoc,
                                            Expr *LangStr,
                                            SourceLocation LBraceLoc) {
   StringLiteral *Lit = cast<StringLiteral>(LangStr);
-  if (!Lit->isOrdinary()) {
-    Diag(LangStr->getExprLoc(), diag::err_language_linkage_spec_not_ascii)
-      << LangStr->getSourceRange();
-    return nullptr;
-  }
+  assert(Lit->isUnevaluated() && "Unexpected string literal kind");
 
   StringRef Lang = Lit->getString();
   LinkageSpecDecl::LanguageIDs Language;
@@ -16490,6 +16644,11 @@ VarDecl *Sema::BuildExceptionDeclaration(Scope *S,
   if (!Invalid && (Mode == 0 || !BaseType->isVoidType()) &&
       !BaseType->isDependentType() && RequireCompleteType(Loc, BaseType, DK))
     Invalid = true;
+
+  if (!Invalid && BaseType.isWebAssemblyReferenceType()) {
+    Diag(Loc, diag::err_wasm_reftype_tc) << 1;
+    Invalid = true;
+  }
 
   if (!Invalid && Mode != 1 && BaseType->isSizelessType()) {
     Diag(Loc, diag::err_catch_sizeless) << (Mode == 2 ? 1 : 0) << BaseType;
@@ -16633,14 +16792,11 @@ Decl *Sema::ActOnStaticAssertDeclaration(SourceLocation StaticAssertLoc,
                                          Expr *AssertExpr,
                                          Expr *AssertMessageExpr,
                                          SourceLocation RParenLoc) {
-  StringLiteral *AssertMessage =
-      AssertMessageExpr ? cast<StringLiteral>(AssertMessageExpr) : nullptr;
-
   if (DiagnoseUnexpandedParameterPack(AssertExpr, UPPC_StaticAssertExpression))
     return nullptr;
 
   return BuildStaticAssertDeclaration(StaticAssertLoc, AssertExpr,
-                                      AssertMessage, RParenLoc, false);
+                                      AssertMessageExpr, RParenLoc, false);
 }
 
 /// Convert \V to a string we can present to the user in a diagnostic
@@ -16775,13 +16931,147 @@ void Sema::DiagnoseStaticAssertDetails(const Expr *E) {
   }
 }
 
+bool Sema::EvaluateStaticAssertMessageAsString(Expr *Message,
+                                               std::string &Result,
+                                               ASTContext &Ctx,
+                                               bool ErrorOnInvalidMessage) {
+  assert(Message);
+  assert(!Message->isTypeDependent() && !Message->isValueDependent() &&
+         "can't evaluate a dependant static assert message");
+
+  if (const auto *SL = dyn_cast<StringLiteral>(Message)) {
+    assert(SL->isUnevaluated() && "expected an unevaluated string");
+    Result.assign(SL->getString().begin(), SL->getString().end());
+    return true;
+  }
+
+  SourceLocation Loc = Message->getBeginLoc();
+  QualType T = Message->getType().getNonReferenceType();
+  auto *RD = T->getAsCXXRecordDecl();
+  if (!RD) {
+    Diag(Loc, diag::err_static_assert_invalid_message);
+    return false;
+  }
+
+  auto FindMember = [&](StringRef Member, bool &Empty,
+                        bool Diag = false) -> std::optional<LookupResult> {
+    QualType ObjectType = Message->getType();
+    Expr::Classification ObjectClassification =
+        Message->Classify(getASTContext());
+
+    DeclarationName DN = PP.getIdentifierInfo(Member);
+    LookupResult MemberLookup(*this, DN, Loc, Sema::LookupMemberName);
+    LookupQualifiedName(MemberLookup, RD);
+    Empty = MemberLookup.empty();
+    OverloadCandidateSet Candidates(MemberLookup.getNameLoc(),
+                                    OverloadCandidateSet::CSK_Normal);
+    for (NamedDecl *D : MemberLookup) {
+      AddMethodCandidate(DeclAccessPair::make(D, D->getAccess()), ObjectType,
+                         ObjectClassification, /*Args=*/{}, Candidates);
+    }
+    OverloadCandidateSet::iterator Best;
+    switch (Candidates.BestViableFunction(*this, Loc, Best)) {
+    case OR_Success:
+      return std::move(MemberLookup);
+    default:
+      if (Diag)
+        Candidates.NoteCandidates(
+            PartialDiagnosticAt(
+                Loc, PDiag(diag::err_static_assert_invalid_mem_fn_ret_ty)
+                         << (Member == "data")),
+            *this, OCD_AllCandidates, /*Args=*/{});
+    }
+    return std::nullopt;
+  };
+
+  bool SizeNotFound, DataNotFound;
+  std::optional<LookupResult> SizeMember = FindMember("size", SizeNotFound);
+  std::optional<LookupResult> DataMember = FindMember("data", DataNotFound);
+  if (SizeNotFound || DataNotFound) {
+    Diag(Loc, diag::err_static_assert_missing_member_function)
+        << ((SizeNotFound && DataNotFound) ? 2
+            : SizeNotFound                 ? 0
+                                           : 1);
+    return false;
+  }
+
+  if (!SizeMember || !DataMember) {
+    if (!SizeMember)
+      FindMember("size", SizeNotFound, /*Diag=*/true);
+    if (!DataMember)
+      FindMember("data", DataNotFound, /*Diag=*/true);
+    return false;
+  }
+
+  auto BuildExpr = [&](LookupResult &LR) {
+    ExprResult Res = BuildMemberReferenceExpr(
+        Message, Message->getType(), Message->getBeginLoc(), false,
+        CXXScopeSpec(), SourceLocation(), nullptr, LR, nullptr, nullptr);
+    if (Res.isInvalid())
+      return ExprError();
+    Res = BuildCallExpr(nullptr, Res.get(), Loc, std::nullopt, Loc, nullptr,
+                        false, true);
+    if (Res.isInvalid())
+      return ExprError();
+    if (Res.get()->isTypeDependent() || Res.get()->isValueDependent())
+      return ExprError();
+    return TemporaryMaterializationConversion(Res.get());
+  };
+
+  ExprResult SizeE = BuildExpr(*SizeMember);
+  ExprResult DataE = BuildExpr(*DataMember);
+
+  QualType SizeT = Context.getSizeType();
+  QualType ConstCharPtr =
+      Context.getPointerType(Context.getConstType(Context.CharTy));
+
+  ExprResult EvaluatedSize =
+      SizeE.isInvalid() ? ExprError()
+                        : BuildConvertedConstantExpression(
+                              SizeE.get(), SizeT, CCEK_StaticAssertMessageSize);
+  if (EvaluatedSize.isInvalid()) {
+    Diag(Loc, diag::err_static_assert_invalid_mem_fn_ret_ty) << /*size*/ 0;
+    return false;
+  }
+
+  ExprResult EvaluatedData =
+      DataE.isInvalid()
+          ? ExprError()
+          : BuildConvertedConstantExpression(DataE.get(), ConstCharPtr,
+                                             CCEK_StaticAssertMessageData);
+  if (EvaluatedData.isInvalid()) {
+    Diag(Loc, diag::err_static_assert_invalid_mem_fn_ret_ty) << /*data*/ 1;
+    return false;
+  }
+
+  if (!ErrorOnInvalidMessage &&
+      Diags.isIgnored(diag::warn_static_assert_message_constexpr, Loc))
+    return true;
+
+  Expr::EvalResult Status;
+  SmallVector<PartialDiagnosticAt, 8> Notes;
+  Status.Diag = &Notes;
+  if (!Message->EvaluateCharRangeAsString(Result, EvaluatedSize.get(),
+                                          EvaluatedData.get(), Ctx, Status) ||
+      !Notes.empty()) {
+    Diag(Message->getBeginLoc(),
+         ErrorOnInvalidMessage ? diag::err_static_assert_message_constexpr
+                               : diag::warn_static_assert_message_constexpr);
+    for (const auto &Note : Notes)
+      Diag(Note.first, Note.second);
+    return !ErrorOnInvalidMessage;
+  }
+  return true;
+}
+
 Decl *Sema::BuildStaticAssertDeclaration(SourceLocation StaticAssertLoc,
-                                         Expr *AssertExpr,
-                                         StringLiteral *AssertMessage,
+                                         Expr *AssertExpr, Expr *AssertMessage,
                                          SourceLocation RParenLoc,
                                          bool Failed) {
   assert(AssertExpr != nullptr && "Expected non-null condition");
   if (!AssertExpr->isTypeDependent() && !AssertExpr->isValueDependent() &&
+      (!AssertMessage || (!AssertMessage->isTypeDependent() &&
+                          !AssertMessage->isValueDependent())) &&
       !Failed) {
     // In a static_assert-declaration, the constant-expression shall be a
     // constant expression that can be contextually converted to bool.
@@ -16815,6 +17105,14 @@ Decl *Sema::BuildStaticAssertDeclaration(SourceLocation StaticAssertLoc,
                        FoldKind).isInvalid())
       Failed = true;
 
+    // If the static_assert passes, only verify that
+    // the message is grammatically valid without evaluating it.
+    if (!Failed && AssertMessage && Cond.getBoolValue()) {
+      std::string Str;
+      EvaluateStaticAssertMessageAsString(AssertMessage, Str, Context,
+                                          /*ErrorOnInvalidMessage=*/false);
+    }
+
     // CWG2518
     // [dcl.pre]/p10  If [...] the expression is evaluated in the context of a
     // template definition, the declaration has no effect.
@@ -16822,17 +17120,17 @@ Decl *Sema::BuildStaticAssertDeclaration(SourceLocation StaticAssertLoc,
         getLangOpts().CPlusPlus && CurContext->isDependentContext();
 
     if (!Failed && !Cond && !InTemplateDefinition) {
-
       SmallString<256> MsgBuffer;
       llvm::raw_svector_ostream Msg(MsgBuffer);
+      bool HasMessage = AssertMessage;
       if (AssertMessage) {
-        const auto *MsgStr = cast<StringLiteral>(AssertMessage);
-        if (MsgStr->isOrdinary())
-          Msg << MsgStr->getString();
-        else
-          MsgStr->printPretty(Msg, nullptr, getPrintingPolicy());
+        std::string Str;
+        HasMessage =
+            EvaluateStaticAssertMessageAsString(
+                AssertMessage, Str, Context, /*ErrorOnInvalidMessage=*/true) ||
+            !Str.empty();
+        Msg << Str;
       }
-
       Expr *InnerCond = nullptr;
       std::string InnerCondDescription;
       std::tie(InnerCond, InnerCondDescription) =
@@ -16841,7 +17139,7 @@ Decl *Sema::BuildStaticAssertDeclaration(SourceLocation StaticAssertLoc,
         // Drill down into concept specialization expressions to see why they
         // weren't satisfied.
         Diag(AssertExpr->getBeginLoc(), diag::err_static_assert_failed)
-            << !AssertMessage << Msg.str() << AssertExpr->getSourceRange();
+            << !HasMessage << Msg.str() << AssertExpr->getSourceRange();
         ConstraintSatisfaction Satisfaction;
         if (!CheckConstraintSatisfaction(InnerCond, Satisfaction))
           DiagnoseUnsatisfiedConstraint(Satisfaction);
@@ -16849,12 +17147,12 @@ Decl *Sema::BuildStaticAssertDeclaration(SourceLocation StaticAssertLoc,
                            && !isa<IntegerLiteral>(InnerCond)) {
         Diag(InnerCond->getBeginLoc(),
              diag::err_static_assert_requirement_failed)
-            << InnerCondDescription << !AssertMessage << Msg.str()
+            << InnerCondDescription << !HasMessage << Msg.str()
             << InnerCond->getSourceRange();
         DiagnoseStaticAssertDetails(InnerCond);
       } else {
         Diag(AssertExpr->getBeginLoc(), diag::err_static_assert_failed)
-            << !AssertMessage << Msg.str() << AssertExpr->getSourceRange();
+            << !HasMessage << Msg.str() << AssertExpr->getSourceRange();
         PrintContextStack();
       }
       Failed = true;
@@ -17959,7 +18257,7 @@ void Sema::MarkVTableUsed(SourceLocation Loc, CXXRecordDecl *Class,
     return;
   // Do not mark as used if compiling for the device outside of the target
   // region.
-  if (TUKind != TU_Prefix && LangOpts.OpenMP && LangOpts.OpenMPIsDevice &&
+  if (TUKind != TU_Prefix && LangOpts.OpenMP && LangOpts.OpenMPIsTargetDevice &&
       !isInOpenMPDeclareTargetContext() &&
       !isInOpenMPTargetExecutionDirective()) {
     if (!DefinitionRequired)

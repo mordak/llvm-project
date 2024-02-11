@@ -27,7 +27,7 @@
 ! CHECK-NEXT: -fcolor-diagnostics    Enable colors in diagnostics
 ! CHECK-NEXT: -fconvert=<value>      Set endian conversion of data for unformatted files
 ! CHECK-NEXT: -fdefault-double-8     Set the default double precision kind to an 8 byte wide type
-! CHECK-NEXT: -fdefault-integer-8    Set the default integer kind to an 8 byte wide type
+! CHECK-NEXT: -fdefault-integer-8    Set the default integer and logical kind to an 8 byte wide type
 ! CHECK-NEXT: -fdefault-real-8       Set the default real kind to an 8 byte wide type
 ! CHECK-NEXT: -ffast-math            Allow aggressive, lossy floating-point optimizations
 ! CHECK-NEXT: -ffixed-form           Process source files in fixed form
@@ -39,10 +39,10 @@
 ! CHECK-NEXT: -finput-charset=<value> Specify the default character set for source files
 ! CHECK-NEXT: -fintrinsic-modules-path <dir>
 ! CHECK-NEXT:                        Specify where to find the compiled intrinsic modules
-! CHECK-NEXT: -flang-experimental-exec
-! CHECK-NEXT:                        Enable support for generating executables (experimental)
 ! CHECK-NEXT: -flang-experimental-hlfir
 ! CHECK-NEXT:                        Use HLFIR lowering (experimental)
+! CHECK-NEXT: -flang-experimental-polymorphism
+! CHECK-NEXT:                        Enable Fortran 2003 polymorphism (experimental)
 ! CHECK-NEXT: -flarge-sizes          Use INTEGER(KIND=8) for the result type in size-related intrinsics
 ! CHECK-NEXT: -flogical-abbreviations Enable logical abbreviations
 ! CHECK-NEXT: -flto=<value> Set LTO mode

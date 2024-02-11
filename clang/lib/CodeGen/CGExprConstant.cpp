@@ -1215,11 +1215,6 @@ public:
     return Visit(E->getSubExpr(), T);
   }
 
-  llvm::Constant *VisitMaterializeTemporaryExpr(MaterializeTemporaryExpr *E,
-                                                QualType T) {
-    return Visit(E->getSubExpr(), T);
-  }
-
   llvm::Constant *EmitArrayInitialization(InitListExpr *ILE, QualType T) {
     auto *CAT = CGM.getContext().getAsConstantArrayType(ILE->getType());
     assert(CAT && "can't emit array init for non-constant-bound array");
@@ -1322,7 +1317,12 @@ public:
       assert(CGM.getContext().hasSameUnqualifiedType(Ty, Arg->getType()) &&
              "argument to copy ctor is of wrong type");
 
-      return Visit(Arg, Ty);
+      // Look through the temporary; it's just converting the value to an
+      // lvalue to pass it to the constructor.
+      if (auto *MTE = dyn_cast<MaterializeTemporaryExpr>(Arg))
+        return Visit(MTE->getSubExpr(), Ty);
+      // Don't try to support arbitrary lvalue-to-rvalue conversions for now.
+      return nullptr;
     }
 
     return CGM.EmitNullConstant(Ty);
@@ -1654,29 +1654,22 @@ llvm::Constant *ConstantEmitter::tryEmitPrivateForVarInit(const VarDecl &D) {
   InConstantContext = D.hasConstantInitialization();
 
   QualType destType = D.getType();
-
-  // Try to emit the initializer.  Note that this can allow some things that
-  // are not allowed by tryEmitPrivateForMemory alone.
-  if (auto value = D.evaluateValue()) {
-    return tryEmitPrivateForMemory(*value, destType);
-  }
-
-  // FIXME: Implement C++11 [basic.start.init]p2: if the initializer of a
-  // reference is a constant expression, and the reference binds to a temporary,
-  // then constant initialization is performed. ConstExprEmitter will
-  // incorrectly emit a prvalue constant in this case, and the calling code
-  // interprets that as the (pointer) value of the reference, rather than the
-  // desired value of the referee.
-  if (destType->isReferenceType())
-    return nullptr;
-
   const Expr *E = D.getInit();
   assert(E && "No initializer to emit");
 
-  auto nonMemoryDestType = getNonMemoryType(CGM, destType);
-  auto C =
-    ConstExprEmitter(*this).Visit(const_cast<Expr*>(E), nonMemoryDestType);
-  return (C ? emitForMemory(C, destType) : nullptr);
+  if (!destType->isReferenceType()) {
+    QualType nonMemoryDestType = getNonMemoryType(CGM, destType);
+    if (llvm::Constant *C = ConstExprEmitter(*this).Visit(const_cast<Expr *>(E),
+                                                          nonMemoryDestType))
+      return emitForMemory(C, destType);
+  }
+
+  // Try to emit the initializer.  Note that this can allow some things that
+  // are not allowed by tryEmitPrivateForMemory alone.
+  if (APValue *value = D.evaluateValue())
+    return tryEmitPrivateForMemory(*value, destType);
+
+  return nullptr;
 }
 
 llvm::Constant *
@@ -1743,6 +1736,10 @@ llvm::Constant *ConstantEmitter::tryEmitPrivate(const Expr *E,
                                                 QualType destType) {
   assert(!destType->isVoidType() && "can't emit a void constant");
 
+  if (llvm::Constant *C =
+          ConstExprEmitter(*this).Visit(const_cast<Expr *>(E), destType))
+    return C;
+
   Expr::EvalResult Result;
 
   bool Success = false;
@@ -1752,13 +1749,10 @@ llvm::Constant *ConstantEmitter::tryEmitPrivate(const Expr *E,
   else
     Success = E->EvaluateAsRValue(Result, CGM.getContext(), InConstantContext);
 
-  llvm::Constant *C;
   if (Success && !Result.HasSideEffects)
-    C = tryEmitPrivate(Result.Val, destType);
-  else
-    C = ConstExprEmitter(*this).Visit(const_cast<Expr*>(E), destType);
+    return tryEmitPrivate(Result.Val, destType);
 
-  return C;
+  return nullptr;
 }
 
 llvm::Constant *CodeGenModule::getNullPointer(llvm::PointerType *T, QualType QT) {
@@ -1833,9 +1827,6 @@ private:
       return C;
 
     llvm::Type *origPtrTy = C->getType();
-    unsigned AS = origPtrTy->getPointerAddressSpace();
-    llvm::Type *charPtrTy = CGM.Int8Ty->getPointerTo(AS);
-    C = llvm::ConstantExpr::getBitCast(C, charPtrTy);
     C = llvm::ConstantExpr::getGetElementPtr(CGM.Int8Ty, C, getOffset());
     C = llvm::ConstantExpr::getPointerCast(C, origPtrTy);
     return C;
@@ -1945,15 +1936,8 @@ ConstantLValueEmitter::tryEmitBase(const APValue::LValueBase &base) {
   }
 
   // Handle typeid(T).
-  if (TypeInfoLValue TI = base.dyn_cast<TypeInfoLValue>()) {
-    llvm::Type *StdTypeInfoPtrTy =
-        CGM.getTypes().ConvertType(base.getTypeInfoType())->getPointerTo();
-    llvm::Constant *TypeInfo =
-        CGM.GetAddrOfRTTIDescriptor(QualType(TI.getType(), 0));
-    if (TypeInfo->getType() != StdTypeInfoPtrTy)
-      TypeInfo = llvm::ConstantExpr::getBitCast(TypeInfo, StdTypeInfoPtrTy);
-    return TypeInfo;
-  }
+  if (TypeInfoLValue TI = base.dyn_cast<TypeInfoLValue>())
+    return CGM.GetAddrOfRTTIDescriptor(QualType(TI.getType(), 0));
 
   // Otherwise, it must be an expression.
   return Visit(base.get<const Expr*>());
@@ -1987,7 +1971,7 @@ static ConstantLValue emitConstantObjCStringLiteral(const StringLiteral *S,
                                                     QualType T,
                                                     CodeGenModule &CGM) {
   auto C = CGM.getObjCRuntime().GenerateConstantString(S);
-  return C.getElementBitCast(CGM.getTypes().ConvertTypeForMem(T));
+  return C.withElementType(CGM.getTypes().ConvertTypeForMem(T));
 }
 
 ConstantLValue

@@ -798,6 +798,31 @@ private:
 typedef KMPAffinity::Mask kmp_affin_mask_t;
 extern KMPAffinity *__kmp_affinity_dispatch;
 
+class kmp_affinity_raii_t {
+  kmp_affin_mask_t *mask;
+  bool restored;
+
+public:
+  kmp_affinity_raii_t(const kmp_affin_mask_t *new_mask = nullptr)
+      : restored(false) {
+    if (KMP_AFFINITY_CAPABLE()) {
+      KMP_CPU_ALLOC(mask);
+      KMP_ASSERT(mask != NULL);
+      __kmp_get_system_affinity(mask, /*abort_on_error=*/true);
+      if (new_mask)
+        __kmp_set_system_affinity(new_mask, /*abort_on_error=*/true);
+    }
+  }
+  void restore() {
+    if (!restored && KMP_AFFINITY_CAPABLE()) {
+      __kmp_set_system_affinity(mask, /*abort_on_error=*/true);
+      KMP_CPU_FREE(mask);
+    }
+    restored = true;
+  }
+  ~kmp_affinity_raii_t() { restore(); }
+};
+
 // Declare local char buffers with this size for printing debug and info
 // messages, using __kmp_affinity_print_mask().
 #define KMP_AFFIN_MASK_PRINT_LEN 1024
@@ -1120,7 +1145,7 @@ extern void __kmp_init_target_task();
 #endif /* KMP_MAX_NTH */
 
 #ifdef PTHREAD_STACK_MIN
-#define KMP_MIN_STKSIZE PTHREAD_STACK_MIN
+#define KMP_MIN_STKSIZE ((size_t)PTHREAD_STACK_MIN)
 #else
 #define KMP_MIN_STKSIZE ((size_t)(32 * 1024))
 #endif
@@ -2535,6 +2560,7 @@ typedef struct kmp_tdg_info {
   kmp_int32 rec_num_taskred;
 } kmp_tdg_info_t;
 
+extern int __kmp_tdg_dot;
 extern kmp_int32 __kmp_max_tdgs;
 extern kmp_tdg_info_t **__kmp_global_tdgs;
 extern kmp_int32 __kmp_curr_tdg_idx;

@@ -76,6 +76,9 @@ bool CheckMutable(InterpState &S, CodePtr OpPC, const Pointer &Ptr);
 /// Checks if a value can be loaded from a block.
 bool CheckLoad(InterpState &S, CodePtr OpPC, const Pointer &Ptr);
 
+bool CheckInitialized(InterpState &S, CodePtr OpPC, const Pointer &Ptr,
+                      AccessKinds AK);
+
 /// Checks if a value can be stored in a block.
 bool CheckStore(InterpState &S, CodePtr OpPC, const Pointer &Ptr);
 
@@ -102,8 +105,9 @@ bool CheckPure(InterpState &S, CodePtr OpPC, const CXXMethodDecl *MD);
 bool CheckCtorCall(InterpState &S, CodePtr OpPC, const Pointer &This);
 
 /// Checks if the shift operation is legal.
-template <typename RT>
-bool CheckShift(InterpState &S, CodePtr OpPC, const RT &RHS, unsigned Bits) {
+template <typename LT, typename RT>
+bool CheckShift(InterpState &S, CodePtr OpPC, const LT &LHS, const RT &RHS,
+                unsigned Bits) {
   if (RHS.isNegative()) {
     const SourceInfo &Loc = S.Current->getSource(OpPC);
     S.CCEDiag(Loc, diag::note_constexpr_negative_shift) << RHS.toAPSInt();
@@ -119,6 +123,20 @@ bool CheckShift(InterpState &S, CodePtr OpPC, const RT &RHS, unsigned Bits) {
     S.CCEDiag(E, diag::note_constexpr_large_shift) << Val << Ty << Bits;
     return false;
   }
+
+  if (LHS.isSigned() && !S.getLangOpts().CPlusPlus20) {
+    const Expr *E = S.Current->getExpr(OpPC);
+    // C++11 [expr.shift]p2: A signed left shift must have a non-negative
+    // operand, and must not overflow the corresponding unsigned type.
+    if (LHS.isNegative())
+      S.CCEDiag(E, diag::note_constexpr_lshift_of_negative) << LHS.toAPSInt();
+    else if (LHS.toUnsigned().countLeadingZeros() < static_cast<unsigned>(RHS))
+      S.CCEDiag(E, diag::note_constexpr_lshift_discards);
+  }
+
+  // C++2a [expr.shift]p2: [P0907R4]:
+  //    E1 << E2 is the unique value congruent to
+  //    E1 x 2^E2 module 2^N.
   return true;
 }
 
@@ -151,7 +169,7 @@ bool CheckFloatResult(InterpState &S, CodePtr OpPC, APFloat::opStatus Status);
 bool Interpret(InterpState &S, APValue &Result);
 
 /// Interpret a builtin function.
-bool InterpretBuiltin(InterpState &S, CodePtr &PC, unsigned BuiltinID);
+bool InterpretBuiltin(InterpState &S, CodePtr OpPC, const Function *F);
 
 enum class ArithOp { Add, Sub };
 
@@ -501,8 +519,10 @@ bool IncDecHelper(InterpState &S, CodePtr OpPC, const Pointer &Ptr) {
 /// 4) Pushes the original (pre-inc) value on the stack.
 template <PrimType Name, class T = typename PrimConv<Name>::T>
 bool Inc(InterpState &S, CodePtr OpPC) {
-  // FIXME: Check initialization of Ptr
   const Pointer &Ptr = S.Stk.pop<Pointer>();
+
+  if (!CheckInitialized(S, OpPC, Ptr, AK_Increment))
+    return false;
 
   return IncDecHelper<T, IncDecOp::Inc, PushVal::Yes>(S, OpPC, Ptr);
 }
@@ -512,8 +532,10 @@ bool Inc(InterpState &S, CodePtr OpPC) {
 /// 3) Writes the value increased by one back to the pointer
 template <PrimType Name, class T = typename PrimConv<Name>::T>
 bool IncPop(InterpState &S, CodePtr OpPC) {
-  // FIXME: Check initialization of Ptr
   const Pointer &Ptr = S.Stk.pop<Pointer>();
+
+  if (!CheckInitialized(S, OpPC, Ptr, AK_Increment))
+    return false;
 
   return IncDecHelper<T, IncDecOp::Inc, PushVal::No>(S, OpPC, Ptr);
 }
@@ -524,8 +546,10 @@ bool IncPop(InterpState &S, CodePtr OpPC) {
 /// 4) Pushes the original (pre-dec) value on the stack.
 template <PrimType Name, class T = typename PrimConv<Name>::T>
 bool Dec(InterpState &S, CodePtr OpPC) {
-  // FIXME: Check initialization of Ptr
   const Pointer &Ptr = S.Stk.pop<Pointer>();
+
+  if (!CheckInitialized(S, OpPC, Ptr, AK_Decrement))
+    return false;
 
   return IncDecHelper<T, IncDecOp::Dec, PushVal::Yes>(S, OpPC, Ptr);
 }
@@ -535,8 +559,10 @@ bool Dec(InterpState &S, CodePtr OpPC) {
 /// 3) Writes the value decreased by one back to the pointer
 template <PrimType Name, class T = typename PrimConv<Name>::T>
 bool DecPop(InterpState &S, CodePtr OpPC) {
-  // FIXME: Check initialization of Ptr
   const Pointer &Ptr = S.Stk.pop<Pointer>();
+
+  if (!CheckInitialized(S, OpPC, Ptr, AK_Decrement))
+    return false;
 
   return IncDecHelper<T, IncDecOp::Dec, PushVal::No>(S, OpPC, Ptr);
 }
@@ -562,26 +588,38 @@ bool IncDecFloatHelper(InterpState &S, CodePtr OpPC, const Pointer &Ptr,
 }
 
 inline bool Incf(InterpState &S, CodePtr OpPC, llvm::RoundingMode RM) {
-  // FIXME: Check initialization of Ptr
   const Pointer &Ptr = S.Stk.pop<Pointer>();
+
+  if (!CheckInitialized(S, OpPC, Ptr, AK_Increment))
+    return false;
+
   return IncDecFloatHelper<IncDecOp::Inc, PushVal::Yes>(S, OpPC, Ptr, RM);
 }
 
 inline bool IncfPop(InterpState &S, CodePtr OpPC, llvm::RoundingMode RM) {
-  // FIXME: Check initialization of Ptr
   const Pointer &Ptr = S.Stk.pop<Pointer>();
+
+  if (!CheckInitialized(S, OpPC, Ptr, AK_Increment))
+    return false;
+
   return IncDecFloatHelper<IncDecOp::Inc, PushVal::No>(S, OpPC, Ptr, RM);
 }
 
 inline bool Decf(InterpState &S, CodePtr OpPC, llvm::RoundingMode RM) {
-  // FIXME: Check initialization of Ptr
   const Pointer &Ptr = S.Stk.pop<Pointer>();
+
+  if (!CheckInitialized(S, OpPC, Ptr, AK_Decrement))
+    return false;
+
   return IncDecFloatHelper<IncDecOp::Dec, PushVal::Yes>(S, OpPC, Ptr, RM);
 }
 
 inline bool DecfPop(InterpState &S, CodePtr OpPC, llvm::RoundingMode RM) {
-  // FIXME: Check initialization of Ptr
   const Pointer &Ptr = S.Stk.pop<Pointer>();
+
+  if (!CheckInitialized(S, OpPC, Ptr, AK_Decrement))
+    return false;
+
   return IncDecFloatHelper<IncDecOp::Dec, PushVal::No>(S, OpPC, Ptr, RM);
 }
 
@@ -840,6 +878,7 @@ bool SetField(InterpState &S, CodePtr OpPC, uint32_t I) {
   const Pointer &Field = Obj.atField(I);
   if (!CheckStore(S, OpPC, Field))
     return false;
+  Field.initialize();
   Field.deref<T>() = Value;
   return true;
 }
@@ -1397,9 +1436,13 @@ template <PrimType TIn, PrimType TOut> bool Cast(InterpState &S, CodePtr OpPC) {
 
 /// 1) Pops a Floating from the stack.
 /// 2) Pushes a new floating on the stack that uses the given semantics.
-/// Not templated, so implemented in Interp.cpp.
-bool CastFP(InterpState &S, CodePtr OpPC, const llvm::fltSemantics *Sem,
-            llvm::RoundingMode RM);
+inline bool CastFP(InterpState &S, CodePtr OpPC, const llvm::fltSemantics *Sem,
+            llvm::RoundingMode RM) {
+  Floating F = S.Stk.pop<Floating>();
+  Floating Result = F.toSemantics(Sem, RM);
+  S.Stk.push<Floating>(Result);
+  return true;
+}
 
 template <PrimType Name, class T = typename PrimConv<Name>::T>
 bool CastIntegralFloating(InterpState &S, CodePtr OpPC,
@@ -1495,7 +1538,7 @@ inline bool Shr(InterpState &S, CodePtr OpPC) {
   const auto &LHS = S.Stk.pop<LT>();
   const unsigned Bits = LHS.bitWidth();
 
-  if (!CheckShift<RT>(S, OpPC, RHS, Bits))
+  if (!CheckShift(S, OpPC, LHS, RHS, Bits))
     return false;
 
   Integral<LT::bitWidth(), false> R;
@@ -1512,7 +1555,7 @@ inline bool Shl(InterpState &S, CodePtr OpPC) {
   const auto &LHS = S.Stk.pop<LT>();
   const unsigned Bits = LHS.bitWidth();
 
-  if (!CheckShift<RT>(S, OpPC, RHS, Bits))
+  if (!CheckShift(S, OpPC, LHS, RHS, Bits))
     return false;
 
   Integral<LT::bitWidth(), false> R;
@@ -1622,13 +1665,43 @@ inline bool Call(InterpState &S, CodePtr OpPC, const Function *Func) {
   return false;
 }
 
+inline bool CallVirt(InterpState &S, CodePtr OpPC, const Function *Func) {
+  assert(Func->hasThisPointer());
+  assert(Func->isVirtual());
+  size_t ThisOffset =
+      Func->getArgSize() + (Func->hasRVO() ? primSize(PT_Ptr) : 0);
+  Pointer &ThisPtr = S.Stk.peek<Pointer>(ThisOffset);
+
+  const CXXRecordDecl *DynamicDecl =
+      ThisPtr.getDeclDesc()->getType()->getAsCXXRecordDecl();
+  const auto *StaticDecl = cast<CXXRecordDecl>(Func->getParentDecl());
+  const auto *InitialFunction = cast<CXXMethodDecl>(Func->getDecl());
+  const CXXMethodDecl *Overrider = S.getContext().getOverridingFunction(
+      DynamicDecl, StaticDecl, InitialFunction);
+
+  if (Overrider != InitialFunction) {
+    Func = S.P.getFunction(Overrider);
+
+    const CXXRecordDecl *ThisFieldDecl =
+        ThisPtr.getFieldDesc()->getType()->getAsCXXRecordDecl();
+    if (Func->getParentDecl()->isDerivedFrom(ThisFieldDecl)) {
+      // If the function we call is further DOWN the hierarchy than the
+      // FieldDesc of our pointer, just get the DeclDesc instead, which
+      // is the furthest we might go up in the hierarchy.
+      ThisPtr = ThisPtr.getDeclPtr();
+    }
+  }
+
+  return Call(S, OpPC, Func);
+}
+
 inline bool CallBI(InterpState &S, CodePtr &PC, const Function *Func) {
   auto NewFrame = std::make_unique<InterpFrame>(S, Func, PC);
 
   InterpFrame *FrameBefore = S.Current;
   S.Current = NewFrame.get();
 
-  if (InterpretBuiltin(S, PC, Func->getBuiltinID())) {
+  if (InterpretBuiltin(S, PC, Func)) {
     NewFrame.release();
     return true;
   }
@@ -1646,7 +1719,7 @@ inline bool CallPtr(InterpState &S, CodePtr OpPC) {
   return Call(S, OpPC, F);
 }
 
-inline bool GetFnPtr(InterpState &S, CodePtr &PC, const Function *Func) {
+inline bool GetFnPtr(InterpState &S, CodePtr OpPC, const Function *Func) {
   assert(Func);
   S.Stk.push<FunctionPointer>(Func);
   return true;

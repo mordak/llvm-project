@@ -82,7 +82,7 @@ class RVInstVCCustom2<bits<4> funct6_hi4, bits<3> funct3, dag outs, dag ins,
   let Inst{19-15} = rs1;
   let Inst{14-12} = funct3;
   let Inst{11-7} = rd;
-  let Opcode = OPC_CUSTOM_2.Value;
+  let Inst{6-0} = OPC_CUSTOM_2.Value;
 
   let Uses = [VTYPE, VL];
   let RVVConstraint = NoConstraint;
@@ -105,7 +105,7 @@ class RVInstVCFCustom2<bits<4> funct6_hi4, bits<3> funct3, dag outs, dag ins,
   let Inst{19-15} = rs1;
   let Inst{14-12} = funct3;
   let Inst{11-7} = rd;
-  let Opcode = OPC_CUSTOM_2.Value;
+  let Inst{6-0} = OPC_CUSTOM_2.Value;
 
   let Uses = [VTYPE, VL];
   let RVVConstraint = NoConstraint;
@@ -504,3 +504,27 @@ let Predicates = [HasVendorXSfvcp] in {
     }
   }
 }
+
+let Predicates = [HasVendorXSfcie] in {
+let hasSideEffects = 1, mayLoad = 0, mayStore = 0, DecoderNamespace = "XSfcie" in {
+def SF_CFLUSH_D_L1 : RVInstI<0b000, OPC_SYSTEM, (outs), (ins GPR:$rs1), "cflush.d.l1","$rs1">,
+                             Sched<[]> {
+  let rd = 0;
+  let imm12 = {0b1111,0b1100,0b0000};
+}
+
+def SF_CDISCARD_D_L1 : RVInstI<0b000, OPC_SYSTEM, (outs), (ins GPR:$rs1), "cdiscard.d.l1","$rs1">,
+                               Sched<[]> {
+  let rd = 0;
+  let imm12 = {0b1111,0b1100,0b0010};
+}
+
+def SF_CEASE : RVInstI<0b000, OPC_SYSTEM, (outs), (ins), "cease","">,  Sched<[]> {
+  let rs1 = 0;
+  let rd = 0;
+  let imm12 = {0b0011,0b0000,0b0101};
+}
+}
+def : InstAlias<"cflush.d.l1", (SF_CFLUSH_D_L1 X0)>;
+def : InstAlias<"cdiscard.d.l1", (SF_CDISCARD_D_L1 X0)>;
+} // Predicates = [HasVendorXScie]

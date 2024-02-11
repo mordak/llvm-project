@@ -908,6 +908,15 @@ public:
   /// Returns true if it is not a class or if the class might not be dynamic.
   bool mayBeNotDynamicClass() const;
 
+  /// Returns true if it is a WebAssembly Reference Type.
+  bool isWebAssemblyReferenceType() const;
+
+  /// Returns true if it is a WebAssembly Externref Type.
+  bool isWebAssemblyExternrefType() const;
+
+  /// Returns true if it is a WebAssembly Funcref Type.
+  bool isWebAssemblyFuncrefType() const;
+
   // Don't promise in the API that anything besides 'const' can be
   // easily added.
 
@@ -1649,7 +1658,8 @@ protected:
     unsigned : NumTypeBits;
 
     /// The kind (BuiltinType::Kind) of builtin type this is.
-    unsigned Kind : 8;
+    static constexpr unsigned NumOfBuiltinTypeBits = 9;
+    unsigned Kind : NumOfBuiltinTypeBits;
   };
 
   /// FunctionTypeBitfields store various bits belonging to FunctionProtoType.
@@ -2034,9 +2044,13 @@ public:
   /// Returns true for RVV scalable vector types.
   bool isRVVSizelessBuiltinType() const;
 
-  /// Check if this is a WebAssembly Reference Type.
-  bool isWebAssemblyReferenceType() const;
+  /// Check if this is a WebAssembly Externref Type.
   bool isWebAssemblyExternrefType() const;
+
+  /// Returns true if this is a WebAssembly table type: either an array of
+  /// reference types, or a pointer to a reference type (which can only be
+  /// created by array to pointer decay).
+  bool isWebAssemblyTableType() const;
 
   /// Determines if this is a sizeless type supported by the
   /// 'arm_sve_vector_bits' type attribute, which can be applied to a single
@@ -2291,6 +2305,8 @@ public:
   bool isCUDADeviceBuiltinSurfaceType() const;
   /// Check if the type is the CUDA device builtin texture type.
   bool isCUDADeviceBuiltinTextureType() const;
+
+  bool isRVVType(unsigned ElementCount) const;
 
   bool isRVVType() const;
 
@@ -2677,6 +2693,10 @@ private:
       : Type(Builtin, QualType(),
              K == Dependent ? TypeDependence::DependentInstantiation
                             : TypeDependence::None) {
+    static_assert(Kind::LastKind <
+                      (1 << BuiltinTypeBitfields::NumOfBuiltinTypeBits) &&
+                  "Defined builtin type exceeds the allocated space for serial "
+                  "numbering");
     BuiltinTypeBits.Kind = K;
   }
 
@@ -3953,7 +3973,7 @@ public:
     /// The number of types in the exception specification.
     /// A whole unsigned is not needed here and according to
     /// [implimits] 8 bits would be enough here.
-    unsigned NumExceptionType = 0;
+    uint16_t NumExceptionType = 0;
   };
 
 protected:
@@ -7173,6 +7193,16 @@ inline bool Type::isRVVType() const {
   return
 #include "clang/Basic/RISCVVTypes.def"
     false; // end of boolean or operation.
+}
+
+inline bool Type::isRVVType(unsigned ElementCount) const {
+  bool Ret = false;
+#define RVV_VECTOR_TYPE(Name, Id, SingletonId, NumEls, ElBits, NF, IsSigned,   \
+                        IsFP)                                                  \
+  if (NumEls == ElementCount)                                                  \
+    Ret |= isSpecificBuiltinType(BuiltinType::Id);
+#include "clang/Basic/RISCVVTypes.def"
+  return Ret;
 }
 
 inline bool Type::isRVVType(unsigned Bitwidth, bool IsFloat) const {

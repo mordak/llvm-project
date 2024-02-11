@@ -219,6 +219,7 @@ bool MCELFStreamer::emitSymbolAttribute(MCSymbol *S, MCSymbolAttr Attribute) {
   case MCSA_Invalid:
   case MCSA_IndirectSymbol:
   case MCSA_Exported:
+  case MCSA_WeakAntiDep:
     return false;
 
   case MCSA_NoDeadStrip:
@@ -630,6 +631,9 @@ void MCELFStreamer::emitInstToData(const MCInst &Inst,
   }
 
   DF->setHasInstructions(STI);
+  if (!Fixups.empty() && Fixups.back().getTargetKind() ==
+                             getAssembler().getBackend().RelaxFixupKind)
+    DF->setLinkerRelaxable();
   DF->getContents().append(Code.begin(), Code.end());
 
   if (Assembler.isBundlingEnabled() && Assembler.getRelaxAll()) {
