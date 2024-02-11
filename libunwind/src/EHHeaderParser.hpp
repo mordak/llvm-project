@@ -148,7 +148,6 @@ size_t EHHeaderParser<A>::getTableEntrySize(uint8_t tableEnc) {
   if (tableEnc == DW_EH_PE_omit) {
     return 0;
   }
-
   switch (tableEnc & 0x0f) {
   case DW_EH_PE_sdata2:
   case DW_EH_PE_udata2:
