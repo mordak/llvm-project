@@ -41,7 +41,7 @@ void NativeThreadOpenBSD::SetStoppedBySignal(uint32_t signo,
   SetStopped();
 
   m_stop_info.reason = StopReason::eStopReasonSignal;
-  m_stop_info.details.signal.signo = signo;
+  m_stop_info.signo = signo;
 
   m_stop_description.clear();
   if (info) {
@@ -60,19 +60,19 @@ void NativeThreadOpenBSD::SetStoppedBySignal(uint32_t signo,
 void NativeThreadOpenBSD::SetStoppedByBreakpoint() {
   SetStopped();
   m_stop_info.reason = StopReason::eStopReasonBreakpoint;
-  m_stop_info.details.signal.signo = SIGTRAP;
+  m_stop_info.signo = SIGTRAP;
 }
 
 void NativeThreadOpenBSD::SetStoppedByTrace() {
   SetStopped();
   m_stop_info.reason = StopReason::eStopReasonTrace;
-  m_stop_info.details.signal.signo = SIGTRAP;
+  m_stop_info.signo = SIGTRAP;
 }
 
 void NativeThreadOpenBSD::SetStoppedByExec() {
   SetStopped();
   m_stop_info.reason = StopReason::eStopReasonExec;
-  m_stop_info.details.signal.signo = SIGTRAP;
+  m_stop_info.signo = SIGTRAP;
 }
 
 void NativeThreadOpenBSD::SetStopped() {
