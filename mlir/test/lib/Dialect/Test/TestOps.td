@@ -264,6 +264,16 @@ def DerivedTypeAttrOp : TEST_Op<"derived_type_attr", []> {
     "$_builder.getI32IntegerAttr($_self)">;
 }
 
+def TestPropOp : TEST_Op<"prop">,
+  Arguments<(ins Variadic<Index>:$upperInits,
+      I32ElementsAttr:$transforms)>,
+  Results<(outs Variadic<AnyType>:$results)> {
+  DerivedAttr upperLen = DerivedAttr<"uint32_t", [{
+    return getUpperInits().size() / getTransforms().size();
+  }], [{ $_builder.getI32IntegerAttr($_self) }]>;
+}
+
+
 def StringElementsAttrOp : TEST_Op<"string_elements_attr"> {
   let arguments = (ins
       StringElementsAttr:$scalar_string_attr
@@ -449,6 +459,11 @@ def IsolatedOneRegionOp : TEST_Op<"isolated_one_region_op", [IsolatedFromAbove]>
   let assemblyFormat = [{
     attr-dict-with-keyword $operands $my_region `:` type($operands)
   }];
+}
+
+def IsolatedRegionsOp : TEST_Op<"isolated_regions", [IsolatedFromAbove]> {
+  let regions = (region VariadicRegion<AnyRegion>:$regions);
+  let assemblyFormat = "attr-dict-with-keyword $regions";
 }
 
 //===----------------------------------------------------------------------===//

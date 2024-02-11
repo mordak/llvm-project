@@ -2231,7 +2231,6 @@ bool AArch64InstrInfo::hasUnscaledLdStOffset(unsigned Opc) {
   case AArch64::LDRWpre:
   case AArch64::LDURXi:
   case AArch64::LDRXpre:
-  case AArch64::LDRSWpre:
   case AArch64::LDURSWi:
   case AArch64::LDURHHi:
   case AArch64::LDURBBi:
@@ -2441,7 +2440,6 @@ bool AArch64InstrInfo::isPairableLdStInst(const MachineInstr &MI) {
   case AArch64::LDURXi:
   case AArch64::LDRXpre:
   case AArch64::LDURSWi:
-  case AArch64::LDRSWpre:
     return true;
   }
 }
@@ -2562,8 +2560,7 @@ bool AArch64InstrInfo::isCandidateToMergeOrPair(const MachineInstr &MI) const {
   // Can't merge/pair if the instruction modifies the base register.
   // e.g., ldr x0, [x0]
   // This case will never occur with an FI base.
-  // However, if the instruction is an LDR<S,D,Q,W,X,SW>pre or
-  // STR<S,D,Q,W,X>pre, it can be merged.
+  // However, if the instruction is an LDR/STR<S,D,Q,W,X>pre, it can be merged.
   // For example:
   //   ldr q0, [x11, #32]!
   //   ldr q1, [x11, #16]
@@ -3140,7 +3137,6 @@ int AArch64InstrInfo::getMemScale(unsigned Opc) {
   case AArch64::LDRSpre:
   case AArch64::LDRSWui:
   case AArch64::LDURSWi:
-  case AArch64::LDRSWpre:
   case AArch64::LDRWpre:
   case AArch64::LDRWui:
   case AArch64::LDURWi:
@@ -3196,7 +3192,6 @@ bool AArch64InstrInfo::isPreLd(const MachineInstr &MI) {
     return false;
   case AArch64::LDRWpre:
   case AArch64::LDRXpre:
-  case AArch64::LDRSWpre:
   case AArch64::LDRSpre:
   case AArch64::LDRDpre:
   case AArch64::LDRQpre:
@@ -4772,7 +4767,7 @@ int llvm::isAArch64FrameOffsetLegal(const MachineInstr &MI,
     Offset = Remainder;
   else {
     NewOffset = NewOffset < 0 ? MinOff : MaxOff;
-    Offset = Offset - NewOffset * Scale + Remainder;
+    Offset = Offset - NewOffset * Scale;
   }
 
   if (EmittableOffset)
@@ -5441,8 +5436,8 @@ static bool getFNEGPatterns(MachineInstr &Root,
   auto Match = [&](unsigned Opcode, MachineCombinerPattern Pattern) -> bool {
     MachineOperand &MO = Root.getOperand(1);
     MachineInstr *MI = MRI.getUniqueVRegDef(MO.getReg());
-    if (MI != nullptr && MRI.hasOneNonDBGUse(MI->getOperand(0).getReg()) &&
-        (MI->getOpcode() == Opcode) &&
+    if (MI != nullptr && (MI->getOpcode() == Opcode) &&
+        MRI.hasOneNonDBGUse(MI->getOperand(0).getReg()) &&
         Root.getFlag(MachineInstr::MIFlag::FmContract) &&
         Root.getFlag(MachineInstr::MIFlag::FmNsz) &&
         MI->getFlag(MachineInstr::MIFlag::FmContract) &&
