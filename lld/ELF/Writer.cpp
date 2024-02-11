@@ -672,7 +672,7 @@ static bool shouldKeepInSymtab(const Defined &sym) {
   // * --discard-locals is used.
   // * The symbol is in a SHF_MERGE section, which is normally the reason for
   //   the assembler keeping the .L symbol.
-  if (sym.getName().starts_with(".L") &&
+  if ((sym.getName().startswith(".L") || sym.getName().empty()) &&
       (config->discard == DiscardPolicy::Locals ||
        (sym.section && (sym.section->flags & SHF_MERGE))))
     return false;

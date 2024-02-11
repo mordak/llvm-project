@@ -38,7 +38,7 @@ static Flavor getFlavor(StringRef s) {
       .Default(Invalid);
 }
 
-#ifndef __OpenBSD__
+#ifdef LLD_ENABLE_MINGW
 static cl::TokenizerCallback getDefaultQuotingStyle() {
   if (Triple(sys::getProcessTriple()).getOS() == Triple::Win32)
     return cl::TokenizeWindowsCommandLine;
@@ -129,7 +129,7 @@ parseFlavorWithoutMinGW(llvm::SmallVectorImpl<const char *> &argsV) {
 
 static Flavor parseFlavor(llvm::SmallVectorImpl<const char *> &argsV) {
   Flavor f = parseFlavorWithoutMinGW(argsV);
-#ifndef __OpenBSD__
+#ifndef LLD_ENABLE_MINGW
   if (f == Gnu) {
     auto isPE = isPETarget(argsV);
     if (!isPE)
