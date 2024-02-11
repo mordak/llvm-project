@@ -70,7 +70,7 @@ static Flavor getFlavor(StringRef s) {
       .Default(Invalid);
 }
 
-#ifndef __OpenBSD__
+#ifdef LLD_ENABLE_MINGW
 static cl::TokenizerCallback getDefaultQuotingStyle() {
   if (Triple(sys::getProcessTriple()).getOS() == Triple::Win32)
     return cl::TokenizeWindowsCommandLine;
@@ -151,18 +151,23 @@ static int lldMain(int argc, const char **argv, llvm::raw_ostream &stdoutOS,
   std::vector<const char *> args(argv, argv + argc);
   auto link = [&args]() {
     Flavor f = parseFlavor(args);
-#ifdef __OpenBSD__
-    if (f == Gnu)
-      return elf::link;
-#else
+#ifdef LLD_ENABLE_MINGW
     if (f == Gnu && isPETarget(args))
       return mingw::link;
     else if (f == Gnu)
+#else
+    if (f == Gnu)
+#endif
       return elf::link;
+#ifdef LLD_ENABLE_COFF
     else if (f == WinLink)
       return coff::link;
+#endif
+#ifdef LLD_ENABLE_MACHO
     else if (f == Darwin)
       return macho::link;
+#endif
+#ifdef LLD_ENABLE_WASM
     else if (f == Wasm)
       return lld::wasm::link;
 #endif
