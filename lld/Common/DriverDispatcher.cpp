@@ -129,7 +129,7 @@ parseFlavorWithoutMinGW(llvm::SmallVectorImpl<const char *> &argsV) {
 
 static Flavor parseFlavor(llvm::SmallVectorImpl<const char *> &argsV) {
   Flavor f = parseFlavorWithoutMinGW(argsV);
-#ifndef LLD_ENABLE_MINGW
+#ifdef LLD_ENABLE_MINGW
   if (f == Gnu) {
     auto isPE = isPETarget(argsV);
     if (!isPE)
