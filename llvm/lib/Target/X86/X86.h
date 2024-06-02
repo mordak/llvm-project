@@ -139,6 +139,10 @@ FunctionPass *createX86FixupGadgetsPass();
 /// possible in order to reduce code size or facilitate HW decoding.
 FunctionPass *createX86CompressEVEXPass();
 
+/// Return a Machine Function pass that attempts to replace
+/// RET instructions with a cleaning sequence
+FunctionPass *createX86RetCleanPass();
+
 /// This pass creates the thunks for the retpoline feature.
 FunctionPass *createX86IndirectThunksPass();
 
