@@ -177,6 +177,8 @@ public:
 
   const PPCReturnProtectorLowering RPL;
   const ReturnProtectorLowering *getReturnProtector() const override;
+
+  uint64_t getStackThreshold() const override;
 };
 } // End llvm namespace
 

@@ -47,6 +47,9 @@
 #include "__cxxabi_config.h"
 #include "include/atomic_support.h" // from libc++
 #if defined(__has_include)
+#  if __has_include(<sys/futex.h>)
+#    include <sys/futex.h>
+#  endif
 #  if __has_include(<sys/syscall.h>)
 #    include <sys/syscall.h>
 #  endif
@@ -411,18 +414,16 @@ private:
 //                         Futex Implementation
 //===----------------------------------------------------------------------===//
 
-#ifdef __OpenBSD__
-#include <sys/futex.h>
-
+#if defined(__OpenBSD__)
 void PlatformFutexWait(int* addr, int expect) {
   constexpr int WAIT = 0;
-  futex((volatile uint32_t *)addr, WAIT, expect, NULL, NULL);
+  futex(reinterpret_cast<volatile uint32_t*>(addr), WAIT, expect, NULL, NULL);
   __tsan_acquire(addr);
 }
 void PlatformFutexWake(int* addr) {
   constexpr int WAKE = 1;
   __tsan_release(addr);
-  futex((volatile uint32_t *)addr, WAKE, INT_MAX, NULL, NULL);
+  futex(reinterpret_cast<volatile uint32_t*>(addr), WAKE, INT_MAX, NULL, NULL);
 }
 #elif defined(SYS_futex)
 void PlatformFutexWait(int* addr, int expect) {
