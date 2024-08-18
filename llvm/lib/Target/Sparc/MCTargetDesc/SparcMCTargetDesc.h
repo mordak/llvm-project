@@ -13,6 +13,7 @@
 #ifndef LLVM_LIB_TARGET_SPARC_MCTARGETDESC_SPARCMCTARGETDESC_H
 #define LLVM_LIB_TARGET_SPARC_MCTARGETDESC_SPARCMCTARGETDESC_H
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DataTypes.h"
 
 #include <memory>
@@ -35,6 +36,29 @@ MCAsmBackend *createSparcAsmBackend(const Target &T, const MCSubtargetInfo &STI,
                                     const MCTargetOptions &Options);
 std::unique_ptr<MCObjectTargetWriter> createSparcELFObjectWriter(bool Is64Bit,
                                                                  uint8_t OSABI);
+
+// Defines symbolic names for Sparc v9 ASI tag names.
+namespace SparcASITag {
+struct ASITag {
+  const char *Name;
+  const char *AltName;
+  unsigned Encoding;
+};
+
+#define GET_ASITagsList_DECL
+#include "SparcGenSearchableTables.inc"
+} // end namespace SparcASITag
+
+// Defines symbolic names for Sparc v9 prefetch tag names.
+namespace SparcPrefetchTag {
+struct PrefetchTag {
+  const char *Name;
+  unsigned Encoding;
+};
+
+#define GET_PrefetchTagsList_DECL
+#include "SparcGenSearchableTables.inc"
+} // end namespace SparcPrefetchTag
 } // End llvm namespace
 
 // Defines symbolic names for Sparc registers.  This defines a mapping from

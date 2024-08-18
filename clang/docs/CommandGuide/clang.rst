@@ -302,7 +302,7 @@ Language Selection and Mode Options
 .. option:: -fmsc-version=
 
  Set ``_MSC_VER``. When on Windows, this defaults to either the same value as
- the currently installed version of cl.exe, or ``1920``. Not set otherwise.
+ the currently installed version of cl.exe, or ``1933``. Not set otherwise.
 
 .. option:: -fborland-extensions
 
@@ -362,7 +362,7 @@ number of cross compilers, or may only support a native target.
 
   Specify the architecture to build for (all platforms).
 
-.. option:: -mmacosx-version-min=<version>
+.. option:: -mmacos-version-min=<version>
 
   When building for macOS, specify the minimum version supported by your
   application.
@@ -684,6 +684,21 @@ Preprocessor Options
 
   Do not search clang's builtin directory for include files.
 
+.. option:: -fkeep-system-includes
+
+  Usable only with :option:`-E`. Do not copy the preprocessed content of
+  "system" headers to the output; instead, preserve the #include directive.
+  This can greatly reduce the volume of text produced by :option:`-E` which
+  can be helpful when trying to produce a "small" reproduceable test case.
+
+  This option does not guarantee reproduceability, however. If the including
+  source defines preprocessor symbols that influence the behavior of system
+  headers (for example, ``_XOPEN_SOURCE``) the operation of :option:`-E` will
+  remove that definition and thus can change the semantics of the included
+  header. Also, using a different version of the system headers (especially a
+  different version of the STL) may result in different behavior. Always verify
+  the preprocessed file by compiling it separately.
+
 
 ENVIRONMENT
 -----------
@@ -708,7 +723,7 @@ ENVIRONMENT
 
 .. envvar:: MACOSX_DEPLOYMENT_TARGET
 
-  If :option:`-mmacosx-version-min` is unspecified, the default deployment
+  If :option:`-mmacos-version-min` is unspecified, the default deployment
   target is read from this environment variable. This option only affects
   Darwin targets.
 

@@ -30,10 +30,12 @@ struct LogicalResult;
 class ModuleOp;
 class Operation;
 class RewritePatternSet;
+class TypeConverter;
 
 class Pass;
 
 namespace gpu {
+enum class AddressSpace : uint32_t;
 class GPUModuleOp;
 } // namespace gpu
 
@@ -44,9 +46,6 @@ class LLVMDialect;
 #define GEN_PASS_DECL_GPUTOLLVMCONVERSIONPASS
 #include "mlir/Conversion/Passes.h.inc"
 
-using OwnedBlob = std::unique_ptr<std::vector<char>>;
-using BlobGenerator =
-    std::function<OwnedBlob(const std::string &, Location, StringRef)>;
 using LoweringCallback = std::function<std::unique_ptr<llvm::Module>(
     Operation *, llvm::LLVMContext &, StringRef)>;
 
@@ -66,9 +65,15 @@ struct FunctionCallBuilder {
 /// populate converter for gpu types.
 void populateGpuToLLVMConversionPatterns(LLVMTypeConverter &converter,
                                          RewritePatternSet &patterns,
-                                         StringRef gpuBinaryAnnotation = {},
                                          bool kernelBarePtrCallConv = false);
 
+/// A function that maps a MemorySpace enum to a target-specific integer value.
+using MemorySpaceMapping = std::function<unsigned(gpu::AddressSpace)>;
+
+/// Populates memory space attribute conversion rules for lowering
+/// gpu.address_space to integer values.
+void populateGpuMemorySpaceAttributeConversions(
+    TypeConverter &typeConverter, const MemorySpaceMapping &mapping);
 } // namespace mlir
 
 #endif // MLIR_CONVERSION_GPUCOMMON_GPUCOMMONPASS_H_

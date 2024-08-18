@@ -136,8 +136,9 @@ namespace {
 
   public:
     SparcAsmBackend(const Target &T)
-        : MCAsmBackend(StringRef(T.getName()) == "sparcel" ? support::little
-                                                           : support::big),
+        : MCAsmBackend(StringRef(T.getName()) == "sparcel"
+                           ? llvm::endianness::little
+                           : llvm::endianness::big),
           TheTarget(T), Is64Bit(StringRef(TheTarget.getName()) == "sparcv9") {}
 
     unsigned getNumFixupKinds() const override {
@@ -264,14 +265,15 @@ namespace {
 
       assert(unsigned(Kind - FirstTargetFixupKind) < getNumFixupKinds() &&
              "Invalid kind!");
-      if (Endian == support::little)
+      if (Endian == llvm::endianness::little)
         return InfosLE[Kind - FirstTargetFixupKind];
 
       return InfosBE[Kind - FirstTargetFixupKind];
     }
 
     bool shouldForceRelocation(const MCAssembler &Asm, const MCFixup &Fixup,
-                               const MCValue &Target) override {
+                               const MCValue &Target,
+                               const MCSubtargetInfo *STI) override {
       if (Fixup.getKind() >= FirstLiteralRelocationKind)
         return true;
       switch ((Sparc::Fixups)Fixup.getKind()) {
@@ -321,9 +323,11 @@ namespace {
 
     bool writeNopData(raw_ostream &OS, uint64_t Count,
                       const MCSubtargetInfo *STI) const override {
-      // Cannot emit NOP with size not multiple of 32 bits.
-      if (Count % 4 != 0)
-        return false;
+
+      // If the count is not 4-byte aligned, we must be writing data into the
+      // text section (otherwise we have unaligned instructions, and thus have
+      // far bigger problems), so just write zeros instead.
+      OS.write_zeros(Count % 4);
 
       uint64_t NumNops = Count / 4;
       for (uint64_t i = 0; i != NumNops; ++i)
@@ -355,7 +359,8 @@ namespace {
       // from the fixup value. The Value has been "split up" into the
       // appropriate bitfields above.
       for (unsigned i = 0; i != NumBytes; ++i) {
-        unsigned Idx = Endian == support::little ? i : (NumBytes - 1) - i;
+        unsigned Idx =
+            Endian == llvm::endianness::little ? i : (NumBytes - 1) - i;
         Data[Offset + Idx] |= uint8_t((Value >> (i * 8)) & 0xff);
       }
     }

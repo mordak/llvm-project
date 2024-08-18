@@ -49,7 +49,7 @@ InstructionSelector *createMipsInstructionSelector(const MipsTargetMachine &,
 void initializeMipsLoongson2FBTBFixPass(PassRegistry &);
 void initializeMicroMipsSizeReducePass(PassRegistry &);
 void initializeMipsBranchExpansionPass(PassRegistry &);
-void initializeMipsDAGToDAGISelPass(PassRegistry &);
+void initializeMipsDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeMipsDelaySlotFillerPass(PassRegistry &);
 void initializeMipsMulMulBugFixPass(PassRegistry &);
 void initializeMipsPostLegalizerCombinerPass(PassRegistry &);

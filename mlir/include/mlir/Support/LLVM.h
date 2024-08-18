@@ -80,6 +80,7 @@ class TypeSwitch;
 
 // Other common classes.
 class APInt;
+class DynamicAPInt;
 class APSInt;
 class APFloat;
 template <typename Fn>
@@ -122,7 +123,7 @@ template <typename KeyT, typename ValueT,
 using DenseMap = llvm::DenseMap<KeyT, ValueT, KeyInfoT, BucketT>;
 template <typename ValueT, typename ValueInfoT = DenseMapInfo<ValueT>>
 using DenseSet = llvm::DenseSet<ValueT, ValueInfoT>;
-template <typename T, typename Vector = std::vector<T>,
+template <typename T, typename Vector = llvm::SmallVector<T, 0>,
           typename Set = DenseSet<T>, unsigned N = 0>
 using SetVector = llvm::SetVector<T, Vector, Set, N>;
 template <typename AllocatorTy = llvm::MallocAllocator>
@@ -143,6 +144,7 @@ using TypeSwitch = llvm::TypeSwitch<T, ResultT>;
 using llvm::APFloat;
 using llvm::APInt;
 using llvm::APSInt;
+using llvm::DynamicAPInt;
 template <typename Fn>
 using function_ref = llvm::function_ref<Fn>;
 using llvm::iterator_range;

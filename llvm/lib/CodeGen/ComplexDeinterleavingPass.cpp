@@ -60,6 +60,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/ComplexDeinterleavingPass.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -226,6 +227,7 @@ private:
   const TargetLowering *TL = nullptr;
   const TargetLibraryInfo *TLI = nullptr;
   SmallVector<NodePtr> CompositeNodes;
+  DenseMap<std::pair<Value *, Value *>, NodePtr> CachedResult;
 
   SmallPtrSet<Instruction *, 16> FinalInstructions;
 
@@ -257,7 +259,7 @@ private:
   ///
   /// %OutsideUser can be `llvm.vector.reduce.fadd` or `fadd` preceding
   /// `llvm.vector.reduce.fadd` when unroll factor isn't one.
-  std::map<Instruction *, std::pair<PHINode *, Instruction *>> ReductionInfo;
+  MapVector<Instruction *, std::pair<PHINode *, Instruction *>> ReductionInfo;
 
   /// In the process of detecting a reduction, we consider a pair of
   /// %ReductionOP, which we refer to as real and imag (or vice versa), and
@@ -292,15 +294,9 @@ private:
 
   NodePtr submitCompositeNode(NodePtr Node) {
     CompositeNodes.push_back(Node);
+    if (Node->Real && Node->Imag)
+      CachedResult[{Node->Real, Node->Imag}] = Node;
     return Node;
-  }
-
-  NodePtr getContainingComposite(Value *R, Value *I) {
-    for (const auto &CN : CompositeNodes) {
-      if (CN->Real == R && CN->Imag == I)
-        return CN;
-    }
-    return nullptr;
   }
 
   /// Identifies a complex partial multiply pattern and its rotation, based on
@@ -900,9 +896,11 @@ ComplexDeinterleavingGraph::identifyNode(Value *R, Value *I) {
   LLVM_DEBUG(dbgs() << "identifyNode on " << *R << " / " << *I << "\n");
   assert(R->getType() == I->getType() &&
          "Real and imaginary parts should not have different types");
-  if (NodePtr CN = getContainingComposite(R, I)) {
+
+  auto It = CachedResult.find({R, I});
+  if (It != CachedResult.end()) {
     LLVM_DEBUG(dbgs() << " - Folding to existing node\n");
-    return CN;
+    return It->second;
   }
 
   if (NodePtr CN = identifySplat(R, I))
@@ -949,6 +947,7 @@ ComplexDeinterleavingGraph::identifyNode(Value *R, Value *I) {
     return CN;
 
   LLVM_DEBUG(dbgs() << "  - Not recognised as a valid pattern.\n");
+  CachedResult[{R, I}] = nullptr;
   return nullptr;
 }
 
@@ -1426,7 +1425,17 @@ bool ComplexDeinterleavingGraph::identifyNodes(Instruction *RootI) {
   // CompositeNode we should choose only one either Real or Imag instruction to
   // use as an anchor for generating complex instruction.
   auto It = RootToNode.find(RootI);
-  if (It != RootToNode.end() && It->second->Real == RootI) {
+  if (It != RootToNode.end()) {
+    auto RootNode = It->second;
+    assert(RootNode->Operation ==
+           ComplexDeinterleavingOperation::ReductionOperation);
+    // Find out which part, Real or Imag, comes later, and only if we come to
+    // the latest part, add it to OrderedRoots.
+    auto *R = cast<Instruction>(RootNode->Real);
+    auto *I = cast<Instruction>(RootNode->Imag);
+    auto *ReplacementAnchor = R->comesBefore(I) ? I : R;
+    if (ReplacementAnchor != RootI)
+      return false;
     OrderedRoots.push_back(RootI);
     return true;
   }
@@ -1630,8 +1639,7 @@ bool ComplexDeinterleavingGraph::checkNodes() {
 ComplexDeinterleavingGraph::NodePtr
 ComplexDeinterleavingGraph::identifyRoot(Instruction *RootI) {
   if (auto *Intrinsic = dyn_cast<IntrinsicInst>(RootI)) {
-    if (Intrinsic->getIntrinsicID() !=
-        Intrinsic::experimental_vector_interleave2)
+    if (Intrinsic->getIntrinsicID() != Intrinsic::vector_interleave2)
       return nullptr;
 
     auto *Real = dyn_cast<Instruction>(Intrinsic->getOperand(0));
@@ -1666,7 +1674,7 @@ ComplexDeinterleavingGraph::identifyDeinterleave(Instruction *Real,
   Value *FinalValue = nullptr;
   if (match(Real, m_ExtractValue<0>(m_Instruction(I))) &&
       match(Imag, m_ExtractValue<1>(m_Specific(I))) &&
-      match(I, m_Intrinsic<Intrinsic::experimental_vector_deinterleave2>(
+      match(I, m_Intrinsic<Intrinsic::vector_deinterleave2>(
                    m_Value(FinalValue)))) {
     NodePtr PlaceholderNode = prepareCompositeNode(
         llvm::ComplexDeinterleavingOperation::Deinterleave, Real, Imag);
@@ -1951,13 +1959,11 @@ Value *ComplexDeinterleavingGraph::replaceNode(IRBuilderBase &Builder,
       // Splats that are not constant are interleaved where they are located
       Instruction *InsertPoint = (I->comesBefore(R) ? R : I)->getNextNode();
       IRBuilder<> IRB(InsertPoint);
-      ReplacementNode =
-          IRB.CreateIntrinsic(Intrinsic::experimental_vector_interleave2, NewTy,
-                              {Node->Real, Node->Imag});
+      ReplacementNode = IRB.CreateIntrinsic(Intrinsic::vector_interleave2,
+                                            NewTy, {Node->Real, Node->Imag});
     } else {
-      ReplacementNode =
-          Builder.CreateIntrinsic(Intrinsic::experimental_vector_interleave2,
-                                  NewTy, {Node->Real, Node->Imag});
+      ReplacementNode = Builder.CreateIntrinsic(
+          Intrinsic::vector_interleave2, NewTy, {Node->Real, Node->Imag});
     }
     break;
   }
@@ -1966,7 +1972,7 @@ Value *ComplexDeinterleavingGraph::replaceNode(IRBuilderBase &Builder,
     // It is filled later when the ReductionOperation is processed.
     auto *VTy = cast<VectorType>(Node->Real->getType());
     auto *NewVTy = VectorType::getDoubleElementsVectorType(VTy);
-    auto *NewPHI = PHINode::Create(NewVTy, 0, "", BackEdge->getFirstNonPHI());
+    auto *NewPHI = PHINode::Create(NewVTy, 0, "", BackEdge->getFirstNonPHIIt());
     OldToNewPHI[dyn_cast<PHINode>(Node->Real)] = NewPHI;
     ReplacementNode = NewPHI;
     break;
@@ -1982,9 +1988,8 @@ Value *ComplexDeinterleavingGraph::replaceNode(IRBuilderBase &Builder,
     auto *B = replaceNode(Builder, Node->Operands[1]);
     auto *NewMaskTy = VectorType::getDoubleElementsVectorType(
         cast<VectorType>(MaskReal->getType()));
-    auto *NewMask =
-        Builder.CreateIntrinsic(Intrinsic::experimental_vector_interleave2,
-                                NewMaskTy, {MaskReal, MaskImag});
+    auto *NewMask = Builder.CreateIntrinsic(Intrinsic::vector_interleave2,
+                                            NewMaskTy, {MaskReal, MaskImag});
     ReplacementNode = Builder.CreateSelect(NewMask, A, B);
     break;
   }
@@ -2012,8 +2017,8 @@ void ComplexDeinterleavingGraph::processReductionOperation(
   Value *InitImag = OldPHIImag->getIncomingValueForBlock(Incoming);
 
   IRBuilder<> Builder(Incoming->getTerminator());
-  auto *NewInit = Builder.CreateIntrinsic(
-      Intrinsic::experimental_vector_interleave2, NewVTy, {InitReal, InitImag});
+  auto *NewInit = Builder.CreateIntrinsic(Intrinsic::vector_interleave2, NewVTy,
+                                          {InitReal, InitImag});
 
   NewPHI->addIncoming(NewInit, Incoming);
   NewPHI->addIncoming(OperationReplacement, BackEdge);
@@ -2025,9 +2030,9 @@ void ComplexDeinterleavingGraph::processReductionOperation(
 
   Builder.SetInsertPoint(
       &*FinalReductionReal->getParent()->getFirstInsertionPt());
-  auto *Deinterleave = Builder.CreateIntrinsic(
-      Intrinsic::experimental_vector_deinterleave2,
-      OperationReplacement->getType(), OperationReplacement);
+  auto *Deinterleave = Builder.CreateIntrinsic(Intrinsic::vector_deinterleave2,
+                                               OperationReplacement->getType(),
+                                               OperationReplacement);
 
   auto *NewReal = Builder.CreateExtractValue(Deinterleave, (uint64_t)0);
   FinalReductionReal->replaceUsesOfWith(Real, NewReal);

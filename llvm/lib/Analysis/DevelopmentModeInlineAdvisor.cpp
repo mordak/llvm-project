@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements a model runner using Tensorflow C APIs, allowing the
+// This file implements a model runner using TFLite, allowing the
 // loading of a model from a command line option.
 //
 //===----------------------------------------------------------------------===//
@@ -253,7 +253,6 @@ private:
 };
 
 static const std::vector<TensorSpec> TrainingOnlyFeatures{
-    TensorSpec::createSpec<int64_t>(TFFeedPrefix + "inlining_default", {1}),
     TensorSpec::createSpec<float>(TFFeedPrefix + "discount", {1}),
     TensorSpec::createSpec<float>(TFFeedPrefix + "reward", {1}),
     TensorSpec::createSpec<int32_t>(TFFeedPrefix + "step_type", {1})};

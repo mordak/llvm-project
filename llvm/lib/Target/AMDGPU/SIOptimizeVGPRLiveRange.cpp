@@ -148,10 +148,10 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<LiveVariables>();
-    AU.addRequired<MachineDominatorTree>();
+    AU.addRequired<MachineDominatorTreeWrapperPass>();
     AU.addRequired<MachineLoopInfo>();
     AU.addPreserved<LiveVariables>();
-    AU.addPreserved<MachineDominatorTree>();
+    AU.addPreserved<MachineDominatorTreeWrapperPass>();
     AU.addPreserved<MachineLoopInfo>();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -522,9 +522,11 @@ void SIOptimizeVGPRLiveRange::optimizeLiveRange(
     auto *UseBlock = UseMI->getParent();
     // Replace uses in Endif block
     if (UseBlock == Endif) {
-      if (UseMI->isPHI()) {
+      if (UseMI->isPHI())
         O.setReg(NewReg);
-      } else {
+      else if (UseMI->isDebugInstr())
+        continue;
+      else {
         // DetectDeadLanes may mark register uses as undef without removing
         // them, in which case a non-phi instruction using the original register
         // may exist in the Endif block even though the register is not live
@@ -616,7 +618,7 @@ char SIOptimizeVGPRLiveRange::ID = 0;
 
 INITIALIZE_PASS_BEGIN(SIOptimizeVGPRLiveRange, DEBUG_TYPE,
                       "SI Optimize VGPR LiveRange", false, false)
-INITIALIZE_PASS_DEPENDENCY(MachineDominatorTree)
+INITIALIZE_PASS_DEPENDENCY(MachineDominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
 INITIALIZE_PASS_DEPENDENCY(LiveVariables)
 INITIALIZE_PASS_END(SIOptimizeVGPRLiveRange, DEBUG_TYPE,
@@ -633,7 +635,7 @@ bool SIOptimizeVGPRLiveRange::runOnMachineFunction(MachineFunction &MF) {
   const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   TII = ST.getInstrInfo();
   TRI = &TII->getRegisterInfo();
-  MDT = &getAnalysis<MachineDominatorTree>();
+  MDT = &getAnalysis<MachineDominatorTreeWrapperPass>().getDomTree();
   Loops = &getAnalysis<MachineLoopInfo>();
   LV = &getAnalysis<LiveVariables>();
   MRI = &MF.getRegInfo();

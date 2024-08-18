@@ -630,7 +630,7 @@ void MachObjectWriter::computeSymbolTable(
       // Set the Index and the IsExtern bit.
       unsigned Index = Rel.Sym->getIndex();
       assert(isInt<24>(Index));
-      if (W.Endian == support::little)
+      if (W.Endian == llvm::endianness::little)
         Rel.MRE.r_word1 = (Rel.MRE.r_word1 & (~0U << 24)) | Index | (1 << 27);
       else
         Rel.MRE.r_word1 = (Rel.MRE.r_word1 & 0xff) | Index << 8 | (1 << 4);
@@ -710,16 +710,6 @@ bool MachObjectWriter::isSymbolRefDifferenceFullyResolvedImpl(
         return false;
       return true;
     }
-    // For Darwin x86_64, there is one special case when the reference IsPCRel.
-    // If the fragment with the reference does not have a base symbol but meets
-    // the simple way of dealing with this, in that it is a temporary symbol in
-    // the same atom then it is assumed to be fully resolved.  This is needed so
-    // a relocation entry is not created and so the static linker does not
-    // mess up the reference later.
-    else if(!FB.getAtom() &&
-            SA.isTemporary() && SA.isInSection() && &SecA == &SecB){
-      return true;
-    }
   }
 
   // If they are not in the same section, we can't compute the diff.
@@ -777,11 +767,9 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
   if (!Asm.CGProfile.empty()) {
     MCSection *CGProfileSection = Asm.getContext().getMachOSection(
         "__LLVM", "__cg_profile", 0, SectionKind::getMetadata());
-    MCDataFragment *Frag = dyn_cast_or_null<MCDataFragment>(
-        &*CGProfileSection->getFragmentList().begin());
-    assert(Frag && "call graph profile section not reserved");
-    Frag->getContents().clear();
-    raw_svector_ostream OS(Frag->getContents());
+    auto &Frag = cast<MCDataFragment>(*CGProfileSection->begin());
+    Frag.getContents().clear();
+    raw_svector_ostream OS(Frag.getContents());
     for (const MCAssembler::CGProfileEntry &CGPE : Asm.CGProfile) {
       uint32_t FromIndex = CGPE.From->getSymbol().getIndex();
       uint32_t ToIndex = CGPE.To->getSymbol().getIndex();

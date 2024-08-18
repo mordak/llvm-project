@@ -133,6 +133,8 @@ private:
 
   /// List of declared file names
   std::vector<std::pair<std::string, size_t>> FileNames;
+  // Optional compiler version.
+  std::string CompilerVersion;
 
   MCDwarfLineTableParams LTParams;
 
@@ -185,7 +187,8 @@ private:
   /// relocation.
   bool evaluateFixup(const MCAsmLayout &Layout, const MCFixup &Fixup,
                      const MCFragment *DF, MCValue &Target,
-                     uint64_t &Value, bool &WasForced) const;
+                     const MCSubtargetInfo *STI, uint64_t &Value,
+                     bool &WasForced) const;
 
   /// Check whether a fixup can be satisfied, or whether it needs to be relaxed
   /// (increased in size, in order to hold its value correctly).
@@ -199,10 +202,6 @@ private:
   /// Perform one layout iteration and return true if any offsets
   /// were adjusted.
   bool layoutOnce(MCAsmLayout &Layout);
-
-  /// Perform one layout iteration of the given section and return true
-  /// if any offsets were adjusted.
-  bool layoutSectionOnce(MCAsmLayout &Layout, MCSection &Sec);
 
   /// Perform relaxation on a single fragment - returns true if the fragment
   /// changes as a result of relaxation.
@@ -221,8 +220,10 @@ private:
   /// finishLayout - Finalize a layout, including fragment lowering.
   void finishLayout(MCAsmLayout &Layout);
 
-  std::tuple<MCValue, uint64_t, bool>
-  handleFixup(const MCAsmLayout &Layout, MCFragment &F, const MCFixup &Fixup);
+  std::tuple<MCValue, uint64_t, bool> handleFixup(const MCAsmLayout &Layout,
+                                                  MCFragment &F,
+                                                  const MCFixup &Fixup,
+                                                  const MCSubtargetInfo *STI);
 
 public:
   struct Symver {
@@ -483,6 +484,12 @@ public:
     FileNames.emplace_back(std::string(FileName), Symbols.size());
   }
 
+  void setCompilerVersion(std::string CompilerVers) {
+    if (CompilerVersion.empty())
+      CompilerVersion = std::move(CompilerVers);
+  }
+  StringRef getCompilerVersion() { return CompilerVersion; }
+
   /// Write the necessary bundle padding to \p OS.
   /// Expects a fragment \p F containing instructions and its size \p FSize.
   void writeFragmentPadding(raw_ostream &OS, const MCEncodedFragment &F,
@@ -492,13 +499,6 @@ public:
 
   void dump() const;
 };
-
-/// Compute the amount of padding required before the fragment \p F to
-/// obey bundling restrictions, where \p FOffset is the fragment's offset in
-/// its section and \p FSize is the fragment's size.
-uint64_t computeBundlePadding(const MCAssembler &Assembler,
-                              const MCEncodedFragment *F, uint64_t FOffset,
-                              uint64_t FSize);
 
 } // end namespace llvm
 

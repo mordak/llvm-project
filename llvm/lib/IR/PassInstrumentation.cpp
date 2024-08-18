@@ -19,8 +19,7 @@ namespace llvm {
 
 void PassInstrumentationCallbacks::addClassToPassName(StringRef ClassName,
                                                       StringRef PassName) {
-  if (ClassToPassName[ClassName].empty())
-    ClassToPassName[ClassName] = PassName.str();
+  ClassToPassName.try_emplace(ClassName, PassName.str());
 }
 
 StringRef
@@ -35,7 +34,8 @@ bool isSpecialPass(StringRef PassID, const std::vector<StringRef> &Specials) {
   StringRef Prefix = PassID;
   if (Pos != StringRef::npos)
     Prefix = PassID.substr(0, Pos);
-  return any_of(Specials, [Prefix](StringRef S) { return Prefix.endswith(S); });
+  return any_of(Specials,
+                [Prefix](StringRef S) { return Prefix.ends_with(S); });
 }
 
 } // namespace llvm

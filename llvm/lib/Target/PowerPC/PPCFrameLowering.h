@@ -177,6 +177,10 @@ public:
 
   const PPCReturnProtectorLowering RPL;
   const ReturnProtectorLowering *getReturnProtector() const override;
+
+  void updateCalleeSaves(const MachineFunction &MF, BitVector &SavedRegs) const;
+
+  uint64_t getStackThreshold() const override;
 };
 } // End llvm namespace
 

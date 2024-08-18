@@ -29,8 +29,8 @@ public:
 
   void computeInfo(CGFunctionInfo &FI) const override;
 
-  Address EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
-                    QualType Ty) const override;
+  RValue EmitVAArg(CodeGenFunction &CGF, Address VAListAddr, QualType Ty,
+                   AggValueSlot Slot) const override;
 };
 
 // Helper for coercing an aggregate argument or return value into an integer
@@ -112,23 +112,30 @@ Address emitVoidPtrDirectVAArg(CodeGenFunction &CGF, Address VAListAddr,
 /// \param ForceRightAdjust - Default is false. On big-endian platform and
 ///   if the argument is smaller than a slot, set this flag will force
 ///   right-adjust the argument in its slot irrespective of the type.
-Address emitVoidPtrVAArg(CodeGenFunction &CGF, Address VAListAddr,
-                         QualType ValueTy, bool IsIndirect,
-                         TypeInfoChars ValueInfo, CharUnits SlotSizeAndAlign,
-                         bool AllowHigherAlign, bool ForceRightAdjust = false);
+RValue emitVoidPtrVAArg(CodeGenFunction &CGF, Address VAListAddr,
+                        QualType ValueTy, bool IsIndirect,
+                        TypeInfoChars ValueInfo, CharUnits SlotSizeAndAlign,
+                        bool AllowHigherAlign, AggValueSlot Slot,
+                        bool ForceRightAdjust = false);
 
 Address emitMergePHI(CodeGenFunction &CGF, Address Addr1,
                      llvm::BasicBlock *Block1, Address Addr2,
                      llvm::BasicBlock *Block2, const llvm::Twine &Name = "");
 
 /// isEmptyField - Return true iff a the field is "empty", that is it
-/// is an unnamed bit-field or an (array of) empty record(s).
-bool isEmptyField(ASTContext &Context, const FieldDecl *FD, bool AllowArrays);
+/// is an unnamed bit-field or an (array of) empty record(s). If
+/// AsIfNoUniqueAddr is true, then C++ record fields are considered empty if
+/// the [[no_unique_address]] attribute would have made them empty.
+bool isEmptyField(ASTContext &Context, const FieldDecl *FD, bool AllowArrays,
+                  bool AsIfNoUniqueAddr = false);
 
 /// isEmptyRecord - Return true iff a structure contains only empty
 /// fields. Note that a structure with a flexible array member is not
-/// considered empty.
-bool isEmptyRecord(ASTContext &Context, QualType T, bool AllowArrays);
+/// considered empty. If AsIfNoUniqueAddr is true, then C++ record fields are
+/// considered empty if the [[no_unique_address]] attribute would have made
+/// them empty.
+bool isEmptyRecord(ASTContext &Context, QualType T, bool AllowArrays,
+                   bool AsIfNoUniqueAddr = false);
 
 /// isSingleElementStruct - Determine if a structure is a "single
 /// element struct", i.e. it has exactly one non-empty field or

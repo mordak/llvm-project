@@ -143,7 +143,7 @@ struct MCCVFunctionInfo {
 /// Holds state from .cv_file and .cv_loc directives for later emission.
 class CodeViewContext {
 public:
-  CodeViewContext();
+  CodeViewContext(MCContext *MCCtx) : MCCtx(MCCtx) {}
   ~CodeViewContext();
 
   CodeViewContext &operator=(const CodeViewContext &other) = delete;
@@ -182,6 +182,7 @@ public:
   std::vector<MCCVLoc> getFunctionLineEntries(unsigned FuncId);
 
   std::pair<size_t, size_t> getLineExtent(unsigned FuncId);
+  std::pair<size_t, size_t> getLineExtentIncludingInlinees(unsigned FuncId);
 
   ArrayRef<MCCVLoc> getLinesForExtent(size_t L, size_t R);
 
@@ -222,6 +223,8 @@ public:
   std::pair<StringRef, unsigned> addToStringTable(StringRef S);
 
 private:
+  MCContext *MCCtx;
+
   /// Map from string to string table offset.
   StringMap<unsigned> StringTable;
 

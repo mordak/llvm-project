@@ -15,6 +15,7 @@ static_library("Core") {
     "//llvm/utils/gn/build/libs/pthread",
   ]
   sources = [
+    "AddressMap.cpp",
     "BinaryBasicBlock.cpp",
     "BinaryContext.cpp",
     "BinaryData.cpp",
@@ -24,9 +25,11 @@ static_library("Core") {
     "BinarySection.cpp",
     "DIEBuilder.cpp",
     "DebugData.cpp",
+    "DebugNames.cpp",
     "DynoStats.cpp",
     "Exceptions.cpp",
     "FunctionLayout.cpp",
+    "GDBIndex.cpp",
     "HashUtilities.cpp",
     "JumpTable.cpp",
     "MCPlusBuilder.cpp",

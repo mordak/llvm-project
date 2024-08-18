@@ -71,7 +71,7 @@ def OffsetOfExpr : StmtNode<Expr>;
 def UnaryExprOrTypeTraitExpr : StmtNode<Expr>;
 def ArraySubscriptExpr : StmtNode<Expr>;
 def MatrixSubscriptExpr : StmtNode<Expr>;
-def OMPArraySectionExpr : StmtNode<Expr>;
+def ArraySectionExpr : StmtNode<Expr>;
 def OMPIteratorExpr : StmtNode<Expr>;
 def CallExpr : StmtNode<Expr>;
 def MemberExpr : StmtNode<Expr>;
@@ -154,6 +154,7 @@ def UnresolvedMemberExpr : StmtNode<OverloadExpr>;
 def CXXNoexceptExpr : StmtNode<Expr>;
 def PackExpansionExpr : StmtNode<Expr>;
 def SizeOfPackExpr : StmtNode<Expr>;
+def PackIndexingExpr : StmtNode<Expr>;
 def SubstNonTypeTemplateParmExpr : StmtNode<Expr>;
 def SubstNonTypeTemplateParmPackExpr : StmtNode<Expr>;
 def FunctionParmPackExpr : StmtNode<Expr>;
@@ -203,6 +204,7 @@ def OpaqueValueExpr : StmtNode<Expr>;
 def TypoExpr : StmtNode<Expr>;
 def RecoveryExpr : StmtNode<Expr>;
 def BuiltinBitCastExpr : StmtNode<ExplicitCastExpr>;
+def EmbedExpr : StmtNode<Expr>;
 
 // Microsoft Extensions.
 def MSPropertyRefExpr : StmtNode<Expr>;
@@ -259,6 +261,7 @@ def OMPTargetUpdateDirective : StmtNode<OMPExecutableDirective>;
 def OMPTeamsDirective : StmtNode<OMPExecutableDirective>;
 def OMPCancellationPointDirective : StmtNode<OMPExecutableDirective>;
 def OMPCancelDirective : StmtNode<OMPExecutableDirective>;
+def OMPScopeDirective : StmtNode<OMPExecutableDirective>;
 def OMPTaskLoopDirective : StmtNode<OMPLoopDirective>;
 def OMPTaskLoopSimdDirective : StmtNode<OMPLoopDirective>;
 def OMPMasterTaskLoopDirective : StmtNode<OMPLoopDirective>;
@@ -294,3 +297,10 @@ def OMPTargetTeamsGenericLoopDirective : StmtNode<OMPLoopDirective>;
 def OMPParallelGenericLoopDirective : StmtNode<OMPLoopDirective>;
 def OMPTargetParallelGenericLoopDirective : StmtNode<OMPLoopDirective>;
 def OMPErrorDirective : StmtNode<OMPExecutableDirective>;
+
+// OpenACC Constructs.
+def OpenACCConstructStmt : StmtNode<Stmt, /*abstract=*/1>;
+def OpenACCAssociatedStmtConstruct
+    : StmtNode<OpenACCConstructStmt, /*abstract=*/1>;
+def OpenACCComputeConstruct : StmtNode<OpenACCAssociatedStmtConstruct>;
+def OpenACCLoopConstruct : StmtNode<OpenACCAssociatedStmtConstruct>;

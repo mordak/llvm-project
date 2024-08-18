@@ -26,13 +26,11 @@
 using namespace llvm;
 using namespace llvm::codeview;
 
-CodeViewContext::CodeViewContext() = default;
-
 CodeViewContext::~CodeViewContext() {
   // If someone inserted strings into the string table but never actually
   // emitted them somewhere, clean up the fragment.
-  if (!InsertedStrTabFragment)
-    delete StrTabFragment;
+  if (!InsertedStrTabFragment && StrTabFragment)
+    StrTabFragment->destroy();
 }
 
 /// This is a valid number for use with .cv_loc if we've already seen a .cv_file
@@ -138,7 +136,7 @@ void CodeViewContext::recordCVLoc(MCContext &Ctx, const MCSymbol *Label,
 
 MCDataFragment *CodeViewContext::getStringTableFragment() {
   if (!StrTabFragment) {
-    StrTabFragment = new MCDataFragment();
+    StrTabFragment = MCCtx->allocFragment<MCDataFragment>();
     // Start a new string table out with a null byte.
     StrTabFragment->getContents().push_back('\0');
   }
@@ -275,32 +273,35 @@ void CodeViewContext::addLineEntry(const MCCVLoc &LineEntry) {
 std::vector<MCCVLoc>
 CodeViewContext::getFunctionLineEntries(unsigned FuncId) {
   std::vector<MCCVLoc> FilteredLines;
-  auto I = MCCVLineStartStop.find(FuncId);
-  if (I != MCCVLineStartStop.end()) {
-    MCCVFunctionInfo *SiteInfo = getCVFunctionInfo(FuncId);
-    for (size_t Idx = I->second.first, End = I->second.second; Idx != End;
-         ++Idx) {
-      unsigned LocationFuncId = MCCVLines[Idx].getFunctionId();
-      if (LocationFuncId == FuncId) {
-        // This was a .cv_loc directly for FuncId, so record it.
-        FilteredLines.push_back(MCCVLines[Idx]);
-      } else {
-        // Check if the current location is inlined in this function. If it is,
-        // synthesize a statement .cv_loc at the original inlined call site.
-        auto I = SiteInfo->InlinedAtMap.find(LocationFuncId);
-        if (I != SiteInfo->InlinedAtMap.end()) {
-          MCCVFunctionInfo::LineInfo &IA = I->second;
-          // Only add the location if it differs from the previous location.
-          // Large inlined calls will have many .cv_loc entries and we only need
-          // one line table entry in the parent function.
-          if (FilteredLines.empty() ||
-              FilteredLines.back().getFileNum() != IA.File ||
-              FilteredLines.back().getLine() != IA.Line ||
-              FilteredLines.back().getColumn() != IA.Col) {
-            FilteredLines.push_back(MCCVLoc(
-                MCCVLines[Idx].getLabel(),
-                FuncId, IA.File, IA.Line, IA.Col, false, false));
-          }
+  size_t LocBegin;
+  size_t LocEnd;
+  std::tie(LocBegin, LocEnd) = getLineExtentIncludingInlinees(FuncId);
+  if (LocBegin >= LocEnd) {
+    return FilteredLines;
+  }
+
+  MCCVFunctionInfo *SiteInfo = getCVFunctionInfo(FuncId);
+  for (size_t Idx = LocBegin; Idx != LocEnd; ++Idx) {
+    unsigned LocationFuncId = MCCVLines[Idx].getFunctionId();
+    if (LocationFuncId == FuncId) {
+      // This was a .cv_loc directly for FuncId, so record it.
+      FilteredLines.push_back(MCCVLines[Idx]);
+    } else {
+      // Check if the current location is inlined in this function. If it is,
+      // synthesize a statement .cv_loc at the original inlined call site.
+      auto I = SiteInfo->InlinedAtMap.find(LocationFuncId);
+      if (I != SiteInfo->InlinedAtMap.end()) {
+        MCCVFunctionInfo::LineInfo &IA = I->second;
+        // Only add the location if it differs from the previous location.
+        // Large inlined calls will have many .cv_loc entries and we only need
+        // one line table entry in the parent function.
+        if (FilteredLines.empty() ||
+            FilteredLines.back().getFileNum() != IA.File ||
+            FilteredLines.back().getLine() != IA.Line ||
+            FilteredLines.back().getColumn() != IA.Col) {
+          FilteredLines.push_back(MCCVLoc(MCCVLines[Idx].getLabel(), FuncId,
+                                          IA.File, IA.Line, IA.Col, false,
+                                          false));
         }
       }
     }
@@ -314,6 +315,26 @@ std::pair<size_t, size_t> CodeViewContext::getLineExtent(unsigned FuncId) {
   if (I == MCCVLineStartStop.end())
     return {~0ULL, 0};
   return I->second;
+}
+
+std::pair<size_t, size_t>
+CodeViewContext::getLineExtentIncludingInlinees(unsigned FuncId) {
+  size_t LocBegin;
+  size_t LocEnd;
+  std::tie(LocBegin, LocEnd) = getLineExtent(FuncId);
+
+  // Include all child inline call sites in our extent.
+  MCCVFunctionInfo *SiteInfo = getCVFunctionInfo(FuncId);
+  if (SiteInfo) {
+    for (auto &KV : SiteInfo->InlinedAtMap) {
+      unsigned ChildId = KV.first;
+      auto Extent = getLineExtent(ChildId);
+      LocBegin = std::min(LocBegin, Extent.first);
+      LocEnd = std::max(LocEnd, Extent.second);
+    }
+  }
+
+  return {LocBegin, LocEnd};
 }
 
 ArrayRef<MCCVLoc> CodeViewContext::getLinesForExtent(size_t L, size_t R) {
@@ -427,9 +448,9 @@ void CodeViewContext::emitInlineLineTableForFunction(MCObjectStreamer &OS,
                                                      const MCSymbol *FnEndSym) {
   // Create and insert a fragment into the current section that will be encoded
   // later.
-  new MCCVInlineLineTableFragment(PrimaryFunctionId, SourceFileId,
-                                  SourceLineNum, FnStartSym, FnEndSym,
-                                  OS.getCurrentSectionOnly());
+  auto *F = MCCtx->allocFragment<MCCVInlineLineTableFragment>(
+      PrimaryFunctionId, SourceFileId, SourceLineNum, FnStartSym, FnEndSym);
+  OS.insert(F);
 }
 
 MCFragment *CodeViewContext::emitDefRange(
@@ -438,8 +459,10 @@ MCFragment *CodeViewContext::emitDefRange(
     StringRef FixedSizePortion) {
   // Create and insert a fragment into the current section that will be encoded
   // later.
-  return new MCCVDefRangeFragment(Ranges, FixedSizePortion,
-                           OS.getCurrentSectionOnly());
+  auto *F =
+      MCCtx->allocFragment<MCCVDefRangeFragment>(Ranges, FixedSizePortion);
+  OS.insert(F);
+  return F;
 }
 
 static unsigned computeLabelDiff(MCAsmLayout &Layout, const MCSymbol *Begin,
@@ -463,16 +486,7 @@ void CodeViewContext::encodeInlineLineTable(MCAsmLayout &Layout,
                                             MCCVInlineLineTableFragment &Frag) {
   size_t LocBegin;
   size_t LocEnd;
-  std::tie(LocBegin, LocEnd) = getLineExtent(Frag.SiteFuncId);
-
-  // Include all child inline call sites in our .cv_loc extent.
-  MCCVFunctionInfo *SiteInfo = getCVFunctionInfo(Frag.SiteFuncId);
-  for (auto &KV : SiteInfo->InlinedAtMap) {
-    unsigned ChildId = KV.first;
-    auto Extent = getLineExtent(ChildId);
-    LocBegin = std::min(LocBegin, Extent.first);
-    LocEnd = std::max(LocEnd, Extent.second);
-  }
+  std::tie(LocBegin, LocEnd) = getLineExtentIncludingInlinees(Frag.SiteFuncId);
 
   if (LocBegin >= LocEnd)
     return;
@@ -506,6 +520,8 @@ void CodeViewContext::encodeInlineLineTable(MCAsmLayout &Layout,
   MCCVFunctionInfo::LineInfo LastSourceLoc, CurSourceLoc;
   LastSourceLoc.File = Frag.StartFileId;
   LastSourceLoc.Line = Frag.StartLineNum;
+
+  MCCVFunctionInfo *SiteInfo = getCVFunctionInfo(Frag.SiteFuncId);
 
   SmallVectorImpl<char> &Buffer = Frag.getContents();
   Buffer.clear(); // Clear old contents if we went through relaxation.
@@ -638,7 +654,7 @@ void CodeViewContext::encodeDefRange(MCAsmLayout &Layout,
     }
     unsigned NumGaps = J - I - 1;
 
-    support::endian::Writer LEWriter(OS, support::little);
+    support::endian::Writer LEWriter(OS, llvm::endianness::little);
 
     unsigned Bias = 0;
     // We must split the range into chunks of MaxDefRange, this is a fundamental

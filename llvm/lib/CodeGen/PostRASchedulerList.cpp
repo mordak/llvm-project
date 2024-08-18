@@ -85,8 +85,8 @@ namespace {
       AU.setPreservesCFG();
       AU.addRequired<AAResultsWrapperPass>();
       AU.addRequired<TargetPassConfig>();
-      AU.addRequired<MachineDominatorTree>();
-      AU.addPreserved<MachineDominatorTree>();
+      AU.addRequired<MachineDominatorTreeWrapperPass>();
+      AU.addPreserved<MachineDominatorTreeWrapperPass>();
       AU.addRequired<MachineLoopInfo>();
       AU.addPreserved<MachineLoopInfo>();
       MachineFunctionPass::getAnalysisUsage(AU);
@@ -101,7 +101,7 @@ namespace {
 
   private:
     bool enablePostRAScheduler(
-        const TargetSubtargetInfo &ST, CodeGenOpt::Level OptLevel,
+        const TargetSubtargetInfo &ST, CodeGenOptLevel OptLevel,
         TargetSubtargetInfo::AntiDepBreakMode &Mode,
         TargetSubtargetInfo::RegClassVector &CriticalPathRCs) const;
   };
@@ -260,8 +260,7 @@ LLVM_DUMP_METHOD void SchedulePostRATDList::dumpSchedule() const {
 #endif
 
 bool PostRAScheduler::enablePostRAScheduler(
-    const TargetSubtargetInfo &ST,
-    CodeGenOpt::Level OptLevel,
+    const TargetSubtargetInfo &ST, CodeGenOptLevel OptLevel,
     TargetSubtargetInfo::AntiDepBreakMode &Mode,
     TargetSubtargetInfo::RegClassVector &CriticalPathRCs) const {
   Mode = ST.getAntiDepBreakMode();
