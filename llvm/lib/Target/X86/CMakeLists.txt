@@ -77,6 +77,7 @@ set(sources
   X86PartialReduction.cpp
   X86RegisterBankInfo.cpp
   X86RegisterInfo.cpp
+  X86RetClean.cpp
   X86ReturnProtectorLowering.cpp
   X86ReturnThunks.cpp
   X86SelectionDAGInfo.cpp
