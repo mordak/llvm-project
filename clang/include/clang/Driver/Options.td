@@ -3848,9 +3848,9 @@ def fno_fixup_gadgets : Flag<["-"], "fno-fixup-gadgets">, Group<f_Group>, Visibi
   HelpText<"Disable FixupGadgets pass (x86 only)">;
 def ffixup_gadgets : Flag<["-"], "ffixup-gadgets">, Group<f_Group>, Visibility<[ClangOption, CLOption]>,
   HelpText<"Replace ROP friendly instructions with safe alternatives (x86 only)">;
-def fno_ret_clean : Flag<["-"], "fno-ret-clean">, Group<f_Group>, Flags<[CoreOption]>,
+def fno_ret_clean : Flag<["-"], "fno-ret-clean">, Group<f_Group>, Visibility<[ClangOption, CLOption]>,
   HelpText<"Disable ret-clean pass">;
-def fret_clean : Flag<["-"], "fret-clean">, Group<f_Group>, Flags<[CoreOption]>,
+def fret_clean : Flag<["-"], "fret-clean">, Group<f_Group>, Visibility<[ClangOption, CLOption]>,
   HelpText<"Clean return address from stack after call">;
 def ftrivial_auto_var_init_stop_after : Joined<["-"], "ftrivial-auto-var-init-stop-after=">, Group<f_Group>,
   Visibility<[ClangOption, CC1Option, CLOption, DXCOption]>,
