@@ -73,6 +73,7 @@ set(sources
   X86PadShortFunction.cpp
   X86PartialReduction.cpp
   X86RegisterInfo.cpp
+  X86RetClean.cpp
   X86ReturnProtectorLowering.cpp
   X86ReturnThunks.cpp
   X86SelectionDAGInfo.cpp
